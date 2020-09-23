@@ -1,0 +1,6 @@
+.vscode/
+*.egg-info/
+data/*
+!data/*.txt
+
+__pycache__
