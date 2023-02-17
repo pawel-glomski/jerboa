@@ -12,8 +12,8 @@ import pyglet
 from pyglet.media import StreamingSource
 from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
-AUDIO_FRAME_CACHE_SIZE = 64
-VIDEO_FRAME_CACHE_SIZE = 32
+AUDIO_FRAME_CACHE_SIZE = 2
+VIDEO_FRAME_CACHE_SIZE = 2
 
 MAX_COMPENSATION_RATIO = Fraction(1, 10)
 MAX_AUDIO_CHANNELS = 2
@@ -110,52 +110,47 @@ class StreamDecoder:
         wait_for_task = True
 
 
-class SLDecoder:
+class SLSource(StreamingSource):
 
-  def __init__(self, container: av.container.InputContainer):
+  def __init__(self, filepath: str):
+    # find if there is a file with analysis results
+    # if there is not, create one
+    # use analysis results to skip frames
+    self.container = av.open(filepath)
     self.audio_decoder: StreamDecoder = None
     self.video_decoder: StreamDecoder = None
     self.decoders: Dict[MediaType, StreamDecoder] = {}
-    if container.streams.audio:
-      self.audio_decoder = StreamDecoder(container.name, container.streams.audio[0].index)
+    if self.container.streams.audio:
+      self.audio_decoder = StreamDecoder(self.container.name, self.container.streams.audio[0].index)
       self.decoders[MediaType.Audio] = self.audio_decoder
-    if container.streams.video:
-      self.video_decoder = StreamDecoder(container.name, container.streams.video[0].index)
+      audio_stream = self.audio_decoder.stream
+      self.audio_format = AudioFormat(channels=min(2, audio_stream.channels),
+                                      sample_size=AUDIO_FORMAT.bits,
+                                      sample_rate=audio_stream.sample_rate)
+    if self.container.streams.video:
+      self.video_decoder = StreamDecoder(self.container.name, self.container.streams.video[0].index)
       self.decoders[MediaType.Video] = self.video_decoder
+
+      video_stream = self.video_decoder.stream
+      sar = video_stream.sample_aspect_ratio
+      self.video_format = VideoFormat(width=video_stream.width, 
+                                      height=video_stream.height, 
+                                      sample_aspect= sar if sar else 1.0) 
+      self.video_format.frame_rate = float(video_stream.average_rate)
+
     self.start_time = min([dec.start_time for dec in self.decoders.values()])
 
-  def seek(self, timestamp: float):
+  def __del__(self):
+    self.container.close()
+
+  def seek(self, timestamp):
     offset = int(self.start_time + timestamp) * av.time_base
     for decoder in self.decoders.values():
       decoder.start_seek(offset)
     for decoder in self.decoders.values():
       decoder.finish_seek()
 
-
-class SLSource(StreamingSource):
-
-  def __init__(self, filepath: str):
-    self.container = av.open(filepath)
-    self.decoder = SLDecoder(self.container)
-    if self.decoder.audio_decoder is not None:
-      audio_stream = self.decoder.audio_decoder.stream
-      self.audio_format = AudioFormat(channels=min(2, audio_stream.channels),
-                                      sample_size=AUDIO_FORMAT.bits,
-                                      sample_rate=audio_stream.sample_rate)
-    if self.decoder.video_decoder is not None:
-      video_stream = self.decoder.video_decoder.stream
-      self.video_format = VideoFormat(video_stream.width, video_stream.height)
-      if video_stream.sample_aspect_ratio is not None:
-        self.video_format.sample_aspect = video_stream.sample_aspect_ratio
-      if video_stream.framerate is not None and float(video_stream.framerate) > 0:
-        self.video_format.frame_rate = float(video_stream.framerate)
-
-  def __del__(self):
-    self.container.close()
-
-  def seek(self, timestamp):
-    self.decoder.seek(timestamp)
-    decoders_to_seek = list(self.decoder.decoders.values())
+    decoders_to_seek = list(self.decoders.values())
 
     while len(decoders_to_seek) > 0:
       for decoder in [*decoders_to_seek]:
@@ -176,12 +171,12 @@ class SLSource(StreamingSource):
     timestamp = None
     while bytes_sum < num_bytes:
       frame = self._pop_frame(MediaType.Audio)
-      frame_data: np.ndarray = frame.data
       if frame is None:
         break
       if timestamp is None:
         timestamp = frame.timestamp
 
+      frame_data: np.ndarray = frame.data
       frames.append(frame_data)
       bytes_sum += frame_data.size * frame_data.dtype.itemsize
 
@@ -189,7 +184,7 @@ class SLSource(StreamingSource):
       return None
 
     assert AUDIO_FORMAT.is_packed
-    audio_stream = self.decoder.audio_decoder.stream
+    audio_stream = self.audio_decoder.stream
     data = np.concatenate(frames, axis=1).reshape((-1, audio_stream.channels))
     data = data[:, :MAX_AUDIO_CHANNELS]
     samples = data.shape[0]
@@ -218,7 +213,7 @@ class SLSource(StreamingSource):
     return AudioData(data, len(data), timestamp, duration, [])
 
   def _pop_frame(self, frame_type: MediaType) -> SLFrame:
-    buffer = self.decoder.decoders[frame_type].frame_buffer
+    buffer = self.decoders[frame_type].frame_buffer
     frame = buffer.get()
     if frame is None:
       assert len(buffer.queue) == 0
@@ -226,7 +221,7 @@ class SLSource(StreamingSource):
     return frame
 
   def get_next_video_timestamp(self):
-    buffer = self.decoder.decoders[MediaType.Video].frame_buffer
+    buffer = self.decoders[MediaType.Video].frame_buffer
     with buffer.not_empty:
       if len(buffer.queue) == 0:
         buffer.not_empty.wait()
