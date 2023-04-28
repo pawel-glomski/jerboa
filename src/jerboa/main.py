@@ -3,7 +3,9 @@ import pyglet
 from imgui.integrations.pyglet import create_renderer
 
 # from testwindow import show_test_window
-from avsource import SLSource
+from jerboa.avsource import SLSource
+# from player import SLPlayer
+from pyglet.media import Player as SLPlayer
 
 
 def main():
@@ -12,9 +14,10 @@ def main():
   imgui.create_context()
   impl = create_renderer(window)
 
-  src = SLSource('data/debugging.mp4')#'before.mp4')
+  src = SLSource('before.mp4')
+  # src = SLSource('data/debugging.mp4')#'before.mp4')
 
-  video_player = pyglet.media.Player()
+  video_player = SLPlayer()
   # manually create a square texture - this is slightly modified version of Player._create_texture
   # function, which creates a rectangle texture instead of a square one
   # video_player._texture = pyglet.image.Texture.create(src.video_format.width,
@@ -22,9 +25,9 @@ def main():
   # video_player._texture = video_player._texture.get_transform(flip_y=True)
   # video_player._texture.anchor_y = 0
 
+  # video_player.start(src)
   video_player.queue(src)
   video_player.play()
-  video_player.set_handler
 
 
   def update(dt):
@@ -34,6 +37,11 @@ def main():
         video_player.seek(video_player.time + 2.0)
       if imgui.is_key_pressed(imgui.KEY_LEFT_ARROW):
         video_player.seek(video_player.time - 2.0)
+      if imgui.is_key_pressed(imgui.KEY_SPACE):
+        if video_player.playing:
+          video_player.pause()
+        else:
+          video_player.play()
       if imgui.begin_menu('File', True):
         clicked_quit, selected_quit = imgui.menu_item('Quit', 'Cmd+Q', False, True)
         if clicked_quit:

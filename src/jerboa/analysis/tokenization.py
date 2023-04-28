@@ -5,8 +5,8 @@ import spacy
 from typing import List
 from math import inf
 
-from speechless.edit_context import TimelineChange
-from speechless.utils.math import ranges_of_truth
+from jerboa.timeline import MTSection, FragmentedTimeline
+from jerboa.utils.math import ranges_of_truth
 
 TOKEN_SEPARATOR = ' '
 SENTENCE_SEPARATOR = '.' + TOKEN_SEPARATOR
@@ -49,8 +49,8 @@ class EditToken:
     self.index = None  # index of the token in the document
     self.label = None  # label assigned later by an analysis method
 
-  def as_timeline_change(self, duration_ratio: float) -> TimelineChange:
-    return TimelineChange(self.start_time, self.end_time, duration_ratio)
+  def as_timeline_section(self, duration_modifier: float) -> MTSection:
+    return MTSection(self.start_time, self.end_time, duration_modifier)
 
   def __len__(self) -> int:
     return len(self.text)
@@ -157,28 +157,18 @@ def sentence_segmentation(transcript: List[EditToken]) -> List[List[EditToken]]:
   return sentences
 
 
-def make_timeline_changes(tokens: List[EditToken],
-                          duration_ratio: float = 0.0) -> List[TimelineChange]:
-  """Create list of timeline changes ready for modification
+def create_timeline(tokens: List[EditToken], duration_modifier: float = 1.0) -> FragmentedTimeline:
+  """Creates an instance of `FragmentedTimeline` from a list of tokens
 
   Args:
       tokens (List[EditToken]): List of labeled tokens
-      duration_ratio (float): Duration ratio for the timeline changes
+      duration_modifier (float): Duration modifier for the timeline sections
 
   Returns:
-      List[TimelineChanges]: List of changes, with intervals between words
-      and before first and after last word
+      FragmentedTimeline: A timeline containing only the given tokens
   """
-  rot = ranges_of_truth(np.array([not token.label for token in tokens]))
-  changes = []
-  for r in rot:
-    start = tokens[r[0] - 1].end_time if r[0] > 0 else 0.0
-    end = tokens[r[1]].start_time if r[1] < len(tokens) else inf
-    changes.append(TimelineChange(start, end, duration_ratio))
-  if len(changes) == 0:
-    return changes
-  if changes[0].beg != 0.0:
-    changes.insert(0, TimelineChange(0.0, tokens[0].start_time, duration_ratio))
-  if changes[-1].end != inf:
-    changes.append(TimelineChange(tokens[-1].end_time, inf, duration_ratio))
-  return changes
+  timeline = FragmentedTimeline()
+  for token in tokens:
+    if token.label:
+      timeline.append_section(MTSection(token.start_time, token.end_time, duration_modifier))
+  return timeline

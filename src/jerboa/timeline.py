@@ -1,0 +1,253 @@
+import math
+from bisect import bisect_left
+from typing import Generator
+
+from speechless.utils import KeyWrapper
+
+
+class MTSection:
+  '''Represents a Modified Timeline Section - a timeline section with a duration modifier.'''
+
+  def __init__(self, beg: float, end: float, modifier: float = 1.0):
+    '''Initializes a `MTSection` instance.
+
+    Args:
+      beg (float): The beginning time of the section.
+      end (float): The end time of the section.
+      modifier (float): The duration modifier of the section (default 1.0).
+
+    '''
+    assert not math.isnan(end - beg), f'Invalid range values: ({beg}, {end})).'
+    assert not math.isnan(modifier), f'Invalid modifier value: {modifier}).'
+    assert beg <= end, f'The beginning must precede the end: ({beg}, {end}).'
+    assert modifier >= 0.0, f'Section modifier cannot be negative: {modifier}.'
+
+    self._beg = beg
+    self._end = end
+    self._modifier = modifier
+    self._duration = self.modifier * (self.end - self.beg) if modifier else 0.0
+
+  @property
+  def beg(self) -> float:
+    '''float: The beginning time of the section.'''
+    return self._beg
+
+  @property
+  def end(self) -> float:
+    '''float: The end time of the section.'''
+    return self._end
+
+  @property
+  def modifier(self) -> float:
+    '''float: The duration modifier of the section.'''
+    return self._modifier
+
+  @property
+  def duration(self) -> float:
+    '''float: The duration of the section, taking into account the duration modifier.'''
+    return self._duration
+
+  def __repr__(self) -> str:
+    '''Returns a string representation of the section.'''
+    return f'MTSection({self.beg=}, {self.end=}, {self.modifier=})'
+
+  def __eq__(self, other: object) -> bool:
+    '''Checks if two sections are equal.'''
+    if isinstance(other, MTSection):
+      return (self.beg == other.beg and self.end == other.end and self.modifier == other.modifier)
+    return False
+
+  def try_extending_with(self, other: 'MTSection') -> bool:
+    '''If the other section is a direct continuation, extends this section.
+
+    A MTSection is considered a direct continuation of another if its `beg` time is the same as the
+    other's `end` time, and both sections have the same duration modifier.
+
+    Args:
+      other (MTSection): The section to extend to.
+
+    Returns:
+      bool: True if the section was extended, False otherwise.
+
+    '''
+    if self.end == other.beg and self.modifier == other.modifier:
+      self._end = other.end
+      self._duration += other.duration
+      return True
+    return False
+
+  def overlap(self, beg, end) -> 'MTSection':
+    '''Returns a new `MTSection` instance representing the overlap between the current section
+    and the given time range.
+
+    The new section will have the same modifier as the original section.
+
+    Args:
+      beg (float): The beginning time of the range.
+      end (float): The end time of the range.
+
+    Returns:
+      MTSection: The new `MTSection` instance representing the overlap, `beg` == `end` when there is
+       no overlap.
+
+    '''
+    beg = max(self.beg, beg)
+    end = max(beg, min(self.end, end))  # end == beg when the section does not overlap the range
+    return MTSection(beg, end, self.modifier)
+
+
+class FragmentedTimeline:
+  '''Represents a timeline that is made up of sections, where each section can have different
+  duration modifier (different playback speed).
+
+  Note:
+      The timeline sections must be added in ascending order by their beginning time.
+  '''
+
+  def __init__(self, *init_sections: tuple[MTSection]) -> None:
+    '''Initialize a new FragmentedTimeline instance.
+
+    Args:
+        *init_sections (tuple[MTSection]): Optional initial sections to add to the timeline. \
+                                           The sections should be in ascending order by their \
+                                           beginning time.
+    '''
+    self._sections: list[MTSection] = []
+    self._resulting_timepoints: list[float] = []
+    self._time_scope = -math.inf
+
+    for section in init_sections:
+      self.append(section)
+
+  def __len__(self) -> int:
+    return len(self._sections)
+
+  def __iter__(self) -> Generator[tuple[MTSection, float], None, None]:
+    for section, resulting_timepoint in zip(self._sections, self._resulting_timepoints):
+      yield (section, resulting_timepoint)
+
+  @property
+  def time_scope(self) -> float:
+    '''Getter for the time scope of the timeline, which represents the maximum timestamp for which
+    the mapping is defined for the timeline.
+
+    Returns:
+        float: the time scope of the timeline
+    '''
+
+    return self._time_scope
+
+  @time_scope.setter
+  def time_scope(self, new_value):
+    '''Setter for the timeline's scope in seconds. Only allows increasing the scope.
+
+    Args:
+        new_value (float): The new time scope to set.
+
+    Raises:
+        AssertionError: If `new_value` is less than or equal to the current time scope.
+    '''
+    assert new_value > self._time_scope, 'Scope should only increase!'
+    self._time_scope = new_value
+
+  def append_section(self, section: MTSection) -> None:
+    '''
+    Appends a new section to the timeline.
+
+    Args:
+        section (MTSection): The section to be appended. Must follow the existing sections.
+
+    Raises:
+        AssertionError: If the new section precedes existing sections or it overlaps the current
+        time scope (which it should always extend).
+    '''
+    assert not self._sections or section.beg >= self._sections[-1].end, (
+        'The section cannot precede existing sections. '
+        f'The last section is: {self._sections[-1]}, but tried to append: {section}.')
+    assert section.beg >= self.time_scope, ('Cannot alter the "committed" time scope. '
+                                            f'Current scope is: {self.time_scope}, '
+                                            f'but tried to append: {section}')
+
+    self.time_scope = section.end
+    section_duration = section.duration()
+    if section_duration > 0:
+      if self._sections and section.is_direct_continuation_of(self._sections[-1]):
+        self._resulting_timepoints[-1] += section_duration
+        self._sections[-1].end = section.end
+      else:
+        self._sections.append(section)
+        last_timepoint = self._resulting_timepoints[-1] if self._resulting_timepoints else 0.0
+        self._resulting_timepoints.append(last_timepoint + section_duration)
+
+  # TODO(OPT): optimize for frequent sequential checks
+  def map_timepoint_to_source(self, timestamp: float) -> float | None:
+    '''Maps a resulting timeline timestamp to its source timeline counterpart.
+
+    Args:
+        timestamp (float): The timestamp to be mapped.
+
+    Returns:
+        float | None: The mapped source timestamp if the given timestamp is valid; None otherwise.
+    '''
+    if self._resulting_timepoints:
+      timestamp = max(0, timestamp)
+      idx = bisect_left(self._resulting_timepoints, timestamp)
+      if idx < len(self._resulting_timepoints):
+        scale = 1.0 / self._sections[idx].modifier
+        beg_src = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
+        return self._sections[idx].beg + scale * (timestamp - beg_src)
+      if self.time_scope == math.inf:
+        return self._sections[-1].end
+    return None
+
+  # TODO(OPT): optimize for frequent sequential checks
+  def map_time_range(self, beg: float, end: float) -> tuple[float, float, float, list[MTSection]]:
+    '''Maps a time range to the resulting timeline.
+
+    This method maps a time range specified by its beginning and ending timestamps in the source
+    timeline to the corresponding section(s) in the resulting timeline.
+  
+    Args:
+        beg (float): The beginning timestamp of the time range to be mapped.
+        end (float): The ending timestamp of the time range to be mapped.
+
+    Returns:
+        tuple[float, float, float, list[MTSection]]: A tuple of four values:
+            0: The mapped beginning timestamp of the range.
+            1: The mapped ending timestamp of the range.
+            2: The next closest timestamp that can be mapped after the range ends. If such a \
+               timestamp does not exist in the current scope, it returns the current time scope.
+            3: A list of sections that overlapped this time range.
+
+    Raises:
+        AssertionError: If the beginning timestamp is greater than the ending timestamp, or if the
+        end of the range is beyond the timeline's scope.
+    '''
+    assert beg <= end, f'The beginning must precede the end ({beg}, {end}).'
+    assert end <= self.time_scope, (
+        f'Range out of scope: ({beg}, {end}) while the scope is: {self.time_scope}.')
+
+    involved_sections = list[MTSection]()
+    idx = bisect_left(KeyWrapper(self._sections, lambda s: s.end), beg)
+    if idx >= len(self._sections):
+      mapped_beg = self._sections[-1].end if self._sections else 0
+      mapped_end = mapped_beg
+      next_timestamp = self.time_scope
+    else:
+      mapped_beg_offset = self._sections[idx].modifier * max(0, self._sections[idx].beg - beg)
+      mapped_beg = self._resulting_timepoints[idx] + mapped_beg_offset
+      mapped_end = mapped_beg
+
+      while idx < len(self._sections) and end > self._sections[idx].beg:
+        involved_sections.append(self._sections[idx].overlap(beg, end))
+        mapped_end += involved_sections[-1].duration()
+      assert all(s.duration() > 0.0 for s in involved_sections)
+
+      if end < self._sections[idx - 1].end:
+        next_timestamp = end
+      elif idx < len(self._sections):
+        next_timestamp = self._sections[idx].beg
+      else:
+        next_timestamp = self._time_scope
+
+    return (mapped_beg, mapped_end, next_timestamp, involved_sections)

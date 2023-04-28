@@ -3,7 +3,9 @@ import numpy as np
 from typing import List
 from logging import Logger
 from argparse import ArgumentParser
+from librosa import power_to_db
 from librosa.core import stft
+from librosa.feature import melspectrogram
 from scipy.signal import convolve2d as conv2d
 from scipy.stats import entropy as kl_div
 from scipy.special import softmax
@@ -23,7 +25,7 @@ SPEC_NORM_MAX = 9
 MIN_AMPLITUDE = 3
 SOUND_POINT = 15  # number of freq with amplitude > 0 (after transformations)
 
-REDUNDANCY_THRESHOLD = 0.025
+REDUNDANCY_THRESHOLD = 0.005
 MIN_SILENCE_LEN = int(0.1 * SR / HOP + 0.5)
 MIN_SOUND_LEN = MIN_SILENCE_LEN
 
@@ -103,14 +105,15 @@ class SpectrogramAnalysis(AnalysisMethod):
 
   @staticmethod
   def make_spectrogram(signal: np.ndarray) -> np.ndarray:
-    spec = np.abs(stft(signal, NFFT, HOP))
-    spec = conv2d(spec**SPEC_POWER, kernel_2d_from_window((5, 5), np.hanning), 'same')
-    spec = spec * (SPEC_NORM_MAX / spec.max())
+    spec = power_to_db(melspectrogram(y=signal, n_fft=NFFT, hop_length=HOP, sr=SR, n_mels=64), ref=np.max)
+    spec = (spec + 80.0) / 80.0
+    spec[spec < 0.01] = 0.01
+    spec = conv2d(spec, kernel_2d_from_window((3, 3), np.hanning), 'same')
     return spec
 
   @staticmethod
   def find_sound_and_silence(spec: np.ndarray) -> np.ndarray:
-    is_sound = (spec > MIN_AMPLITUDE).sum(axis=0) > SOUND_POINT
+    is_sound = (spec > 0.333).sum(axis=0) > SOUND_POINT
 
     # filter out very small silence segments
     ranges = ranges_of_truth(is_sound == False)
@@ -130,10 +133,12 @@ class SpectrogramAnalysis(AnalysisMethod):
 
   @staticmethod
   def redundancy(spec: np.ndarray) -> np.ndarray:
-    spec = softmax(spec, axis=0)
+    spec = spec / spec.sum(axis=0, keepdims=True)
+    # spec = softmax(spec, axis=0)
     redundancy = np.zeros(spec.shape[1])
     redundancy[1:] = kl_div(spec[:, :-1], spec[:, 1:], axis=0)
-    redundancy = np.convolve(redundancy, np.hanning(7), 'same')
+    # redundancy[is_sound == False] = 1
+    redundancy = np.convolve(redundancy, np.hanning(5), 'same')
     return redundancy
 
 
