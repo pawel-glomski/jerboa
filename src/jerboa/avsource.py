@@ -13,7 +13,7 @@ from bisect import bisect_left, bisect_right
 from pyglet.media import StreamingSource
 from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
-from speechless.timeline import ModifiedTimeline
+from jerboa.timeline import TMSection, FragmentedTimeline
 
 
 class MediaType(Enum):
@@ -137,7 +137,7 @@ def probe_keyframe_pts(container: av.container.Container, stream: av.stream.Stre
 
 class StreamDecoder:
 
-  def __init__(self, filepath: str, stream_idx: int, init_timeline: ModifiedTimeline = None):
+  def __init__(self, filepath: str, stream_idx: int, init_timeline: FragmentedTimeline = None):
     self.container = av.open(filepath)
     if not (0 <= stream_idx < len(self.container.streams)):
       raise ValueError(f'Wrong stream index! Tried to decode #{stream_idx} stream, while the file '
@@ -157,10 +157,9 @@ class StreamDecoder:
     self._seek_timestamp: None | float = None
     self._waiting_for_seek = False
 
-    self._buffer = deque[TimedFrame]()
-    self._buffer_duration = 0
+    self._buffer = create_frame_buffer(self.stream, BUFFER_MAX_DURATION)
 
-    self._timeline = init_timeline or ModifiedTimeline()
+    self._timeline = init_timeline or FragmentedTimeline()
 
     self._dec_thread = Thread(target=self._decode,
                               name=f'Decoding #{self.stream.index} stream ({self.stream.type})',
@@ -300,7 +299,7 @@ class SLSource(StreamingSource):
     self.container = av.open(filepath)
     self.decoders: dict[MediaType, StreamDecoder] = {}
     if self.container.streams.audio:
-      from speechless.timeline import TimelineSection
+      from jerboa.timeline import TimelineSection
       audio_decoder = StreamDecoder(filepath, self.container.streams.audio[0].index,
                                     ModifiedTimeline(TimelineSection(-math.inf, math.inf, 1.0)))
       self.decoders[MediaType.AUDIO] = audio_decoder
