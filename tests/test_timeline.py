@@ -2,10 +2,10 @@ import math
 
 import pytest
 
-from speechless.timeline import MTSection, FragmentedTimeline
+from jerboa.timeline import TMSection, FragmentedTimeline
 
 
-class TestMTSection:
+class TestTMSection:
 
   @pytest.mark.parametrize("beg, end, modifier", [
       (0, 10, 1.0),
@@ -13,7 +13,7 @@ class TestMTSection:
       (0, 0, 0.5),
   ])
   def test_should_create_new_instance_when_valid_input(self, beg, end, modifier):
-    section = MTSection(beg, end, modifier)
+    section = TMSection(beg, end, modifier)
 
     assert section.beg == beg
     assert section.end == end
@@ -31,92 +31,92 @@ class TestMTSection:
   ])
   def test_should_raise_assertion_error_when_invalid_input(self, beg, end, modifier):
     with pytest.raises(AssertionError):
-      MTSection(beg, end, modifier)
+      TMSection(beg, end, modifier)
 
   @pytest.mark.parametrize("section1, section2, expected_section", [
       (
-          MTSection(0, 10, 1.0),
-          MTSection(10, 20, 1.0),
-          MTSection(0, 20, 1.0),
+          TMSection(0, 10, 1.0),
+          TMSection(10, 20, 1.0),
+          TMSection(0, 20, 1.0),
       ),
       (
-          MTSection(-10, 0, 2.0),
-          MTSection(0, 10, 2.0),
-          MTSection(-10, 10, 2.0),
+          TMSection(-10, 0, 2.0),
+          TMSection(0, 10, 2.0),
+          TMSection(-10, 10, 2.0),
       ),
       (
-          MTSection(-math.inf, 0, 0),
-          MTSection(0, 10, 0.0),
-          MTSection(-math.inf, 10, 0),
+          TMSection(-math.inf, 0, 0),
+          TMSection(0, 10, 0.0),
+          TMSection(-math.inf, 10, 0),
       ),
       (
-          MTSection(-math.inf, 10, 0),
-          MTSection(10, math.inf, 0),
-          MTSection(-math.inf, math.inf, 0),
+          TMSection(-math.inf, 10, 0),
+          TMSection(10, math.inf, 0),
+          TMSection(-math.inf, math.inf, 0),
       ),
       (
-          MTSection(-math.inf, 10, 0.5),
-          MTSection(10, math.inf, 0.5),
-          MTSection(-math.inf, math.inf, 0.5),
+          TMSection(-math.inf, 10, 0.5),
+          TMSection(10, math.inf, 0.5),
+          TMSection(-math.inf, math.inf, 0.5),
       ),
   ])
   def test_try_extending_with_should_extend_to_expected_section_when_is_direct_continuation(
-      self, section1: MTSection, section2: MTSection, expected_section: MTSection):
+      self, section1: TMSection, section2: TMSection, expected_section: TMSection):
     assert section1.try_extending_with(section2) is True and section1 == expected_section
 
   @pytest.mark.parametrize("section1, section2", [
-      (MTSection(-10, 10, 1.0), MTSection(-10, 10, 1.0)),
-      (MTSection(5, 10, 1.0), MTSection(5, 15, 1.0)),
-      (MTSection(6, 10, 0.5), MTSection(11, 15, 1.0)),
-      (MTSection(7, 10, 2.0), MTSection(10, 15, 0.5)),
-      (MTSection(8, 10, 1.0), MTSection(10, 15, 0.0)),
-      (MTSection(0, 10, 1.0), MTSection(-10, 0, 1.0)),
+      (TMSection(-10, 10, 1.0), TMSection(-10, 10, 1.0)),
+      (TMSection(5, 10, 1.0), TMSection(5, 15, 1.0)),
+      (TMSection(6, 10, 0.5), TMSection(11, 15, 1.0)),
+      (TMSection(7, 10, 2.0), TMSection(10, 15, 0.5)),
+      (TMSection(8, 10, 1.0), TMSection(10, 15, 0.0)),
+      (TMSection(0, 10, 1.0), TMSection(-10, 0, 1.0)),
   ])
   def test_try_extending_with_should_return_false_when_is_not_direct_continuation(
-      self, section1: MTSection, section2: MTSection):
-    section1_before = MTSection(section1.beg, section1.end, section1.modifier)
+      self, section1: TMSection, section2: TMSection):
+    section1_before = TMSection(section1.beg, section1.end, section1.modifier)
     assert section1.try_extending_with(section2) is False and section1 == section1_before
 
   @pytest.mark.parametrize("section, expected_duration", [
-      (MTSection(0, 10, 1.0), 10),
-      (MTSection(-10, 10, 2.0), 40),
-      (MTSection(0, 100, 0.5), 50),
-      (MTSection(0, 100, 0.0), 0),
-      (MTSection(10, 10, 1.0), 0),
-      (MTSection(0, math.inf, 0.0), 0),
-      (MTSection(-math.inf, 0, 1.0), math.inf),
-      (MTSection(0, math.inf, 0.5), math.inf),
-      (MTSection(-math.inf, math.inf, 1.0), math.inf),
+      (TMSection(0, 10, 1.0), 10),
+      (TMSection(-10, 10, 2.0), 40),
+      (TMSection(0, 100, 0.5), 50),
+      (TMSection(0, 100, 0.0), 0),
+      (TMSection(10, 10, 1.0), 0),
+      (TMSection(0, math.inf, 0.0), 0),
+      (TMSection(-math.inf, 0, 1.0), math.inf),
+      (TMSection(0, math.inf, 0.5), math.inf),
+      (TMSection(-math.inf, math.inf, 1.0), math.inf),
   ])
   def test_duration_should_return_expected_duration(self, section, expected_duration):
     assert section.duration == expected_duration
 
   @pytest.mark.parametrize("section, beg, end, expected_section", [
-      (MTSection(0, 3, 2), 1, 2, MTSection(1, 2, 2)),
-      (MTSection(1, 2, 2), 0, 3, MTSection(1, 2, 2)),
-      (MTSection(1, 2, 1), 0, 3, MTSection(1, 2, 1)),
-      (MTSection(0, 2, 1), 1, 3, MTSection(1, 2, 1)),
-      (MTSection(0, 3, 1), 1, 2, MTSection(1, 2, 1)),
-      (MTSection(1, 3, 1), 0, 2, MTSection(1, 2, 1)),
+      (TMSection(0, 3, 2), 1, 2, TMSection(1, 2, 2)),
+      (TMSection(1, 2, 2), 0, 3, TMSection(1, 2, 2)),
+      (TMSection(1, 2, 1), 0, 3, TMSection(1, 2, 1)),
+      (TMSection(0, 2, 1), 1, 3, TMSection(1, 2, 1)),
+      (TMSection(0, 3, 1), 1, 2, TMSection(1, 2, 1)),
+      (TMSection(1, 3, 1), 0, 2, TMSection(1, 2, 1)),
   ])
   def test_overlap_should_return_expected_section_for_overlapping_range(
       self,
-      section: MTSection,
+      section: TMSection,
       beg: float,
       end: float,
-      expected_section: MTSection,
+      expected_section: TMSection,
   ):
     result = section.overlap(beg, end)
 
     assert result == expected_section
 
   @pytest.mark.parametrize("section, beg, end", [
-      (MTSection(0, 1, 1), 2, 3),
-      (MTSection(4, 5, 0.5), 2, 3),
+      (TMSection(0, 1, 1), 2, 3),
+      (TMSection(4, 5, 0.5), 2, 3),
   ])
   def test_overlap_should_return_empty_section_for_non_overlapping_range(
       self,
-      section: MTSection,
+      section: TMSection,
       beg: float,
       end: float,
   ):
@@ -126,25 +126,11 @@ class TestMTSection:
 
 
 class TestFragmentedTimeline:
-
-  @pytest.mark.parametrize('section1, section2, expected_overlap', [
-      ((0, 1), (2, 3), 0),
-      ((0, 1), (1, 2), 0),
-      ((0, 1), (0, 1), 1),
-      ((0, 1, 0), (0, 1, 0), 0),
-      ((0, 2, 0.5), (1, 2, 0.5), 0.5),
-      ((0, 2, 1.5), (1, 3, 1.5), 1.5),
-      ((0, 4), (1, 3), 2),
-  ])
-  def test_timeline_section_overlap(section1, section2, expected_overlap):
-    assert MTSection(*section1).overlap(*section2[:2]) == expected_overlap
-    assert MTSection(*section2).overlap(*section1[:2]) == expected_overlap
-
   def test_modified_timeline():
-    mt = MTSection(MTSection(0, 3, 0.75), MTSection(4, 5, 0.5), MTSection(5, 20, 0.25))
-    mt.map_to_normal(0)
-    mt.map_to_normal(3.5)
-    mt.apply_to_frame(1.5, 5)
+    timeline = FragmentedTimeline(TMSection(0, 3, 0.75), TMSection(4, 5, 0.5), TMSection(5, 20, 0.25))
+    timeline.map_timepoint_to_source(0)
+    timeline.map_timepoint_to_source(3.5)
+    timeline.map_time_range(1.5, 5)
 
   def test_length_of_empty_set_should_be_zero():
     timeline = FragmentedTimeline()
