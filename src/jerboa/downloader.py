@@ -7,12 +7,12 @@ from typing import List
 from argparse import ArgumentParser
 
 from .utils.cli import cli_subcommand
-from .utils.logging import NULL_LOGGER
+from .utils.logger import NULL_LOGGER
 
 SUBTITLES_FORMAT = 'vtt'
 QUERY_JOBS_MULTI = 4
 DOWNLOAD_RETRIES = 6
-SLOW_DOWNLOAD_TIMEOUT = 3
+SLOW_DOWNLOAD_TIMEOUT = 6
 NO_SUBS_LANGUAGE = 'none'
 OUT_VIDEO = 'video'
 OUT_AUDIO = 'audio'
@@ -188,7 +188,7 @@ class Downloader:
         self.logger.info(f'[ SUB ] {url}')
         return url
     elif stype == OUT_RECORDING:
-      out_format = 'worst' if self.with_video else 'worstaudio'
+      out_format = 'best' if self.with_video else 'bestaudio'
       out_name = OUT_VIDEO if self.with_video else OUT_AUDIO
       if self._download(url, {
           **common_options, 'outtmpl': dst_path.format(self.dst, out_name),

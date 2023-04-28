@@ -16,7 +16,7 @@ from speechless.readers.subtitles import read_subtitles
 from speechless.readers import read_entire_audio
 from speechless.transcription import speech_to_text
 from speechless.utils.logging import NULL_LOGGER
-from speechless.utils.storage import make_cache_dir_rel
+from speechless.utils.file import make_cache_dir_rel
 
 GENSIM_CACHE_DIR = make_cache_dir_rel('gensim')
 CORPUS_DIR = str(GENSIM_CACHE_DIR / 'gensim-data/')
