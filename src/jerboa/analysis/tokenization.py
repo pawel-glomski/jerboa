@@ -5,7 +5,7 @@ import spacy
 from typing import List
 from math import inf
 
-from jerboa.timeline import MTSection, FragmentedTimeline
+from jerboa.timeline import TMSection, FragmentedTimeline
 from jerboa.utils.math import ranges_of_truth
 
 TOKEN_SEPARATOR = ' '
@@ -49,8 +49,8 @@ class EditToken:
     self.index = None  # index of the token in the document
     self.label = None  # label assigned later by an analysis method
 
-  def as_timeline_section(self, duration_modifier: float) -> MTSection:
-    return MTSection(self.start_time, self.end_time, duration_modifier)
+  def as_timeline_section(self, duration_modifier: float) -> TMSection:
+    return TMSection(self.start_time, self.end_time, duration_modifier)
 
   def __len__(self) -> int:
     return len(self.text)
@@ -170,5 +170,5 @@ def create_timeline(tokens: List[EditToken], duration_modifier: float = 1.0) -> 
   timeline = FragmentedTimeline()
   for token in tokens:
     if token.label:
-      timeline.append_section(MTSection(token.start_time, token.end_time, duration_modifier))
+      timeline.append_section(TMSection(token.start_time, token.end_time, duration_modifier))
   return timeline

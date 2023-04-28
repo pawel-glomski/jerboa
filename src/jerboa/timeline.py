@@ -2,14 +2,14 @@ import math
 from bisect import bisect_left
 from typing import Generator
 
-from speechless.utils import KeyWrapper
+from jerboa.utils import KeyWrapper
 
 
-class MTSection:
-  '''Represents a Modified Timeline Section - a timeline section with a duration modifier.'''
+class TMSection:
+  '''Represents a Timeline Modified Section - a timeline section with a duration modifier.'''
 
   def __init__(self, beg: float, end: float, modifier: float = 1.0):
-    '''Initializes a `MTSection` instance.
+    '''Initializes a `TMSection` instance.
 
     Args:
       beg (float): The beginning time of the section.
@@ -49,22 +49,22 @@ class MTSection:
 
   def __repr__(self) -> str:
     '''Returns a string representation of the section.'''
-    return f'MTSection({self.beg=}, {self.end=}, {self.modifier=})'
+    return f'TMSection({self.beg=}, {self.end=}, {self.modifier=})'
 
   def __eq__(self, other: object) -> bool:
     '''Checks if two sections are equal.'''
-    if isinstance(other, MTSection):
+    if isinstance(other, TMSection):
       return (self.beg == other.beg and self.end == other.end and self.modifier == other.modifier)
     return False
 
-  def try_extending_with(self, other: 'MTSection') -> bool:
+  def try_extending_with(self, other: 'TMSection') -> bool:
     '''If the other section is a direct continuation, extends this section.
 
-    A MTSection is considered a direct continuation of another if its `beg` time is the same as the
+    A TMSection is considered a direct continuation of another if its `beg` time is the same as the
     other's `end` time, and both sections have the same duration modifier.
 
     Args:
-      other (MTSection): The section to extend to.
+      other (TMSection): The section to extend to.
 
     Returns:
       bool: True if the section was extended, False otherwise.
@@ -76,8 +76,8 @@ class MTSection:
       return True
     return False
 
-  def overlap(self, beg, end) -> 'MTSection':
-    '''Returns a new `MTSection` instance representing the overlap between the current section
+  def overlap(self, beg, end) -> 'TMSection':
+    '''Returns a new `TMSection` instance representing the overlap between the current section
     and the given time range.
 
     The new section will have the same modifier as the original section.
@@ -87,13 +87,13 @@ class MTSection:
       end (float): The end time of the range.
 
     Returns:
-      MTSection: The new `MTSection` instance representing the overlap, `beg` == `end` when there is
+      TMSection: The new `TMSection` instance representing the overlap, `beg` == `end` when there is
        no overlap.
 
     '''
     beg = max(self.beg, beg)
     end = max(beg, min(self.end, end))  # end == beg when the section does not overlap the range
-    return MTSection(beg, end, self.modifier)
+    return TMSection(beg, end, self.modifier)
 
 
 class FragmentedTimeline:
@@ -104,15 +104,15 @@ class FragmentedTimeline:
       The timeline sections must be added in ascending order by their beginning time.
   '''
 
-  def __init__(self, *init_sections: tuple[MTSection]) -> None:
+  def __init__(self, *init_sections: tuple[TMSection]) -> None:
     '''Initialize a new FragmentedTimeline instance.
 
     Args:
-        *init_sections (tuple[MTSection]): Optional initial sections to add to the timeline. \
+        *init_sections (tuple[TMSection]): Optional initial sections to add to the timeline. \
                                            The sections should be in ascending order by their \
                                            beginning time.
     '''
-    self._sections: list[MTSection] = []
+    self._sections: list[TMSection] = []
     self._resulting_timepoints: list[float] = []
     self._time_scope = -math.inf
 
@@ -122,9 +122,12 @@ class FragmentedTimeline:
   def __len__(self) -> int:
     return len(self._sections)
 
-  def __iter__(self) -> Generator[tuple[MTSection, float], None, None]:
-    for section, resulting_timepoint in zip(self._sections, self._resulting_timepoints):
-      yield (section, resulting_timepoint)
+  def __iter__(self) -> Generator[tuple[TMSection, float], None, None]:
+    for idx in range(self):
+      yield self[idx]
+
+  def __getitem__(self, idx: int) -> tuple[float, float]:
+    return (self._sections[idx], self._resulting_timepoints[idx])
 
   @property
   def time_scope(self) -> float:
@@ -139,23 +142,24 @@ class FragmentedTimeline:
 
   @time_scope.setter
   def time_scope(self, new_value):
-    '''Setter for the timeline's scope in seconds. Only allows increasing the scope.
+    '''Setter for the timeline's scope in seconds. This operation must always extend the scope.
 
     Args:
         new_value (float): The new time scope to set.
 
     Raises:
-        AssertionError: If `new_value` is less than or equal to the current time scope.
+        AssertionError: If `new_value` does not extend the current scope.
     '''
-    assert new_value > self._time_scope, 'Scope should only increase!'
+    assert new_value > self._time_scope, ('Scope must always increase: '
+                                          f'current = {self._time_scope}, new = {new_value}')
     self._time_scope = new_value
 
-  def append_section(self, section: MTSection) -> None:
+  def append_section(self, section: TMSection) -> None:
     '''
     Appends a new section to the timeline.
 
     Args:
-        section (MTSection): The section to be appended. Must follow the existing sections.
+        section (TMSection): The section to be appended. Must follow the existing sections.
 
     Raises:
         AssertionError: If the new section precedes existing sections or it overlaps the current
@@ -201,7 +205,7 @@ class FragmentedTimeline:
     return None
 
   # TODO(OPT): optimize for frequent sequential checks
-  def map_time_range(self, beg: float, end: float) -> tuple[float, float, float, list[MTSection]]:
+  def map_time_range(self, beg: float, end: float) -> tuple[float, float, float, list[TMSection]]:
     '''Maps a time range to the resulting timeline.
 
     This method maps a time range specified by its beginning and ending timestamps in the source
@@ -212,7 +216,7 @@ class FragmentedTimeline:
         end (float): The ending timestamp of the time range to be mapped.
 
     Returns:
-        tuple[float, float, float, list[MTSection]]: A tuple of four values:
+        tuple[float, float, float, list[TMSection]]: A tuple of four values:
             0: The mapped beginning timestamp of the range.
             1: The mapped ending timestamp of the range.
             2: The next closest timestamp that can be mapped after the range ends. If such a \
@@ -227,7 +231,7 @@ class FragmentedTimeline:
     assert end <= self.time_scope, (
         f'Range out of scope: ({beg}, {end}) while the scope is: {self.time_scope}.')
 
-    involved_sections = list[MTSection]()
+    involved_sections = list[TMSection]()
     idx = bisect_left(KeyWrapper(self._sections, lambda s: s.end), beg)
     if idx >= len(self._sections):
       mapped_beg = self._sections[-1].end if self._sections else 0
