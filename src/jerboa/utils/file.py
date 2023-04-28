@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 
 CACHE_DIR_ENV_VAR_NAME = 'SPLE_HOME'
-DEFAULT_CACHE_DIR_PATH = Path.home() / '.speechless/'
+DEFAULT_CACHE_DIR_PATH = Path.home() / '.jerboa/'
 CACHE_DIR_PATH = Path(os.environ.get(CACHE_DIR_ENV_VAR_NAME, DEFAULT_CACHE_DIR_PATH)).resolve()
 
 

@@ -8,15 +8,15 @@ from logging import Logger
 from pathlib import Path
 from typing import List
 
-from speechless.edit_context.common import TimelineChange
-from speechless.processing.analysis.analysis import (ARG_PREPARE_ANALYSIS_METHOD_FN, AnalysisMethod)
-from speechless.processing.tokenization import (EditToken, make_timeline_changes,
+from jerboa.edit_context.common import TimelineChange
+from jerboa.processing.analysis.analysis import (ARG_PREPARE_ANALYSIS_METHOD_FN, AnalysisMethod)
+from jerboa.processing.tokenization import (EditToken, make_timeline_changes,
                                                 sentence_segmentation, spacy_nlp)
-from speechless.readers.subtitles import read_subtitles
-from speechless.readers import read_entire_audio
-from speechless.transcription import speech_to_text
-from speechless.utils.logging import NULL_LOGGER
-from speechless.utils.file import make_cache_dir_rel
+from jerboa.readers.transcript import read_subtitles
+from jerboa.readers import read_entire_audio
+from jerboa.transcription import speech_to_text
+from jerboa.utils.logger import NULL_LOGGER
+from jerboa.utils.file import make_cache_dir_rel
 
 GENSIM_CACHE_DIR = make_cache_dir_rel('gensim')
 CORPUS_DIR = str(GENSIM_CACHE_DIR / 'gensim-data/')

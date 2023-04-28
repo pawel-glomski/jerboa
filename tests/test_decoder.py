@@ -2,8 +2,8 @@
 # from common import TEST_REC_PATH, TEST_REC_CHANNELS
 
 # import av
-# from speechless.avsource import StreamDecoder, MediaType
-# from speechless.timeline_changes import RangeSet
+# from jerboa.avsource import StreamDecoder, MediaType
+# from jerboa.timeline_changes import RangeSet
 
 
 # def test_decoder_with_valid_file_should_decode_correct_file():

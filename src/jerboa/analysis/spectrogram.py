@@ -11,10 +11,10 @@ from scipy.stats import entropy as kl_div
 from scipy.special import softmax
 
 from .analysis import AnalysisMethod, ARG_PREPARE_ANALYSIS_METHOD_FN
-from speechless.readers import read_entire_audio
-from speechless.edit_context import TimelineChange
-from speechless.utils.logging import NULL_LOGGER
-from speechless.utils.math import ranges_of_truth, kernel_2d_from_window
+from jerboa.readers import read_entire_audio
+from jerboa.timeline import FragmentedTimeline
+from jerboa.utils.logger import NULL_LOGGER
+from jerboa.utils.math import ranges_of_truth, kernel_2d_from_window
 
 SR = 16000
 NFFT = 256
@@ -53,7 +53,7 @@ class SpectrogramAnalysis(AnalysisMethod):
     self.silence_len = silence_len
     self.logger = logger
 
-  def analyze(self, recording_path: str, _) -> List[TimelineChange]:
+  def analyze(self, recording_path: str, _) -> FragmentedTimeline:
     signal, _ = read_entire_audio(recording_path, sample_rate=SR, mono=True, logger=self.logger)
     spec = SpectrogramAnalysis.make_spectrogram(signal[0])
     is_sound = SpectrogramAnalysis.find_sound_and_silence(spec)
@@ -62,7 +62,7 @@ class SpectrogramAnalysis(AnalysisMethod):
 
     changes = ranges_of_truth(cls_segments == False) * HOP / SR
     changes = np.concatenate([changes, np.ones((changes.shape[0], 1)) * self.dur_multi], axis=1)
-    return TimelineChange.from_numpy(changes)
+    return FragmentedTimeline(*changes)
 
   def classify(self, is_sound: np.ndarray, redundancy: np.ndarray) -> np.ndarray:
     cls = redundancy >= REDUNDANCY_THRESHOLD * self.th_ratio
