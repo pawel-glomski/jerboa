@@ -15,7 +15,6 @@ class TMSection:
       beg (float): The beginning time of the section.
       end (float): The end time of the section.
       modifier (float): The duration modifier of the section (default 1.0).
-
     '''
     assert not math.isnan(end - beg), f'Invalid range values: ({beg}, {end})).'
     assert not math.isnan(modifier), f'Invalid modifier value: {modifier}).'
@@ -68,7 +67,6 @@ class TMSection:
 
     Returns:
       bool: True if the section was extended, False otherwise.
-
     '''
     if self.end == other.beg and self.modifier == other.modifier:
       self._end = other.end
@@ -88,8 +86,7 @@ class TMSection:
 
     Returns:
       TMSection: The new `TMSection` instance representing the overlap, `beg` == `end` when there is
-       no overlap.
-
+      no overlap.
     '''
     beg = max(self.beg, beg)
     end = max(beg, min(self.end, end))  # end == beg when the section does not overlap the range
@@ -101,16 +98,14 @@ class FragmentedTimeline:
   duration modifier (different playback speed).
 
   Note:
-      The timeline sections must be added in ascending order by their beginning time.
+    The timeline sections must be added in ascending order by their beginning time.
   '''
 
   def __init__(self, *init_sections: tuple[TMSection]) -> None:
     '''Initialize a new FragmentedTimeline instance.
 
     Args:
-        *init_sections (tuple[TMSection]): Optional initial sections to add to the timeline. \
-                                           The sections should be in ascending order by their \
-                                           beginning time.
+      *init_sections (tuple[TMSection]): Optional initial sections to add to the timeline.
     '''
     self._sections: list[TMSection] = []
     self._resulting_timepoints: list[float] = []
@@ -135,7 +130,7 @@ class FragmentedTimeline:
     the mapping is defined for the timeline.
 
     Returns:
-        float: the time scope of the timeline
+      float: the time scope of the timeline
     '''
 
     return self._time_scope
@@ -145,10 +140,10 @@ class FragmentedTimeline:
     '''Setter for the timeline's scope in seconds. This operation must always extend the scope.
 
     Args:
-        new_value (float): The new time scope to set.
+      new_value (float): The new time scope to set.
 
     Raises:
-        AssertionError: If `new_value` does not extend the current scope.
+      AssertionError: If `new_value` does not extend the current scope.
     '''
     assert new_value > self._time_scope, ('Scope must always increase: '
                                           f'current = {self._time_scope}, new = {new_value}')
@@ -159,11 +154,11 @@ class FragmentedTimeline:
     Appends a new section to the timeline.
 
     Args:
-        section (TMSection): The section to be appended. Must follow the existing sections.
+      section (TMSection): The section to be appended. Must follow the existing sections.
 
     Raises:
-        AssertionError: If the new section precedes existing sections or it overlaps the current
-        time scope (which it should always extend).
+      AssertionError: If the new section precedes existing sections or it overlaps the current
+      time scope (which it should always extend).
     '''
     assert not self._sections or section.beg >= self._sections[-1].end, (
         'The section cannot precede existing sections. '
@@ -188,10 +183,10 @@ class FragmentedTimeline:
     '''Maps a resulting timeline timestamp to its source timeline counterpart.
 
     Args:
-        timestamp (float): The timestamp to be mapped.
+      timestamp (float): The timestamp to be mapped.
 
     Returns:
-        float | None: The mapped source timestamp if the given timestamp is valid; None otherwise.
+      float | None: The mapped source timestamp if the given timestamp is valid; None otherwise.
     '''
     if self._resulting_timepoints:
       timestamp = max(0, timestamp)
@@ -212,20 +207,20 @@ class FragmentedTimeline:
     timeline to the corresponding section(s) in the resulting timeline.
   
     Args:
-        beg (float): The beginning timestamp of the time range to be mapped.
-        end (float): The ending timestamp of the time range to be mapped.
+      beg (float): The beginning timestamp of the time range to be mapped.
+      end (float): The ending timestamp of the time range to be mapped.
 
     Returns:
-        tuple[float, float, float, list[TMSection]]: A tuple of four values:
-            0: The mapped beginning timestamp of the range.
-            1: The mapped ending timestamp of the range.
-            2: The next closest timestamp that can be mapped after the range ends. If such a \
-               timestamp does not exist in the current scope, it returns the current time scope.
-            3: A list of sections that overlapped this time range.
+      tuple[float, float, float, list[TMSection]]: A tuple of four values:
+        0: The mapped beginning timestamp of the range.
+        1: The mapped ending timestamp of the range.
+        2: The next closest timestamp that can be mapped after the range ends. If such a timestamp \
+           does not exist in the current scope, it returns the current time scope.
+        3: A list of sections that overlapped this time range.
 
     Raises:
-        AssertionError: If the beginning timestamp is greater than the ending timestamp, or if the
-        end of the range is beyond the timeline's scope.
+      AssertionError: If the beginning timestamp is greater than the ending timestamp, or if the
+      end of the range is beyond the timeline's scope.
     '''
     assert beg <= end, f'The beginning must precede the end ({beg}, {end}).'
     assert end <= self.time_scope, (
