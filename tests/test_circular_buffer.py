@@ -33,11 +33,11 @@ def create_elements(buffer: CircularBuffer, element_beg: int, element_end: int):
 
   elements = []
   for idx in range(element_beg, element_end):
-    element = np.arange(idx, idx + element_size, dtype=buffer.data.dtype)
+    element = np.arange(idx, idx + element_size, dtype=buffer.dtype)
     elements.append(element.reshape(element_shape))
   if elements:
-    return np.concatenate(elements, buffer.index_axis, dtype=buffer.data.dtype)
-  return np.ndarray(element_shape, buffer.data.dtype)
+    return np.concatenate(elements, buffer.index_axis, dtype=buffer.dtype)
+  return np.ndarray(element_shape, buffer.dtype)
 
 
 def create_empty_buffer(shape: tuple, axis: int, dtype: np.dtype) -> CircularBuffer:
@@ -102,9 +102,8 @@ class TestCircularBufferInit:
     buffer = CircularBuffer(shape, axis, dtype)
 
     assert len(buffer) == 0
-    assert buffer.max_size == shape[axis]
     assert buffer.data.shape == shape
-    assert buffer.data.dtype == dtype
+    assert buffer.dtype == dtype
 
 
 class TestCircularBufferPut:
