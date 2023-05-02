@@ -6,7 +6,7 @@ GROWTH_MULTIPLIER = 1.1
 class CircularBuffer:
   '''Circular buffer implemented using NumPy.'''
 
-  def __init__(self, shape: tuple, index_axis, dtype: np.dtype):
+  def __init__(self, shape: tuple = (8,), index_axis: int = 0, dtype: np.dtype = np.float64):
     '''
     Initializes the circular buffer.
 
@@ -18,6 +18,10 @@ class CircularBuffer:
     self.data = np.zeros(shape, dtype=dtype)
     self._axis = index_axis
     self._head = self._tail = self._size = 0
+    try:
+      shape[index_axis]
+    except IndexError as exc:
+      raise ValueError(f'Wrong index axis! {index_axis=}, {shape=}.') from exc
 
   def __repr__(self) -> str:
     return np.concatenate(self._get(self._size), self._axis).__repr__()
@@ -33,6 +37,14 @@ class CircularBuffer:
     return self._size
 
   @property
+  def index_axis(self) -> int:
+    '''
+    Returns:
+      int: The axis used to index elements.
+    '''
+    return self._axis
+
+  @property
   def max_size(self) -> int:
     '''
     Returns:
@@ -40,20 +52,22 @@ class CircularBuffer:
     '''
     return self.data.shape[self._axis]
 
+  def get_shape_for_data(self, elements_num: int) -> tuple:
+    '''
+    Returns:
+      tuple: Shape for data with the number of elements equal to `elements_num`
+    '''
+    shape = list(self.data.shape)
+    shape[self.index_axis] = elements_num
+    return tuple(shape)
+
   def put(self, data: np.ndarray) -> None:
     '''
     Appends the given data into the buffer.
 
     Args:
       data (np.ndarray): The data to be appended into the buffer.
-
-    Raises:
-      ValueError: If the data has an incompatible shape or data type.
     '''
-    if (data.dtype != self.data.dtype or data.shape[:self._axis] != self.data.shape[:self._axis] or
-        data.shape[self._axis + 1:] != self.data.shape[self._axis + 1:]):
-      raise ValueError('Incompatible data!')
-
     insert_size = data.shape[self._axis]
     resulting_size = self._size + insert_size
     if resulting_size > self.max_size:
@@ -92,7 +106,8 @@ class CircularBuffer:
       ValueError: When attempting to remove more elements than the buffer contains.
     '''
     data = np.concatenate(self._get(pop_size), self._axis)
-    self._head = (self._head + pop_size) % self.max_size
+    # max below prevents 0 % 0 when pop_size == 0 and max_size == 0 and does nothing for other cases
+    self._head = (self._head + pop_size) % max(1, self.max_size)
     self._size -= pop_size
     return data
 
@@ -118,7 +133,7 @@ class CircularBuffer:
       ValueError: When the `count` is greater than the number of elements in the buffer.
     '''
     if count > self._size:
-      raise ValueError('Tried to access too many items')
+      raise ValueError('Tried to access more elements than are in the buffer')
 
     idx_beg = self._head
     idx_end = min(self.max_size, idx_beg + count)
