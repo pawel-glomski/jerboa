@@ -52,6 +52,14 @@ class CircularBuffer:
     '''
     return self.data.shape[self._axis]
 
+  @property
+  def dtype(self) -> np.dtype:
+    '''
+    Returns:
+      int: The type of the data.
+    '''
+    return self.data.dtype
+
   def get_shape_for_data(self, elements_num: int) -> tuple:
     '''
     Returns:
@@ -173,7 +181,7 @@ class CircularBuffer:
 
     new_shape = list(self.data.shape)
     new_shape[self._axis] = new_max_size
-    self.data = np.zeros(new_shape, dtype=self.data.dtype)
+    self.data = np.zeros(new_shape, dtype=self.dtype)
 
     write_indices = [slice(None) for _ in range(self.data.ndim)]
 
