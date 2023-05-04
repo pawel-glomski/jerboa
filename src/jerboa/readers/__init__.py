@@ -1,2 +1,2 @@
 from .audio import AudioReader, StreamInfo, read_entire_audio
-from .subtitles import read_subtitles
+from .transcript import read_subtitles

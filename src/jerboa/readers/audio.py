@@ -8,7 +8,7 @@ from logging import Logger
 from pathlib import Path
 from enum import Enum, auto
 
-from speechless.utils.logging import NULL_LOGGER
+from jerboa.utils.logger import NULL_LOGGER
 
 
 class StreamInfo(Enum):
