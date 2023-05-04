@@ -7,7 +7,7 @@ SUPPORTED_LANGUAGES = ['en']
 
 def download_spacy(_: str):
   import spacy  # pylint: disable=import-outside-toplevel
-  from speechless.processing.tokenization import SPACY_MODEL  # pylint: disable=import-outside-toplevel
+  from jerboa.processing.tokenization import SPACY_MODEL  # pylint: disable=import-outside-toplevel
   spacy.cli.download(SPACY_MODEL)
 
 
