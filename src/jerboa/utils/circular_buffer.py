@@ -69,6 +69,40 @@ class CircularBuffer:
     shape[self.index_axis] = elements_num
     return tuple(shape)
 
+  def resize(self, new_max_size: int):
+    '''
+    Resizes the underyling buffer to a new size.
+
+    Args:
+      new_max_size (int): The new maximum size for the buffer.
+
+    Raises:
+      ValueError: If the new buffer won't be able to hold current number of elements.
+    '''
+    if new_max_size < self._size:
+      raise ValueError('New size cannot fit current contents!')
+    if new_max_size == self.max_size:
+      return
+
+    data_part1, data_part2 = self._get(self._size)
+    data1_size, data2_size = data_part1.shape[self._axis], data_part2.shape[self._axis]
+
+    self._head = 0
+    self._tail = data1_size + data2_size
+    self._size = data1_size + data2_size
+
+    new_shape = list(self.data.shape)
+    new_shape[self._axis] = new_max_size
+    self.data = np.zeros(new_shape, dtype=self.dtype)
+
+    write_indices = [slice(None) for _ in range(self.data.ndim)]
+
+    write_indices[self._axis] = slice(data1_size)
+    self.data[tuple(write_indices)] = data_part1
+
+    write_indices[self._axis] = slice(data1_size, data1_size + data2_size)
+    self.data[tuple(write_indices)] = data_part2
+
   def put(self, data: np.ndarray) -> None:
     '''
     Appends the given data into the buffer.
@@ -157,36 +191,6 @@ class CircularBuffer:
 
     return (part1, part2)
 
-  def resize(self, new_max_size: int):
-    '''
-    Resizes the underyling buffer to a new size.
-
-    Args:
-      new_max_size (int): The new maximum size for the buffer.
-
-    Raises:
-      ValueError: If the new buffer won't be able to hold current number of elements.
-    '''
-    if new_max_size < self._size:
-      raise ValueError('New size cannot fit current contents!')
-    if new_max_size == self.max_size:
-      return
-
-    data_part1, data_part2 = self._get(self._size)
-    data1_size, data2_size = data_part1.shape[self._axis], data_part2.shape[self._axis]
-
-    self._head = 0
-    self._tail = data1_size + data2_size
-    self._size = data1_size + data2_size
-
-    new_shape = list(self.data.shape)
-    new_shape[self._axis] = new_max_size
-    self.data = np.zeros(new_shape, dtype=self.dtype)
-
-    write_indices = [slice(None) for _ in range(self.data.ndim)]
-
-    write_indices[self._axis] = slice(data1_size)
-    self.data[tuple(write_indices)] = data_part1
-
-    write_indices[self._axis] = slice(data1_size, data1_size + data2_size)
-    self.data[tuple(write_indices)] = data_part2
+  def clear(self) -> None:
+    """Discards all the elements."""
+    self._head = self._tail = self._size = 0

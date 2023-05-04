@@ -2,7 +2,7 @@ import pytest
 
 import math
 import numpy as np
-from copy import copy
+from typing import Callable
 
 from jerboa.utils.circular_buffer import CircularBuffer
 
@@ -25,6 +25,9 @@ for __buffer_args in VALID_BUFFER_CASES:
   VALID_BUFFER_CASES_BY_NDIM.setdefault(len(__buffer_args[0]), []).append(__buffer_args)
 
 VALID_BUFFER_CASES_MINIMAL = [cases[-1] for cases in VALID_BUFFER_CASES_BY_NDIM.values()]
+
+BufferArgs = tuple[tuple, int, np.dtype]  # shape, axis, dtype
+BufferCreator = Callable[[tuple, int, np.dtype], CircularBuffer]
 
 
 def create_elements(buffer: CircularBuffer, element_beg: int, element_end: int):
@@ -76,6 +79,9 @@ def create_full_buffer(shape: tuple, axis: int, dtype: np.dtype) -> CircularBuff
 
     return buffer
   pytest.skip("Not applicable test case")
+
+
+ALL_BUFFER_CREATORS = [create_empty_buffer, create_partially_filled_buffer, create_full_buffer]
 
 
 class TestCircularBufferInit:
@@ -153,7 +159,7 @@ class TestCircularBufferPut:
     assert buffer.max_size >= len(buffer)
 
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
-  def test_put_should_add_data_to_buffer_when_buffer_is_full(self, buffer_args):
+  def test_put_should_add_data_to_buffer_when_buffer_is_full(self, buffer_args: BufferArgs):
     buffer = create_full_buffer(*buffer_args)
     buffer_size_before = len(buffer)
     elements_to_put_num = 5
@@ -173,7 +179,7 @@ class TestCircularBufferResize:
   ])
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES_MINIMAL)
   def test_resize_should_raise_value_error_when_new_max_is_less_than_size(
-      self, elements_num: int, new_max_size: int, buffer_args):
+      self, elements_num: int, new_max_size: int, buffer_args: BufferArgs):
     buffer = create_filled_buffer(*buffer_args, elements_num=elements_num)
 
     with pytest.raises(ValueError):
@@ -188,7 +194,7 @@ class TestCircularBufferResize:
   ])
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES_MINIMAL)
   def test_resize_should_change_buffer_max_size_when_new_max_size_is_bigger_than_size(
-      self, elements_num: int, new_max_size: int, buffer_args):
+      self, elements_num: int, new_max_size: int, buffer_args: BufferArgs):
     buffer = create_filled_buffer(*buffer_args, elements_num=elements_num)
     buffer_len_before = len(buffer)
 
@@ -200,29 +206,28 @@ class TestCircularBufferResize:
 
 class TestCircularBufferPop:
 
-  @pytest.mark.parametrize(
-      'buffer_create_fn',
-      [create_empty_buffer, create_partially_filled_buffer, create_empty_buffer])
+  @pytest.mark.parametrize('buffer_creator', ALL_BUFFER_CREATORS)
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
   def test_pop_should_raise_value_error_when_pop_size_is_greater_than_buffer_size(
-      self, buffer_create_fn, buffer_args):
-    buffer: CircularBuffer = buffer_create_fn(*buffer_args)
+      self, buffer_creator: BufferCreator, buffer_args: BufferArgs):
+    buffer = buffer_creator(*buffer_args)
     with pytest.raises(ValueError):
       buffer.pop(len(buffer) + 1)
 
-  @pytest.mark.parametrize(
-      'buffer_create_fn',
-      [create_empty_buffer, create_partially_filled_buffer, create_empty_buffer])
+  @pytest.mark.parametrize('buffer_creator', ALL_BUFFER_CREATORS)
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
   def test_pop_should_remove_nothing_and_return_empty_array_when_pop_size_is_zero(
-      self, buffer_create_fn, buffer_args):
-    buffer: CircularBuffer = buffer_create_fn(*buffer_args)
+      self, buffer_creator: BufferCreator, buffer_args: BufferArgs):
+    buffer = buffer_creator(*buffer_args)
     buffer_size_before = len(buffer)
-    assert buffer.pop(0).shape[buffer.index_axis] == 0
+
+    removed_element = buffer.pop(0)
+
+    assert removed_element.shape[buffer.index_axis] == 0
     assert len(buffer) == buffer_size_before
 
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
-  def test_pop_should_remove_and_return_requested_elements(self, buffer_args):
+  def test_pop_should_remove_and_return_requested_elements(self, buffer_args: BufferArgs):
     buffer = create_filled_buffer(*buffer_args, elements_num=8)
 
     expected_data1 = create_elements(buffer, 0, 2)  # 0, 1
@@ -232,3 +237,15 @@ class TestCircularBufferPop:
     assert np.array_equal(buffer.pop(2), expected_data1)
     assert np.array_equal(buffer.pop(4), expected_data2)
     assert np.array_equal(buffer.pop(2), expected_data3)
+
+  @pytest.mark.parametrize('buffer_creator', ALL_BUFFER_CREATORS)
+  @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
+  def test_clear_should_remove_all_elements(self, buffer_creator: BufferCreator,
+                                            buffer_args: BufferArgs):
+    buffer = buffer_creator(*buffer_args)
+    buffer_max_size_before = buffer.max_size
+
+    buffer.clear()
+
+    assert len(buffer) == 0
+    assert buffer.max_size == buffer_max_size_before
