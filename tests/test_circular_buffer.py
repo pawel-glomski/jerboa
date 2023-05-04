@@ -31,6 +31,10 @@ BufferCreator = Callable[[tuple, int, np.dtype], CircularBuffer]
 
 
 def create_elements(buffer: CircularBuffer, element_beg: int, element_end: int):
+  if element_beg < 0:
+    element_beg += len(buffer)
+    element_end += len(buffer)
+
   element_shape = buffer.get_shape_for_data(min(1, element_end - element_beg))
   element_size = math.prod(element_shape)
 
@@ -249,3 +253,26 @@ class TestCircularBufferPop:
 
     assert len(buffer) == 0
     assert buffer.max_size == buffer_max_size_before
+
+  @pytest.mark.parametrize('buffer_creator', ALL_BUFFER_CREATORS)
+  @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES_MINIMAL)
+  @pytest.mark.parametrize('idx_offset', [-1024, 0, 1, 10, 100])
+  def test_getitem_should_raise_index_error_when_index_out_of_range(self,
+                                                                    buffer_creator: BufferCreator,
+                                                                    buffer_args: BufferArgs,
+                                                                    idx_offset: int):
+    buffer = buffer_creator(*buffer_args)
+
+    with pytest.raises(IndexError):
+      _ = buffer[len(buffer) + idx_offset]
+
+  @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES_MINIMAL)
+  @pytest.mark.parametrize('idx', [-1, 0, 1, 8, 15])
+  def test_getitem_should_return_correct_element_when_valid_index(self, buffer_args: BufferArgs,
+                                                                  idx: int):
+    buffer = create_empty_buffer(*buffer_args)
+    buffer.put(create_elements(buffer, 0, 16))
+
+    expected_element = create_elements(buffer, idx, idx + 1)
+
+    assert np.array_equal(buffer[idx], expected_element)
