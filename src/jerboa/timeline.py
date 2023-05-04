@@ -1,6 +1,7 @@
 import math
 from bisect import bisect_left
 from typing import Generator
+from dataclasses import dataclass
 
 from jerboa.utils import KeyWrapper
 
@@ -93,6 +94,13 @@ class TMSection:
     return TMSection(beg, end, self.modifier)
 
 
+@dataclass
+class RangeMappingResult:
+  beg_timestamp: float  # The mapped beginning timestamp of the range.
+  end_timestamp: float  # The mapped ending timestamp of the range.
+  sections: list[TMSection]  # A list of sections that overlapped this time range.
+
+
 class FragmentedTimeline:
   '''Represents a timeline that is made up of sections, where each section can have different
   duration modifier (different playback speed).
@@ -112,7 +120,7 @@ class FragmentedTimeline:
     self._time_scope = -math.inf
 
     for section in init_sections:
-      self.append(section)
+      self.append_section(section)
 
   def __len__(self) -> int:
     return len(self._sections)
@@ -168,11 +176,10 @@ class FragmentedTimeline:
                                             f'but tried to append: {section}')
 
     self.time_scope = section.end
-    section_duration = section.duration()
+    section_duration = section.duration
     if section_duration > 0:
-      if self._sections and section.is_direct_continuation_of(self._sections[-1]):
+      if self._sections and self._sections[-1].try_extending_with(section):
         self._resulting_timepoints[-1] += section_duration
-        self._sections[-1].end = section.end
       else:
         self._sections.append(section)
         last_timepoint = self._resulting_timepoints[-1] if self._resulting_timepoints else 0.0
@@ -204,19 +211,17 @@ class FragmentedTimeline:
     '''Maps a time range to the resulting timeline.
 
     This method maps a time range specified by its beginning and ending timestamps in the source
-    timeline to the corresponding section(s) in the resulting timeline.
+    timeline to the corresponding range in the resulting timeline.
   
     Args:
       beg (float): The beginning timestamp of the time range to be mapped.
       end (float): The ending timestamp of the time range to be mapped.
 
     Returns:
-      tuple[float, float, float, list[TMSection]]: A tuple of four values:
-        0: The mapped beginning timestamp of the range.
-        1: The mapped ending timestamp of the range.
-        2: The next closest timestamp that can be mapped after the range ends. If such a timestamp \
-           does not exist in the current scope, it returns the current time scope.
-        3: A list of sections that overlapped this time range.
+      tuple[RangeMappingResult, float]: A tuple of 2 values:\n
+        0: (RangeMappingResult) Results of the mapping.\n
+        1: (float) The next closest timestamp that can be mapped after the range ends. If such a
+        timestamp does not exist in the current time scope, it returns the scope itself.
 
     Raises:
       AssertionError: If the beginning timestamp is greater than the ending timestamp, or if the
@@ -239,8 +244,9 @@ class FragmentedTimeline:
 
       while idx < len(self._sections) and end > self._sections[idx].beg:
         involved_sections.append(self._sections[idx].overlap(beg, end))
-        mapped_end += involved_sections[-1].duration()
-      assert all(s.duration() > 0.0 for s in involved_sections)
+        mapped_end += involved_sections[-1].duration
+        idx += 1
+      assert all(s.duration > 0.0 for s in involved_sections)
 
       if end < self._sections[idx - 1].end:
         next_timestamp = end
@@ -249,4 +255,4 @@ class FragmentedTimeline:
       else:
         next_timestamp = self._time_scope
 
-    return (mapped_beg, mapped_end, next_timestamp, involved_sections)
+    return (RangeMappingResult(mapped_beg, mapped_end, involved_sections), next_timestamp)
