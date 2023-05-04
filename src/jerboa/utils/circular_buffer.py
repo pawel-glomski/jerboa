@@ -36,6 +36,27 @@ class CircularBuffer:
     '''
     return self._size
 
+  def __getitem__(self, idx: int) -> np.ndarray:
+    '''Receives a single element at the specified index, without removing it from the buffer.
+    Args:
+      idx (int): Index of the element to receive.
+
+    Returns:
+      np.ndarray: The requested element.
+    '''
+    if idx < 0:
+      idx = len(self) + idx
+    if not (0 <= idx < self._size):
+      raise IndexError(f'Index out of range: {idx=}, {self._size=}')
+
+    idx = (self._head + idx) % self.max_size
+    return self.data[self._index_samples(idx, idx + 1)]
+
+  def _index_samples(self, beg: int, end: int) -> tuple[slice]:
+    indices = [slice(None) for _ in range(self.data.ndim)]
+    indices[self._axis] = slice(beg, end)
+    return tuple(indices)
+
   @property
   def index_axis(self) -> int:
     '''
@@ -120,16 +141,13 @@ class CircularBuffer:
     idx_overflow = insert_size - (idx_end - idx_beg)
     assert idx_overflow <= self._head and (self._tail >= self._head or idx_end <= self._head)
 
-    write_indices = [slice(None) for _ in range(self.data.ndim)]
-    read_indices = [slice(None) for _ in range(data.ndim)]
+    write_indices = self._index_samples(idx_beg, idx_end)  # idx_beg:idx_end
+    read_indices = self._index_samples(None, idx_end - idx_beg)  # :idx_end - idx_beg
+    self.data[write_indices] = data[read_indices]
 
-    write_indices[self._axis] = slice(idx_beg, idx_end)  # idx_beg:idx_end
-    read_indices[self._axis] = slice(idx_end - idx_beg)  # :idx_end - idx_beg
-    self.data[tuple(write_indices)] = data[tuple(read_indices)]
-
-    write_indices[self._axis] = slice(idx_overflow)  # :idx_overflow
-    read_indices[self._axis] = slice(idx_end - idx_beg, None)  # idx_end - idx_beg:
-    self.data[tuple(write_indices)] = data[tuple(read_indices)]
+    write_indices = self._index_samples(None, idx_overflow)  # :idx_overflow
+    read_indices = self._index_samples(idx_end - idx_beg, None)  # idx_end - idx_beg:
+    self.data[write_indices] = data[read_indices]
 
     self._tail = (self._tail + insert_size) % self.max_size
     self._size += insert_size
@@ -192,5 +210,5 @@ class CircularBuffer:
     return (part1, part2)
 
   def clear(self) -> None:
-    """Discards all the elements."""
+    '''Discards all the elements.'''
     self._head = self._tail = self._size = 0
