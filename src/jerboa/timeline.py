@@ -96,9 +96,9 @@ class TMSection:
 
 @dataclass
 class RangeMappingResult:
-  beg_timestamp: float  # The mapped beginning timestamp of the range.
-  end_timestamp: float  # The mapped ending timestamp of the range.
-  sections: list[TMSection]  # A list of sections that overlapped this time range.
+  beg: float  # The mapped beginning of the range.
+  end: float  # The mapped ending of the range.
+  sections: list[TMSection]  # A list of sections that overlapped the time range.
 
 
 class FragmentedTimeline:
@@ -126,7 +126,7 @@ class FragmentedTimeline:
     return len(self._sections)
 
   def __iter__(self) -> Generator[tuple[TMSection, float], None, None]:
-    for idx in range(self):
+    for idx in range(len(self)):
       yield self[idx]
 
   def __getitem__(self, idx: int) -> tuple[float, float]:
@@ -153,8 +153,8 @@ class FragmentedTimeline:
     Raises:
       AssertionError: If `new_value` does not extend the current scope.
     '''
-    assert new_value > self._time_scope, ('Scope must always increase: '
-                                          f'current = {self._time_scope}, new = {new_value}')
+    if new_value < self._time_scope:
+      raise ValueError(f'Scope cannot decrease: {self._time_scope=}, {new_value=}')
     self._time_scope = new_value
 
   def append_section(self, section: TMSection) -> None:
@@ -168,12 +168,10 @@ class FragmentedTimeline:
       AssertionError: If the new section precedes existing sections or it overlaps the current
       time scope (which it should always extend).
     '''
-    assert not self._sections or section.beg >= self._sections[-1].end, (
-        'The section cannot precede existing sections. '
-        f'The last section is: {self._sections[-1]}, but tried to append: {section}.')
-    assert section.beg >= self.time_scope, ('Cannot alter the "committed" time scope. '
-                                            f'Current scope is: {self.time_scope}, '
-                                            f'but tried to append: {section}')
+    if self._sections and section.beg < self._sections[-1].end:
+      raise ValueError(f'Section ({section}) precedes existing sections ({self._sections[-1]=})')
+    if section.beg < self.time_scope:
+      raise ValueError(f'Section ({section}) precedes the time scope ({self.time_scope})')
 
     self.time_scope = section.end
     section_duration = section.duration
@@ -207,7 +205,7 @@ class FragmentedTimeline:
     return None
 
   # TODO(OPT): optimize for frequent sequential checks
-  def map_time_range(self, beg: float, end: float) -> tuple[float, float, float, list[TMSection]]:
+  def map_time_range(self, beg: float, end: float) -> tuple[RangeMappingResult, float]:
     '''Maps a time range to the resulting timeline.
 
     This method maps a time range specified by its beginning and ending timestamps in the source
@@ -227,9 +225,10 @@ class FragmentedTimeline:
       AssertionError: If the beginning timestamp is greater than the ending timestamp, or if the
       end of the range is beyond the timeline's scope.
     '''
-    assert beg <= end, f'The beginning must precede the end ({beg}, {end}).'
-    assert end <= self.time_scope, (
-        f'Range out of scope: ({beg}, {end}) while the scope is: {self.time_scope}.')
+    if beg > end:
+      raise ValueError(f'The beginning must precede the end ({beg}, {end}).')
+    if end > self.time_scope:
+      raise ValueError(f'Range out of scope: ({beg}, {end}), {self.time_scope=}.')
 
     involved_sections = list[TMSection]()
     idx = bisect_left(KeyWrapper(self._sections, lambda s: s.end), beg)
@@ -238,8 +237,8 @@ class FragmentedTimeline:
       mapped_end = mapped_beg
       next_timestamp = self.time_scope
     else:
-      mapped_beg_offset = self._sections[idx].modifier * max(0, self._sections[idx].beg - beg)
-      mapped_beg = self._resulting_timepoints[idx] + mapped_beg_offset
+      mapped_beg = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
+      mapped_beg += self._sections[idx].modifier * max(0, beg - self._sections[idx].beg)
       mapped_end = mapped_beg
 
       while idx < len(self._sections) and end > self._sections[idx].beg:
