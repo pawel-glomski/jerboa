@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from jerboa.timeline import TMSection, FragmentedTimeline
+from jerboa.timeline import TMSection, FragmentedTimeline, RangeMappingResult
 
 
 class TestTMSection:
@@ -125,334 +125,137 @@ class TestTMSection:
     assert result.beg == result.end
 
 
-# class TestFragmentedTimeline:
-#   def test_modified_timeline():
-#     timeline = FragmentedTimeline(TMSection(0, 3, 0.75), TMSection(4, 5, 0.5), TMSection(5, 20, 0.25))
-#     timeline.map_timepoint_to_source(0)
-#     timeline.map_timepoint_to_source(3.5)
-#     timeline.map_time_range(1.5, 5)
+class TestFragmentedTimeline:
 
-#   def test_length_of_empty_set_should_be_zero():
-#     timeline = FragmentedTimeline()
-#     assert len(timeline) == 0
+  def test_init_should_create_empty_timeline_when_no_args(self):
+    tl = FragmentedTimeline()
 
-#   def test_accessing_invalid_range_should_throw():
-#     timeline = FragmentedTimeline()
+    assert len(tl) == 0
 
-#     with pytest.raises(IndexError):
-#       timeline.get(0)
+  def test_init_should_raise_value_error_when_unordered_init_sections(self):
+    with pytest.raises(ValueError):
+      _ = FragmentedTimeline(TMSection(0, 1), TMSection(0, 1, 0.5), TMSection(-1, 4, 2.0))
 
-#   #################################### add ####################################
+  def test_init_should_create_filled_timeline_when_provided_ordered_init_sections(self):
+    tl = FragmentedTimeline(TMSection(0, 1), TMSection(1, 2, 0.5), TMSection(3, 4, 2.0))
 
-#   @pytest.mark.parametrize('beg, end', [(1, 0), (float('nan'), 1), (0, float('nan'))])
-#   def test_adding_invalid_range_to_empty_set_should_throw(beg, end):
-#     timeline = FragmentedTimeline()
+    assert len(tl) == 3
 
-#     with pytest.raises(AssertionError):
-#       timeline.add(beg, end)
-#     assert len(timeline) == 0
+  def test_time_scope_setter_should_raise_value_error_when_new_is_not_greater(self):
+    tl = FragmentedTimeline(TMSection(0, 5))
 
-#   def test_adding_valid_range_to_empty_set_should_succeed():
-#     timeline = FragmentedTimeline((0, 1))
+    with pytest.raises(ValueError):
+      tl.time_scope = 4
 
-#     assert len(timeline) == 1
-#     assert timeline[0] == (0, 1)
+  def test_append_section_should_raise_value_error_when_unordered_section(self):
+    tl = FragmentedTimeline(TMSection(0, 5))
 
-#   @pytest.mark.parametrize('beg, end, expected_idx', [(-2, -1, 0), (2, 3, 1)])
-#   def test_adding_non_overlapping_range_should_add_new_range__one_range(beg, end, expected_idx):
-#     timeline = FragmentedTimeline((0, 1))
+    with pytest.raises(ValueError):
+      tl.append_section(TMSection(4, 6))
 
-#     timeline.add(beg, end)
-#     assert len(timeline) == 2
-#     assert timeline[expected_idx] == (beg, end)
-#     assert timeline[0 if expected_idx == 1 else 1] == (0, 1)
+  def test_append_section_should_raise_value_error_when_section_precedes_scope(self):
+    tl = FragmentedTimeline(TMSection(0, 5))
 
-#   @pytest.mark.parametrize('beg, end, expected_idx', [(-2, -1, 0), (2, 3, 1), (6, 7, 2)])
-#   def test_adding_non_overlapping_range_should_add_new_range__many_ranges(beg, end, expected_idx):
-#     timeline = FragmentedTimeline((0, 1), (4, 5))
+    tl.time_scope = 6
 
-#     timeline.add(beg, end)
-#     assert len(timeline) == 3
-#     assert timeline[expected_idx] == (beg, end)
-#     assert timeline[0 if expected_idx > 0 else 1] == (0, 1)
-#     assert timeline[2 if expected_idx < 2 else 1] == (4, 5)
+    with pytest.raises(ValueError):
+      tl.append_section(TMSection(5, 6))
 
-#   @pytest.mark.parametrize('beg, end, expected_range', [
-#       [-1, 2, (-1, 2)],
-#       [-1, 1, (-1, 1)],
-#       [0, 2, (0, 2)],
-#       [0.5, 2, (0, 2)],
-#       [1, 2, (0, 2)],
-#       [0, 1, (0, 1)],
-#       [0.25, 0.75, (0, 1)],
-#       [0.5, 0.5, (0, 1)],
-#       [0.0, 0.0, (0, 1)],
-#       [1.0, 1.0, (0, 1)],
-#   ])
-#   def test_adding_overlapping_range_should_extend_existing_range__one_range(
-#       beg, end, expected_range):
-#     timeline = FragmentedTimeline((0, 1))
+  def test_append_section_should_append_when_ordered(self):
+    tl = FragmentedTimeline(TMSection(0, 1))
 
-#     timeline.add(beg, end)
-#     assert len(timeline) == 1
-#     assert timeline[0] == expected_range
+    tl.append_section(TMSection(2, 3, 0.5))
 
-#   @pytest.mark.parametrize('beg, end, expected_ranges', [
-#       [-1, 4, [(-1, 4)]],
-#       [-1, 3, [(-1, 3)]],
-#       [0, 6, [(0, 6)]],
-#       [0.5, 2.5, [(0, 3)]],
-#       [0, 2, [(0, 3)]],
-#       [1, 2, [(0, 3)]],
-#       [1, 3, [(0, 3)]],
-#       [0.5, 1.5, [(0, 1.5), (2, 3)]],
-#       [1, 1.5, [(0, 1.5), (2, 3)]],
-#       [1.5, 2, [(0, 1), (1.5, 3)]],
-#       [1.5, 2.5, [(0, 1), (1.5, 3)]],
-#       [0, 0, [(0, 1), (2, 3)]],
-#       [0.5, 0.5, [(0, 1), (2, 3)]],
-#       [1, 1, [(0, 1), (2, 3)]],
-#       [3, 3, [(0, 1), (2, 3)]],
-#   ])
-#   def test_adding_overlapping_range_should_extend_existing_ranges__many_ranges(
-#       beg, end, expected_ranges):
-#     timeline = FragmentedTimeline((0, 1), (2, 3))
+    assert [s for s in tl] == [(TMSection(0, 1), 1.0), (TMSection(2, 3, 0.5), 1.5)]
+    assert tl.time_scope == 3
 
-#     timeline.add(beg, end)
-#     assert len(timeline) == len(expected_ranges)
-#     for observed_range, expected_range in zip(timeline, expected_ranges):
-#       assert observed_range == expected_range
+  def test_append_section_should_extend_when_direct_continuation(self):
+    tl = FragmentedTimeline(TMSection(0, 1, 0.5))
 
-#   #################################### append ####################################
+    tl.append_section(TMSection(1, 2, 0.5))
 
-#   @pytest.mark.parametrize('beg, end', [(1, 0), (float('nan'), 1), (0, float('nan'))])
-#   def test_append_invalid_range_to_empty_set_should_throw(beg, end):
-#     timeline = FragmentedTimeline()
+    assert [s for s in tl] == [(TMSection(0, 2, 0.5), 1.0)]
+    assert tl.time_scope == 2
 
-#     with pytest.raises(AssertionError):
-#       timeline.append(beg, end)
-#     assert len(timeline) == 0
+  def test_append_section_should_not_append_when_modifier_is_0(self):
+    tl = FragmentedTimeline(TMSection(0, 1))
 
-#   def test_append_valid_range_to_empty_set_should_succeed():
-#     timeline = FragmentedTimeline()
+    tl.append_section(TMSection(2, 3, 0))
 
-#     timeline.append(beg=0, end=1)
-#     assert len(timeline) == 1
-#     assert timeline[0] == (0, 1)
+    assert [s for s in tl] == [(TMSection(0, 1), 1.0)]
+    assert tl.time_scope == 3
 
-#   def test_append_non_overlapping_range_should_add_new_range__one_range():
-#     timeline = FragmentedTimeline((0, 1))
+  def test_map_timepoint_to_source_should_return_none_when_empty_timeline(self):
+    tl = FragmentedTimeline()
 
-#     timeline.append(beg=2, end=3)
-#     assert len(timeline) == 2
-#     assert timeline[0] == (0, 1)
-#     assert timeline[1] == (2, 3)
+    assert tl.map_timepoint_to_source(0.0) is None
 
-#   def test_append_non_overlapping_range_should_add_new_range__many_ranges():
-#     timeline = FragmentedTimeline((0, 1), (2, 3))
+  def test_map_timepoint_to_source_should_return_none_when_timepoint_out_of_scope(self):
+    tl = FragmentedTimeline(TMSection(0, 1, 0.5))
 
-#     timeline.append(beg=4, end=5)
-#     assert len(timeline) == 3
-#     assert timeline[0] == (0, 1)
-#     assert timeline[1] == (2, 3)
-#     assert timeline[2] == (4, 5)
+    assert tl.map_timepoint_to_source(2) is None
 
-#   @pytest.mark.parametrize('beg, end', [
-#       (-2, -1),
-#       (-2, 2),
-#       (-1, 0),
-#       (-1, 0.5),
-#       (-1, 1),
-#       (-1, 2),
-#   ])
-#   def test_append_unordered_range_should_throw__one_range(beg, end):
-#     timeline = FragmentedTimeline((0, 1))
+  @pytest.mark.parametrize('dst_timepoint, expected_src_timepoint', [
+      (0, 0),
+      (1, 2),
+      (2, 2.5),
+      (3, 3),
+  ])
+  def test_map_timepoint_to_source_should_return_correct_value(self, dst_timepoint: float,
+                                                               expected_src_timepoint: float):
+    tl = FragmentedTimeline(TMSection(0, 2, 0.5), TMSection(2, 3, 2.0))
 
-#     with pytest.raises(AssertionError):
-#       timeline.append(beg, end)
+    assert tl.map_timepoint_to_source(dst_timepoint) == expected_src_timepoint
 
-#   @pytest.mark.parametrize('beg', [-2, -1, 0, 0.25, 1, 1.25])
-#   @pytest.mark.parametrize('end', [-1, 0, 0.5, 1, 1.5, 2, 3, 4])
-#   def test_append_unordered_range_should_throw__many_ranges(beg, end):
-#     if beg < end:
-#       timeline = FragmentedTimeline((0, 1), (2, 3))
+  def test_map_timepoint_to_source_should_return_end_of_last_section_when_scope_is_inf_and_timepoint_is_out_of_scope(
+      self):
+    tl = FragmentedTimeline(TMSection(0, 1, 0.5))
+    tl.time_scope = math.inf
 
-#       with pytest.raises(AssertionError):
-#         timeline.append(beg, end)
+    assert tl.map_timepoint_to_source(0.5) == 1
+    assert tl.map_timepoint_to_source(2) == 1
 
-#   @pytest.mark.parametrize('beg, end, expected_range', [
-#       [0, 1, (0, 1)],
-#       [0, 2, (0, 2)],
-#       [0.5, 2, (0, 2)],
-#       [1, 2, (0, 2)],
-#   ])
-#   def test_append_overlapping_range_should_extend_existing_range__one_range(
-#       beg, end, expected_range):
-#     timeline = FragmentedTimeline((0, 1))
+  def test_map_time_range_should_raise_value_error_when_invalid_range(self):
+    with pytest.raises(ValueError):
+      FragmentedTimeline().map_time_range(1, 0)
 
-#     timeline.add(beg, end)
-#     assert len(timeline) == 1
-#     assert timeline[0] == expected_range
+  def test_map_time_range_should_raise_value_error_when_out_of_scope(self):
+    with pytest.raises(ValueError):
+      FragmentedTimeline(TMSection(0, 1)).map_time_range(0, 2)
 
-#   @pytest.mark.parametrize('beg, end, expected_ranges', [
-#       [2, 3, [(0, 1), (2, 3)]],
-#       [2, 4, [(0, 1), (2, 4)]],
-#       [2.5, 4, [(0, 1), (2, 4)]],
-#       [3, 4, [(0, 1), (2, 4)]],
-#   ])
-#   def test_append_overlapping_range_should_extend_existing_ranges__many_ranges(
-#       beg, end, expected_ranges):
-#     timeline = FragmentedTimeline((0, 1), (2, 3))
+  def test_map_time_range_should_return_empty_results_when_maps_to_nothing(self):
+    tl = FragmentedTimeline(TMSection(1, 2))
 
-#     timeline.add(beg, end)
-#     assert len(timeline) == len(expected_ranges)
-#     for observed_range, expected_range in zip(timeline, expected_ranges):
-#       assert observed_range == expected_range
+    mapping_results, next_timestamp = tl.map_time_range(0, 1)
 
-#   #################################### check_overlap ####################################
+    assert mapping_results.beg == mapping_results.end
+    assert mapping_results.sections == []
+    assert next_timestamp == 1
 
-#   @pytest.mark.parametrize('beg, end', [(float('nan'), 0), (0, float('nan')),
-#                                         (float('nan'), float('nan'))])
-#   def test_check_overlap_with_invalid_values_should_throw(beg, end):
-#     timeline = FragmentedTimeline()
-#     with pytest.raises(AssertionError):
-#       timeline.check_overlap(beg, end)
+  @pytest.mark.parametrize('range_to_map, expected_mapping_results, expected_next_timestamp', [
+      (
+          (0, 2),
+          RangeMappingResult(0, 0.5, [TMSection(1, 2, 0.5)]),
+          2,
+      ),
+      (
+          (0, 5),
+          RangeMappingResult(0, 2, [TMSection(1, 3, 0.5), TMSection(4, 5)]),
+          5,
+      ),
+      (
+          (2, 7),
+          RangeMappingResult(0.5, 3, [TMSection(2, 3, 0.5), TMSection(4, 6)]),
+          math.inf,
+      ),
+  ])
+  def test_map_time_range_should_return_correct_results_when_valid_ranges(
+      self, range_to_map: tuple[float, float], expected_mapping_results: RangeMappingResult,
+      expected_next_timestamp: float):
+    tl = FragmentedTimeline(TMSection(1, 3, 0.5), TMSection(4, 6))
+    tl.time_scope = math.inf  # mark the timeline as complete
 
-#   def test_check_overlap_with_empty_set_should_return_false():
-#     timeline = FragmentedTimeline()
-#     assert not timeline.check_overlap(beg=0, end=1)
+    mapping_results, next_timestamp = tl.map_time_range(*range_to_map)
 
-#   @pytest.mark.parametrize('beg, end', [(-1, 0), (1, 2), (3, 6)])
-#   def test_check_overlap_with_non_overlapping_range_should_return_false(beg, end):
-#     timeline = FragmentedTimeline((0, 1))
-
-#     assert not timeline.check_overlap(beg, end)
-
-#   @pytest.mark.parametrize('beg, end, expected_result', [
-#       (-1, 2, True),
-#       (0, 0.5, True),
-#       (0.25, 0.75, True),
-#       (0.5, 0.5, True),
-#       (0.0, 0.0, False),
-#       (1, 1, False),
-#       (-1, 0, False),
-#       (1, 2, False),
-#       (3, 6, False),
-#   ])
-#   def test_check_overlap_with_overlapping_range__one_range(beg, end, expected_result):
-#     timeline = FragmentedTimeline((0, 1))
-
-#     assert timeline.check_overlap(beg, end) == expected_result
-
-#   @pytest.mark.parametrize('beg, end, expected_result', [
-#       (-1, 2, True),
-#       (0, 0.5, True),
-#       (0.25, 0.75, True),
-#       (4, 5, True),
-#       (4.5, 5, True),
-#       (-2, -1, False),
-#       (-1, 0, False),
-#       (2, 3, False),
-#       (6, 7, False),
-#   ])
-#   def test_check_overlap_with_overlapping_range__many_ranges(beg, end, expected_result):
-#     timeline = FragmentedTimeline((0, 1), (4, 5))
-
-#     assert timeline.check_overlap(beg, end) == expected_result
-
-#   #################################### sub ####################################
-
-#   @pytest.mark.parametrize('beg, end', [(1, 0), (float('nan'), 1), (0, float('nan'))])
-#   def test_subtracting_invalid_range_to_empty_set_should_throw(beg, end):
-#     timeline = FragmentedTimeline()
-
-#     with pytest.raises(AssertionError):
-#       timeline.sub(beg, end)
-#     assert len(timeline) == 0
-
-#   def test_subtracting_valid_range_from_empty_set_should_do_nothing():
-#     timeline = FragmentedTimeline()
-
-#     timeline.sub(beg=0, end=1)
-#     assert len(timeline) == 0
-
-#   @pytest.mark.parametrize(
-#       'beg, end, expected_ranges',
-#       [
-#           # overlapping
-#           [-1, 2, []],
-#           [-1, 1, []],
-#           [0, 2, []],
-#           [0, 1, []],
-#           [-1, 0.5, [(0.5, 1)]],
-#           [0.5, 2, [(0, 0.5)]],
-#           [0.25, 0.75, [(0, 0.25), (0.75, 1)]],
-
-#           # non-overlapping
-#           [-2, -1, [(0, 1)]],
-#           [-1, 0, [(0, 1)]],
-#           [1, 2, [(0, 1)]],
-#           [2, 3, [(0, 1)]],
-
-#           # points
-#           [0, 0, [(0, 1)]],
-#           [0.5, 0.5, [(0, 1)]],
-#           [1, 1, [(0, 1)]],
-#       ])
-#   def test_sub__one_range(beg, end, expected_ranges):
-#     timeline = FragmentedTimeline((0, 1))
-
-#     timeline.sub(beg, end)
-#     assert len(timeline) == len(expected_ranges)
-#     for observed_range, expected_range in zip(timeline, expected_ranges):
-#       assert observed_range == expected_range
-
-#   @pytest.mark.parametrize(
-#       'beg, end, expected_ranges',
-#       [
-#           # overlapping
-#           [-1, 4, []],
-#           [-1, 3, []],
-#           [0, 6, []],
-#           [0.5, 2.5, [(0, 0.5), (2.5, 3)]],
-#           [0, 2, [(2, 3)]],
-#           [1, 3, [(0, 1)]],
-#           [0.5, 1.5, [(0, 0.5), (2, 3)]],
-#           [1.5, 2.5, [(0, 1), (2.5, 3)]],
-
-#           # non-overlapping
-#           [-2, -1, [(0, 1), (2, 3)]],
-#           [-1, 0, [(0, 1), (2, 3)]],
-#           [1, 2, [(0, 1), (2, 3)]],
-#           [1.25, 1.75, [(0, 1), (2, 3)]],
-#           [3, 4, [(0, 1), (2, 3)]],
-#           [4, 5, [(0, 1), (2, 3)]],
-
-#           # points
-#           [0, 0, [(0, 1), (2, 3)]],
-#           [0.5, 0.5, [(0, 1), (2, 3)]],
-#           [1, 1, [(0, 1), (2, 3)]],
-#           [3, 3, [(0, 1), (2, 3)]],
-#       ])
-#   def test_sub__many_ranges(beg, end, expected_ranges):
-#     timeline = FragmentedTimeline((0, 1), (2, 3))
-
-#     timeline.sub(beg, end)
-#     assert len(timeline) == len(expected_ranges)
-#     for observed_range, expected_range in zip(timeline, expected_ranges):
-#       assert observed_range == expected_range
-
-#   @pytest.mark.parametrize('init_ranges, min_val, max_val, expected_ranges', [
-#       [[(0, 1)], -math.inf, math.inf, [(-math.inf, 0), (1, math.inf)]],
-#       [[(0, 1)], 0, math.inf, [(1, math.inf)]],
-#       [[(0, 1), (2, 3)], 0, math.inf, [(1, 2), (3, math.inf)]],
-#       [[(0, 1), (2, 3)], 0, math.inf, [(1, 2), (3, math.inf)]],
-#       [[(0, 1), (2, math.inf)], 0, math.inf, [(1, 2)]],
-#   ])
-#   def test_complement(init_ranges, min_val, max_val, expected_ranges):
-#     timeline = FragmentedTimeline(*init_ranges)
-
-#     timeline_comp = timeline.complement(min_val, max_val)
-#     assert len(timeline_comp) == len(expected_ranges)
-#     for observed_range, expected_range in zip(timeline_comp, expected_ranges):
-#       assert observed_range == expected_range
+    assert mapping_results == expected_mapping_results
+    assert next_timestamp == expected_next_timestamp
