@@ -185,35 +185,35 @@ class TestFragmentedTimeline:
     assert [s for s in tl] == [(TMSection(0, 1), 1.0)]
     assert tl.time_scope == 3
 
-  def test_map_timepoint_to_source_should_return_none_when_empty_timeline(self):
+  def test_unmap_timepoint_to_source_should_return_none_when_empty_timeline(self):
     tl = FragmentedTimeline()
 
-    assert tl.map_timepoint_to_source(0.0) is None
+    assert tl.unmap_timepoint_to_source(0.0) is None
 
-  def test_map_timepoint_to_source_should_return_none_when_timepoint_out_of_scope(self):
+  def test_unmap_timepoint_to_source_should_return_none_when_timepoint_out_of_scope(self):
     tl = FragmentedTimeline(TMSection(0, 1, 0.5))
 
-    assert tl.map_timepoint_to_source(2) is None
+    assert tl.unmap_timepoint_to_source(2) is None
 
-  @pytest.mark.parametrize('dst_timepoint, expected_src_timepoint', [
+  @pytest.mark.parametrize('mapped_timepoint, expected_src_timepoint', [
       (0, 0),
       (1, 2),
       (2, 2.5),
       (3, 3),
   ])
-  def test_map_timepoint_to_source_should_return_correct_value(self, dst_timepoint: float,
-                                                               expected_src_timepoint: float):
+  def test_unmap_timepoint_to_source_should_return_correct_value(self, mapped_timepoint: float,
+                                                                 expected_src_timepoint: float):
     tl = FragmentedTimeline(TMSection(0, 2, 0.5), TMSection(2, 3, 2.0))
 
-    assert tl.map_timepoint_to_source(dst_timepoint) == expected_src_timepoint
+    assert tl.unmap_timepoint_to_source(mapped_timepoint) == expected_src_timepoint
 
-  def test_map_timepoint_to_source_should_return_end_of_last_section_when_scope_is_inf_and_timepoint_is_out_of_scope(
+  def test_unmap_timepoint_to_source_should_return_end_of_last_section_when_scope_is_inf_and_timepoint_is_out_of_scope(
       self):
     tl = FragmentedTimeline(TMSection(0, 1, 0.5))
     tl.time_scope = math.inf
 
-    assert tl.map_timepoint_to_source(0.5) == 1
-    assert tl.map_timepoint_to_source(2) == 1
+    assert tl.unmap_timepoint_to_source(0.5) == 1
+    assert tl.unmap_timepoint_to_source(2) == 1
 
   def test_map_time_range_should_raise_value_error_when_invalid_range(self):
     with pytest.raises(ValueError):
@@ -226,13 +226,13 @@ class TestFragmentedTimeline:
   def test_map_time_range_should_return_empty_results_when_maps_to_nothing(self):
     tl = FragmentedTimeline(TMSection(1, 2))
 
-    mapping_results, next_timestamp = tl.map_time_range(0, 1)
+    mapping_results, next_timepoint = tl.map_time_range(0, 1)
 
     assert mapping_results.beg == mapping_results.end
     assert mapping_results.sections == []
-    assert next_timestamp == 1
+    assert next_timepoint == 1
 
-  @pytest.mark.parametrize('range_to_map, expected_mapping_results, expected_next_timestamp', [
+  @pytest.mark.parametrize('range_to_map, expected_mapping_results, expected_next_timepoint', [
       (
           (0, 2),
           RangeMappingResult(0, 0.5, [TMSection(1, 2, 0.5)]),
@@ -251,11 +251,11 @@ class TestFragmentedTimeline:
   ])
   def test_map_time_range_should_return_correct_results_when_valid_ranges(
       self, range_to_map: tuple[float, float], expected_mapping_results: RangeMappingResult,
-      expected_next_timestamp: float):
+      expected_next_timepoint: float):
     tl = FragmentedTimeline(TMSection(1, 3, 0.5), TMSection(4, 6))
     tl.time_scope = math.inf  # mark the timeline as complete
 
-    mapping_results, next_timestamp = tl.map_time_range(*range_to_map)
+    mapping_results, next_timepoint = tl.map_time_range(*range_to_map)
 
     assert mapping_results == expected_mapping_results
-    assert next_timestamp == expected_next_timestamp
+    assert next_timepoint == expected_next_timepoint
