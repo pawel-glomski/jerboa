@@ -3,8 +3,6 @@ from bisect import bisect_left
 from typing import Generator
 from dataclasses import dataclass
 
-from jerboa.utils import KeyWrapper
-
 
 class TMSection:
   '''Represents a Timeline Modified Section - a timeline section with a duration modifier.'''
@@ -134,7 +132,7 @@ class FragmentedTimeline:
 
   @property
   def time_scope(self) -> float:
-    '''Getter for the time scope of the timeline, which represents the maximum timestamp for which
+    '''Getter for the time scope of the timeline, which represents the maximum timepoint for which
     the mapping is defined for the timeline.
 
     Returns:
@@ -184,22 +182,22 @@ class FragmentedTimeline:
         self._resulting_timepoints.append(last_timepoint + section_duration)
 
   # TODO(OPT): optimize for frequent sequential checks
-  def map_timepoint_to_source(self, timestamp: float) -> float | None:
-    '''Maps a resulting timeline timestamp to its source timeline counterpart.
+  def unmap_timepoint_to_source(self, mapped_timepoint: float) -> float | None:
+    '''Unmaps a timepoint from the resulting timeline to its source timeline counterpart.
 
     Args:
-      timestamp (float): The timestamp to be mapped.
+      mapped_timepoint (float): The timepoint to be unmapped.
 
     Returns:
-      float | None: The mapped source timestamp if the given timestamp is valid; None otherwise.
+      float | None: The unmapped timepoint if the timepoint was valid; None otherwise.
     '''
     if self._resulting_timepoints:
-      timestamp = max(0, timestamp)
-      idx = bisect_left(self._resulting_timepoints, timestamp)
+      mapped_timepoint = max(0, mapped_timepoint)
+      idx = bisect_left(self._resulting_timepoints, mapped_timepoint)
       if idx < len(self._resulting_timepoints):
         scale = 1.0 / self._sections[idx].modifier
         beg_src = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
-        return self._sections[idx].beg + scale * (timestamp - beg_src)
+        return self._sections[idx].beg + scale * (mapped_timepoint - beg_src)
       if self.time_scope == math.inf:
         return self._sections[-1].end
     return None
@@ -208,21 +206,21 @@ class FragmentedTimeline:
   def map_time_range(self, beg: float, end: float) -> tuple[RangeMappingResult, float]:
     '''Maps a time range to the resulting timeline.
 
-    This method maps a time range specified by its beginning and ending timestamps in the source
+    This method maps a time range specified by its beginning and ending timepoints in the source
     timeline to the corresponding range in the resulting timeline.
   
     Args:
-      beg (float): The beginning timestamp of the time range to be mapped.
-      end (float): The ending timestamp of the time range to be mapped.
+      beg (float): The beginning of the time range to be mapped.
+      end (float): The ending of the time range to be mapped.
 
     Returns:
       tuple[RangeMappingResult, float]: A tuple of 2 values:\n
         0: (RangeMappingResult) Results of the mapping.\n
-        1: (float) The next closest timestamp that can be mapped after the range ends. If such a
-        timestamp does not exist in the current time scope, it returns the scope itself.
+        1: (float) The next closest timepoint that can be mapped after the range ends. If such a
+        timepoint does not exist in the current time scope, it returns the scope itself.
 
     Raises:
-      AssertionError: If the beginning timestamp is greater than the ending timestamp, or if the
+      AssertionError: If the beginning timepoint is greater than the ending timepoint, or if the
       end of the range is beyond the timeline's scope.
     '''
     if beg > end:
@@ -231,11 +229,11 @@ class FragmentedTimeline:
       raise ValueError(f'Range out of scope: ({beg}, {end}), {self.time_scope=}.')
 
     involved_sections = list[TMSection]()
-    idx = bisect_left(KeyWrapper(self._sections, lambda s: s.end), beg)
+    idx = bisect_left(self._sections, beg, key=lambda s: s.end)  # TODO(OPT): don't use key
     if idx >= len(self._sections):
       mapped_beg = self._sections[-1].end if self._sections else 0
       mapped_end = mapped_beg
-      next_timestamp = self.time_scope
+      next_timepoint = self.time_scope
     else:
       mapped_beg = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
       mapped_beg += self._sections[idx].modifier * max(0, beg - self._sections[idx].beg)
@@ -248,10 +246,10 @@ class FragmentedTimeline:
       assert all(s.duration > 0.0 for s in involved_sections)
 
       if end < self._sections[idx - 1].end:
-        next_timestamp = end
+        next_timepoint = end
       elif idx < len(self._sections):
-        next_timestamp = self._sections[idx].beg
+        next_timepoint = self._sections[idx].beg
       else:
-        next_timestamp = self._time_scope
+        next_timepoint = self._time_scope
 
-    return (RangeMappingResult(mapped_beg, mapped_end, involved_sections), next_timestamp)
+    return (RangeMappingResult(mapped_beg, mapped_end, involved_sections), next_timepoint)
