@@ -61,7 +61,7 @@ class StreamDecoder:
     self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
 
     self._seek_timepoint: None | float = self.start_timepoint
-    self._waiting_for_seek = False
+    self._is_done = False
 
     self._mutex = Lock()
     self._seeking = Condition(self._mutex)
@@ -112,13 +112,12 @@ class StreamDecoder:
     keyframe_pts_arr = probe_keyframe_pts(self.container, self.stream)
 
     self._seek_timepoint = self.start_timepoint  # start decoding from start
+    min_frame_time = self.start_timepoint
     while True:
+      self._av_demux_and_decode(min_frame_time, keyframe_pts_arr)
       with self._mutex:
-        if self._seek_timepoint is None:
-          self._waiting_for_seek = True
-          self._buffer_not_empty_or_done.notify()
-          self._seeking.wait_for(lambda: self._seek_timepoint is not None)
-          self._waiting_for_seek = False
+        self._seeking.wait_for(lambda: self._seek_timepoint is not None)
+        self._is_done = False
 
         if self._seek_timepoint == STOP_DECODING_SEEK_TIMEPOINT:
           return
@@ -128,7 +127,6 @@ class StreamDecoder:
         self._seek_timepoint = None
 
       self.container.seek(seek_timestamp, stream=self.stream)
-      self._av_demux_and_decode(min_frame_time, keyframe_pts_arr)
 
   def _av_demux_and_decode(self, min_frame_time: float, keyframe_pts_arr: list[float]):
     self._mapper.reset()
@@ -177,19 +175,19 @@ class StreamDecoder:
                 return  # return to begin seeking
 
           current_frame = next_frame
-    else:
-      # flush the staged frames (if any) and the
-      mapped_frame = self._mapper.map(None, None)  # TODO: push current_frame instead
-      with self._mutex:
-        if self._seek_timepoint is None:
-          if mapped_frame is not None:
-            self._buffer_not_full_or_seeking.wait_for(
-                lambda: not self._buffer.is_full() or self._seek_timepoint is not None)
-            self._buffer.put(mapped_frame)
-            self._buffer_not_empty_or_done.notify()
+    # flush the staged frames (if any) and TODO: the current_frame
+    mapped_frame = self._mapper.map(None, None)  # TODO: push current_frame instead
+    with self._mutex:
+      if self._seek_timepoint is None:
+        if mapped_frame is not None:
+          self._buffer_not_full_or_seeking.wait_for(
+              lambda: not self._buffer.is_full() or self._seek_timepoint is not None)
+          self._buffer.put(mapped_frame)
+        self._is_done = True
+        self._buffer_not_empty_or_done.notify()
 
   def is_done(self) -> bool:
-    return self._waiting_for_seek
+    return self._is_done
 
   def pop(self, *args) -> np.ndarray:
     frame = None
