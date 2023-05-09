@@ -17,7 +17,7 @@ AUDIO_MAX_LAYOUT = av.AudioLayout('stereo')
 
 AUDIO_MAX_COMPENSATION = 0.1  # duration can be changed up to 10% at once
 
-PREFILL_DURATION = 1.0 # in seconds
+PREFILL_DURATION = 1.0  # in seconds
 
 
 def create_reformatter(stream: av.stream.Stream) -> AudioReformatter | VideoReformatter:
@@ -35,8 +35,7 @@ class SLSource(StreamingSource):
   def __init__(self, filepath: str):
     from jerboa.timeline import TMSection  # TODO: remove me, for debugging only
     debug_timeline = FragmentedTimeline(
-        *[TMSection(i*0.1, i*0.1+0.05, 0.5) for i in range(200)]
-    )
+        *[TMSection(i * 0.1, i * 0.1 + 0.05, 0.5) for i in range(200)])
     # debug_timeline = FragmentedTimeline(TMSection(0, math.inf))
 
     self.container = av.open(filepath)
@@ -80,10 +79,8 @@ class SLSource(StreamingSource):
   def seek(self, timepoint: float):
     for decoder in self.decoders.values():
       decoder.seek(timepoint)
-    print('prefill_start')
     for decoder in self.decoders.values():
       decoder.prefill_buffer(PREFILL_DURATION)
-    print('prefill_done')
 
   def get_audio_data(self, num_bytes, compensation_time=0.0) -> AudioData:
     audio_decoder = self.decoders[MediaType.AUDIO]
@@ -98,7 +95,6 @@ class SLSource(StreamingSource):
     duration = normalized_audio.calc_duration(audio, sample_rate)
     audio_bytes = normalized_audio.to_real_audio(audio, audio_format).tobytes()
 
-    print(f'{timestamp}, {duration}, {num_bytes}')
     return AudioData(audio_bytes, len(audio_bytes), timestamp, duration, [])
 
   def get_next_video_timestamp(self):

@@ -97,6 +97,7 @@ class VideoBuffer:
     assert not self.is_full()
 
     self._frames.append(mapped_video_frame)
+    self._duration += mapped_video_frame.duration
 
   def pop(self) -> np.ndarray:
     assert not self.is_empty()
