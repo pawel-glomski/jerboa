@@ -171,6 +171,9 @@ class FragmentedTimeline:
     if section.beg < self.time_scope:
       raise ValueError(f'Section ({section}) precedes the time scope ({self.time_scope})')
 
+    if section.beg < 0:
+      section = TMSection(0, section.end, section.modifier)
+
     self.time_scope = section.end
     section_duration = section.duration
     if section_duration > 0:
@@ -223,6 +226,7 @@ class FragmentedTimeline:
       AssertionError: If the beginning timepoint is greater than the ending timepoint, or if the
       end of the range is beyond the timeline's scope.
     '''
+    beg = max(0, beg)
     if beg > end:
       raise ValueError(f'The beginning must precede the end ({beg}, {end}).')
     if end > self.time_scope:
