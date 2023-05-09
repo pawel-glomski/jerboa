@@ -126,7 +126,7 @@ class CircularBuffer:
 
   def put(self, data: np.ndarray) -> None:
     '''
-    Appends the given data into the buffer.
+    Appends data into the buffer.
 
     Args:
       data (np.ndarray): The data to be appended into the buffer.

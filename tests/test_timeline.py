@@ -185,6 +185,14 @@ class TestFragmentedTimeline:
     assert [s for s in tl] == [(TMSection(0, 1), 1.0)]
     assert tl.time_scope == 3
 
+  def test_append_section_should_clamp_section_beg_to_0_when_negative_beg(self):
+    tl = FragmentedTimeline()
+
+    tl.append_section(TMSection(-math.inf, math.inf))
+
+    assert [s for s in tl] == [(TMSection(0, math.inf), math.inf)]
+    assert tl.time_scope == math.inf
+
   def test_unmap_timepoint_to_source_should_return_none_when_empty_timeline(self):
     tl = FragmentedTimeline()
 
@@ -232,27 +240,38 @@ class TestFragmentedTimeline:
     assert mapping_results.sections == []
     assert next_timepoint == 1
 
-  @pytest.mark.parametrize('range_to_map, expected_mapping_results, expected_next_timepoint', [
-      (
-          (0, 2),
-          RangeMappingResult(0, 0.5, [TMSection(1, 2, 0.5)]),
-          2,
-      ),
-      (
-          (0, 5),
-          RangeMappingResult(0, 2, [TMSection(1, 3, 0.5), TMSection(4, 5)]),
-          5,
-      ),
-      (
-          (2, 7),
-          RangeMappingResult(0.5, 3, [TMSection(2, 3, 0.5), TMSection(4, 6)]),
-          math.inf,
-      ),
-  ])
+  @pytest.mark.parametrize(
+      'init_sections, range_to_map, expected_mapping_results, expected_next_timepoint', [
+          (
+              [TMSection(1, 3, 0.5), TMSection(4, 6)],
+              (0, 2),
+              RangeMappingResult(0, 0.5, [TMSection(1, 2, 0.5)]),
+              2,
+          ),
+          (
+              [TMSection(1, 3, 0.5), TMSection(4, 6)],
+              (0, 5),
+              RangeMappingResult(0, 2, [TMSection(1, 3, 0.5), TMSection(4, 5)]),
+              5,
+          ),
+          (
+              [TMSection(1, 3, 0.5), TMSection(4, 6)],
+              (2, 7),
+              RangeMappingResult(0.5, 3,
+                                 [TMSection(2, 3, 0.5), TMSection(4, 6)]),
+              math.inf,
+          ),
+          (
+              [TMSection(-math.inf, math.inf)],
+              (2, 7),
+              RangeMappingResult(2, 7, [TMSection(2, 7)]),
+              7,
+          ),
+      ])
   def test_map_time_range_should_return_correct_results_when_valid_ranges(
-      self, range_to_map: tuple[float, float], expected_mapping_results: RangeMappingResult,
-      expected_next_timepoint: float):
-    tl = FragmentedTimeline(TMSection(1, 3, 0.5), TMSection(4, 6))
+      self, init_sections, range_to_map: tuple[float, float],
+      expected_mapping_results: RangeMappingResult, expected_next_timepoint: float):
+    tl = FragmentedTimeline(*init_sections)
     tl.time_scope = math.inf  # mark the timeline as complete
 
     mapping_results, next_timepoint = tl.map_time_range(*range_to_map)

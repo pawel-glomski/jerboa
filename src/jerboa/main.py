@@ -3,7 +3,7 @@ import pyglet
 from imgui.integrations.pyglet import create_renderer
 
 # from testwindow import show_test_window
-from jerboa.av.avsource import SLSource
+from jerboa.media.avsource import SLSource
 # from player import SLPlayer
 from pyglet.media import Player as SLPlayer
 
@@ -28,7 +28,6 @@ def main():
   # video_player.start(src)
   video_player.queue(src)
   video_player.play()
-
 
   def update(dt):
     imgui.new_frame()
@@ -69,7 +68,7 @@ def main():
                   height=image_height,
                   uv0=(0, 0),
                   uv1=((video_texture.width / video_texture.owner.width),
-                      (video_texture.height / video_texture.owner.height)))
+                       (video_texture.height / video_texture.owner.height)))
 
     imgui.end()
 
