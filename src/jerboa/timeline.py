@@ -244,8 +244,9 @@ class FragmentedTimeline:
       mapped_end = mapped_beg
 
       while idx < len(self._sections) and end > self._sections[idx].beg:
-        involved_sections.append(self._sections[idx].overlap(beg, end))
-        mapped_end += involved_sections[-1].duration
+        overlap_section = self._sections[idx].overlap(beg, end)
+        mapped_end += overlap_section.duration
+        involved_sections.append(overlap_section)
         idx += 1
       assert all(s.duration > 0.0 for s in involved_sections)
 
