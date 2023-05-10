@@ -14,7 +14,7 @@ def main():
   imgui.create_context()
   impl = create_renderer(window)
 
-  src = SLSource('before.mp4')
+  src = SLSource('tests/test_recordings/sintel.mp4')
   # src = SLSource('data/debugging.mp4')#'before.mp4')
 
   video_player = SLPlayer()
