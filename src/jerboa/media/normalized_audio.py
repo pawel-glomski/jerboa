@@ -47,7 +47,7 @@ def calc_duration(audio: np.ndarray, sample_rate: int) -> float:
 
 def smooth_out_transition(last_sample: np.ndarray, audio: np.ndarray, steps: int) -> None:
   steps = min(audio.shape[SAMPLE_IDX], steps)
-  weights = expit(np.linspace(-3, 3, steps).reshape(get_shape(steps, 1)))
+  weights = expit(np.linspace(-5, 5, steps).reshape(get_shape(steps, 1)))
   samples_idx = index_samples(0, steps)
   audio[samples_idx] = weights * audio[samples_idx] + (1.0 - weights) * last_sample
 

@@ -7,7 +7,7 @@ from threading import Thread, Lock, Condition
 
 from jerboa.timeline import FragmentedTimeline
 from .buffers import create_buffer
-from .mappers import create_mapper
+from .mappers import create_mapper, MappedNumpyFrame
 from .reformatters import AudioReformatter, VideoReformatter
 
 BUFFER_DEFAULT_DURATION = 5.0  # in seconds
@@ -59,6 +59,7 @@ class StreamDecoder:
     self._buffer = create_buffer(reformatter, BUFFER_DEFAULT_DURATION)
 
     self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
+    self._keyframe_pts_arr = list[float]()  # probing is done in the decoding thread
 
     self._seek_timepoint: None | float = self.start_timepoint
     self._is_done = False
@@ -68,6 +69,9 @@ class StreamDecoder:
     self._buffer_not_empty_or_done = Condition(self._mutex)
     self._buffer_not_full_or_seeking = Condition(self._mutex)
     self._timeline_updated_or_seeking = Condition(self._mutex)
+
+    # this has the same value as _seek_timepoint after the seek, but changes during decoding
+    self._min_frame_time: float = None
 
     self._dec_thread = Thread(target=self._decode,
                               name=f'Decoding #{self.stream.index} stream ({self.stream.type})',
@@ -109,76 +113,94 @@ class StreamDecoder:
       self._seek_without_lock(seek_timepoint)
 
   def _decode(self):
-    keyframe_pts_arr = probe_keyframe_pts(self.container, self.stream)
-
+    self._keyframe_pts_arr = probe_keyframe_pts(self.container, self.stream)
     self._seek_timepoint = self.start_timepoint  # start decoding from start
-    min_frame_time = self.start_timepoint
     while True:
-      self._av_demux_and_decode(min_frame_time, keyframe_pts_arr)
-      with self._mutex:
-        self._seeking.wait_for(lambda: self._seek_timepoint is not None)
-        self._is_done = False
+      self._decoding__wait_and_seek()
+      self._decoding__loop()
 
-        if self._seek_timepoint == STOP_DECODING_SEEK_TIMEPOINT:
-          return
+  def _decoding__wait_and_seek(self):
+    with self._mutex:
+      self._seeking.wait_for(lambda: self._seek_timepoint is not None)
+      self._is_done = False
 
-        min_frame_time = self._seek_timepoint
-        seek_timestamp = int(self._seek_timepoint / self.stream.time_base)
-        self._seek_timepoint = None
+      if self._seek_timepoint == STOP_DECODING_SEEK_TIMEPOINT:
+        return
 
-      self.container.seek(seek_timestamp, stream=self.stream)
+      seek_timestamp = int(self._seek_timepoint / self.stream.time_base)
+      self._min_frame_time = self._seek_timepoint
+      self._seek_timepoint = None
 
-  def _av_demux_and_decode(self, min_frame_time: float, keyframe_pts_arr: list[float]):
+    self.container.seek(seek_timestamp, stream=self.stream)
+
+  def _decoding__loop(self):
     self._mapper.reset()
 
     current_frame: av.VideoFrame | av.AudioFrame | None = None
     for next_pkt in self.container.demux(self.stream):
       for next_raw_frame in next_pkt.decode():
-        if math.isclose(next_raw_frame.time, min_frame_time, abs_tol=1e-3):
+        if (next_raw_frame.time < self._min_frame_time and
+            not math.isclose(next_raw_frame.time, self._min_frame_time, abs_tol=1e-3)):
           current_frame = None
+          continue
 
         for next_frame in self.reformatter.reformat(next_raw_frame):
           if current_frame is not None:
-            frame_beg, frame_end = current_frame.time, next_frame.time
+            beg, end = current_frame.time, next_frame.time
+            mapped_frame = self._decoding__map_frame_and_set_min_frame_time(current_frame, beg, end)
 
-            with self._mutex:
-              self._timeline_updated_or_seeking.wait_for(
-                  lambda: self._timeline.time_scope >= frame_end or self._seek_timepoint is not None
-              )
-              if self._seek_timepoint is not None:
-                return  # return to begin seeking
-
-            mapping_results, min_frame_time = self._timeline.map_time_range(frame_beg, frame_end)
-            if mapping_results.beg < mapping_results.end:
-              mapped_frame = self._mapper.map(current_frame, mapping_results)
-              if mapped_frame is not None:
-                with self._mutex:
-                  self._buffer_not_full_or_seeking.wait_for(
-                      lambda: not self._buffer.is_full() or self._seek_timepoint is not None)
-                  if self._seek_timepoint is not None:
-                    return  # return to begin seeking
-
-                  self._buffer.put(mapped_frame)
-                  self._buffer_not_empty_or_done.notify()
-            else:  # frame was dropped, check if it is worth to seek to the next one
-              if keyframe_pts_arr:
-                current_keyframe_idx = bisect_right(keyframe_pts_arr, current_frame.time)
-                next_keyframe_idx = bisect_right(keyframe_pts_arr, min_frame_time)
-                should_seek = current_keyframe_idx < next_keyframe_idx
-              else:
-                should_seek = min_frame_time - frame_end >= AUDIO_SEEK_THRESHOLD
-
-              if should_seek:
-                with self._mutex:
-                  if self._seek_timepoint is None:  # must never overwrite the user's seek
-                    self._seek_timepoint = min_frame_time
-                return  # return to begin seeking
-
+            if (mapped_frame is None or
+                (not self._decoding__try_putting_mapped_frame(mapped_frame) and
+                 self._decoding__try_skipping_dropped_frames(beg, end))):
+              return  # begin seeking
           current_frame = next_frame
-    # flush the staged frames (if any) and TODO: the current_frame
+
+    self._decoding__flush_mapper() # TODO: this should also handle the last `current_frame`
+
+  def _decoding__map_frame_and_set_min_frame_time(self,
+                                                  current_frame: av.AudioFrame | av.VideoFrame,
+                                                  frame_beg: float,
+                                                  frame_end: float) -> MappedNumpyFrame | None:
+    with self._mutex:
+      self._timeline_updated_or_seeking.wait_for(
+          lambda: self._timeline.time_scope >= frame_end or self._seek_timepoint is not None)
+      if self._seek_timepoint is not None:
+        return None  # begin seeking
+
+    mapping_results, self._min_frame_time = self._timeline.map_time_range(frame_beg, frame_end)
+    return self._mapper.map(current_frame, mapping_results)
+
+  def _decoding__try_putting_mapped_frame(self, mapped_frame: MappedNumpyFrame) -> bool:
+    if mapped_frame.beg_timepoint < mapped_frame.end_timepoint:
+      with self._mutex:
+        self._buffer_not_full_or_seeking.wait_for(
+            lambda: not self._buffer.is_full() or self._seek_timepoint is not None)
+        if self._seek_timepoint is not None:
+          return False  # begin seeking
+
+        self._buffer.put(mapped_frame)
+        self._buffer_not_empty_or_done.notify()
+    return True  # returns false only when interrupted, putting an empty frame is a success too
+
+  def _decoding__try_skipping_dropped_frames(self, frame_beg, frame_end: float) -> bool:
+    if self._keyframe_pts_arr:
+      current_keyframe_idx = bisect_right(self._keyframe_pts_arr, frame_beg)
+      next_keyframe_idx = bisect_right(self._keyframe_pts_arr, self._min_frame_time)
+      should_seek = current_keyframe_idx < next_keyframe_idx
+    else:
+      should_seek = self._min_frame_time - frame_end >= AUDIO_SEEK_THRESHOLD
+
+    if should_seek:
+      with self._mutex:
+        if self._seek_timepoint is None:  # must never overwrite the user's seek
+          self._seek_timepoint = self._min_frame_time
+      return True  # return to begin seeking
+    return False
+
+  def _decoding__flush_mapper(self) -> None:
     mapped_frame = self._mapper.map(None, None)  # TODO: push current_frame instead
     with self._mutex:
-      if self._seek_timepoint is None:
+      if self._seek_timepoint is not None:
         if mapped_frame is not None:
           self._buffer_not_full_or_seeking.wait_for(
               lambda: not self._buffer.is_full() or self._seek_timepoint is not None)

@@ -17,7 +17,7 @@ AUDIO_MAX_LAYOUT = av.AudioLayout('stereo')
 
 AUDIO_MAX_COMPENSATION = 0.1  # duration can be changed up to 10% at once
 
-PREFILL_DURATION = 1.0  # in seconds
+PREFILL_DURATION = 0.1  # in seconds
 
 
 def create_reformatter(stream: av.stream.Stream) -> AudioReformatter | VideoReformatter:
@@ -35,8 +35,11 @@ class SLSource(StreamingSource):
   def __init__(self, filepath: str):
     from jerboa.timeline import TMSection  # TODO: remove me, for debugging only
     debug_timeline = FragmentedTimeline(
-        *[TMSection(i * 0.1, i * 0.1 + 0.05, 0.5) for i in range(200)])
-    # debug_timeline = FragmentedTimeline(TMSection(0, math.inf))
+        # *[TMSection(i * 1.0, i * 1.0 + 0.5, 1 - 0.5 * (i % 2)) for i in range(200)]
+        # TMSection(0, 4, 0.75),
+        TMSection(5, math.inf, 0.5)
+        # TMSection(0, math.inf)
+    )
 
     self.container = av.open(filepath)
     self.decoders: dict[MediaType, StreamDecoder] = {}
