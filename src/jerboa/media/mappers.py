@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from jerboa.media import normalized_audio
 from jerboa.timeline import RangeMappingResult, TMSection
 from .media import MediaType, AudioConfig, VideoConfig
-from .reformatters import AudioReformatter, VideoReformatter
 
 DEFAULT_MIN_AUDIO_DURATION = 0.25
 
@@ -23,19 +22,22 @@ class AudioMapper:
   def __init__(self,
                audio_config: AudioConfig,
                min_duration: float = DEFAULT_MIN_AUDIO_DURATION) -> None:
-    self._audio_config = audio_config
-    self._audio = normalized_audio.create_circular_buffer(audio_config.format, audio_config.layout,
-                                                          audio_config.sample_rate, min_duration)
+    self._processing_audio_config = AudioConfig(normalized_audio.FORMAT, audio_config.layout,
+                                                audio_config.sample_rate)
+
+    self._audio = normalized_audio.create_circular_buffer(self._processing_audio_config,
+                                                          min_duration)
 
     self._transition_steps = normalized_audio.get_transition_steps(audio_config.sample_rate)
     self._target_samples_num = int(min_duration * audio_config.sample_rate)
 
     self.reset()
 
-  def reset(self) -> None:
-    self.clear()
+  @property
+  def processing_media_config(self) -> AudioConfig:
+    return self._processing_audio_config
 
-  def clear(self) -> None:
+  def reset(self) -> None:
     self._audio.clear()
     self._modifiers = [-1]  # start with an impossible to encounter modifier
     self._anchors_before = [0]
@@ -48,9 +50,9 @@ class AudioMapper:
     flush = frame is None
 
     if not flush:
-      assert frame.format.name == self._audio_config.format.name
-      assert frame.layout.name == self._audio_config.layout.name
-      assert frame.sample_rate == self._audio_config.sample_rate
+      assert frame.format.name == self._processing_audio_config.format.name
+      assert frame.layout.name == self._processing_audio_config.layout.name
+      assert frame.sample_rate == self._processing_audio_config.sample_rate
       self._cut_according_to_mapping_results_and_push(frame, mapping_results)
 
     if len(self._audio) >= self._target_samples_num or flush:
@@ -70,8 +72,8 @@ class AudioMapper:
     frame_audio = normalized_audio.get_from_frame(frame)
 
     for section in mapping_results.sections:
-      sample_idx_beg = int((section.beg - frame.time) * self._audio_config.sample_rate)
-      sample_idx_end = int((section.end - frame.time) * self._audio_config.sample_rate)
+      sample_idx_beg = int((section.beg - frame.time) * self._processing_audio_config.sample_rate)
+      sample_idx_end = int((section.end - frame.time) * self._processing_audio_config.sample_rate)
       audio_part = frame_audio[normalized_audio.index_samples(sample_idx_beg, sample_idx_end)]
       last_sample = self._push_audio_section(last_sample, audio_part, section)
 
@@ -89,7 +91,7 @@ class AudioMapper:
 
     self._audio.put(audio)
 
-    samples_num = audio.shape[normalized_audio.SAMPLE_IDX]
+    samples_num = audio.shape[normalized_audio.SAMPLES_AXIS]
     if self._modifiers[-1] == section.modifier:
       self._anchors_before[-1] += samples_num
       self._anchors_after[-1] += round(samples_num * section.modifier)
@@ -106,20 +108,15 @@ class AudioMapper:
     # TODO: TSM algorithm should be an option
     anchors = np.array([self._anchors_before, self._anchors_after])
     audio_before = self._pop_all_and_clear()
-    audio_before = audio_before.T if normalized_audio.CHANNEL_IDX == 1 else audio_before
+    audio_before = audio_before.T if normalized_audio.CHANNELS_AXIS == 1 else audio_before
 
     audio_after = pytsmod.hptsm(audio_before, anchors)
-    return audio_after.T if normalized_audio.CHANNEL_IDX == 1 else audio_after
+    return audio_after.T if normalized_audio.CHANNELS_AXIS == 1 else audio_after
 
   def _pop_all_and_clear(self) -> np.ndarray:
     audio = self._audio.pop(len(self._audio))
-    self.clear()
+    self.reset()
     return audio
-
-  def create_reformatter(self) -> AudioReformatter:
-    config = AudioConfig(self._audio_config.format, self._audio_config.layout,
-                         self._audio_config.sample_rate)
-    return AudioReformatter(config)
 
 
 class VideoMapper:
@@ -127,10 +124,11 @@ class VideoMapper:
   def __init__(self, video_config: VideoConfig) -> None:
     self._video_config = video_config
 
-  def reset(self) -> None:
-    self.clear()
+  @property
+  def processing_media_config(self) -> VideoConfig:
+    return self._video_config
 
-  def clear(self) -> None:
+  def reset(self) -> None:
     pass
 
   def map(self, frame: av.VideoFrame, mapping_results: RangeMappingResult) -> MappedNumpyFrame:
@@ -139,9 +137,6 @@ class VideoMapper:
       return MappedNumpyFrame(mapping_results.beg, mapping_results.end, frame.to_ndarray())
 
     return MappedNumpyFrame(0, 0, np.array([]))  # empty frame
-
-  def create_reformatter(self) -> VideoReformatter:
-    return VideoReformatter(self._video_config)
 
 
 def create_mapper(media_config: AudioConfig | VideoConfig,

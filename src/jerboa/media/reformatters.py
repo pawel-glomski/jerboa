@@ -1,4 +1,4 @@
-from .media import AudioConfig, VideoConfig
+from .media import MediaType, AudioConfig, VideoConfig
 
 import av
 
@@ -34,6 +34,12 @@ class VideoReformatter:
   def reformat(self, frame: av.VideoFrame):
     # TODO: this can also handle resize, etc
     yield self._reformatter.reformat(frame, format=self._config.format)
+
+
+def create_reformatter(media_config: AudioConfig | VideoConfig):
+  if media_config.media_type == MediaType.AUDIO:
+    return AudioReformatter(media_config)
+  return VideoReformatter(media_config)
 
 
 # import errno
