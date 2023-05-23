@@ -73,7 +73,7 @@ def create_partially_filled_buffer(shape: tuple, axis: int, dtype: np.dtype) -> 
     assert 0 < len(buffer) < buffer.max_size
 
     return buffer
-  pytest.skip("Not applicable test case")
+  pytest.skip('Not applicable test case')
 
 
 def create_full_buffer(shape: tuple, axis: int, dtype: np.dtype) -> CircularBuffer:
@@ -82,7 +82,7 @@ def create_full_buffer(shape: tuple, axis: int, dtype: np.dtype) -> CircularBuff
     assert 0 < len(buffer) == buffer.max_size
 
     return buffer
-  pytest.skip("Not applicable test case")
+  pytest.skip('Not applicable test case')
 
 
 ALL_BUFFER_CREATORS = [create_empty_buffer, create_partially_filled_buffer, create_full_buffer]

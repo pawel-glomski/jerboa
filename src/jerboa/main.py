@@ -3,7 +3,7 @@ import pyglet
 from imgui.integrations.pyglet import create_renderer
 
 # from testwindow import show_test_window
-from jerboa.media.avsource import SLSource
+from jerboa.media.avsource import JBSource
 # from player import SLPlayer
 from pyglet.media import Player as SLPlayer
 
@@ -14,7 +14,7 @@ def main():
   imgui.create_context()
   impl = create_renderer(window)
 
-  src = SLSource('tests/test_recordings/sintel.mp4')
+  src = JBSource('tests/test_recordings/sintel.mp4')
   # src = SLSource('data/debugging.mp4')#'before.mp4')
 
   video_player = SLPlayer()

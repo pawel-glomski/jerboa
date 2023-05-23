@@ -3,11 +3,11 @@ import pytsmod
 import numpy as np
 from dataclasses import dataclass
 
-import jerboa.media.normalized_audio as normalized_audio
+from jerboa.media import normalized_audio
 from jerboa.timeline import RangeMappingResult, TMSection
 from .reformatters import MediaType, AudioReformatter, VideoReformatter
 
-DEFAULT_MIN_AUDIO_DURATION = 0.5
+DEFAULT_MIN_AUDIO_DURATION = 0.25
 
 
 @dataclass
