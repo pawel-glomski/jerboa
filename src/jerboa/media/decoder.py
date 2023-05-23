@@ -7,10 +7,11 @@ from threading import Thread, Lock, Condition
 
 from jerboa.timeline import FragmentedTimeline
 from .buffers import create_buffer
-from .mappers import create_mapper, MappedNumpyFrame
-from .reformatters import AudioReformatter, VideoReformatter
+from .mappers import MappedNumpyFrame, create_mapper
+from .media import AudioConfig, VideoConfig
 
-BUFFER_DEFAULT_DURATION = 5.0  # in seconds
+BUFFER_DURATION = 5.0  # in seconds
+MAPPER_BUFFER_DURATION = 0.5  # in seconds
 
 AUDIO_SEEK_THRESHOLD = 0.5  # in seconds
 
@@ -42,7 +43,7 @@ class StreamDecoder:
   def __init__(self,
                filepath: str,
                stream_idx: int,
-               reformatter: AudioReformatter | VideoReformatter,
+               media_config: AudioConfig | VideoConfig,
                init_timeline: FragmentedTimeline = None):
     self.container = av.open(filepath)
     if not (0 <= stream_idx < len(self.container.streams)):
@@ -54,9 +55,10 @@ class StreamDecoder:
     self.start_timepoint = self.stream.start_time * self.stream.time_base
     assert isinstance(self.stream, (av.audio.AudioStream, av.video.VideoStream))
 
-    self._reformatter = reformatter
-    self._mapper = create_mapper(reformatter)
-    self._buffer = create_buffer(reformatter, BUFFER_DEFAULT_DURATION)
+    self._media_config = media_config
+    self._buffer = create_buffer(media_config, BUFFER_DURATION)
+    self._mapper = create_mapper(media_config, MAPPER_BUFFER_DURATION)
+    self._reformatter = self._mapper.create_reformatter()
 
     self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
     self._keyframe_pts_arr = list[float]()  # probing is done in the decoding thread
@@ -83,8 +85,8 @@ class StreamDecoder:
       self.seek(STOP_DECODING_SEEK_TIMEPOINT)
 
   @property
-  def reformatter(self) -> AudioReformatter | VideoReformatter:
-    return self._reformatter
+  def media_config(self) -> AudioConfig | VideoConfig:
+    return self._media_config
 
   def update_timeline(self, updated_timeline: FragmentedTimeline):
     assert updated_timeline.time_scope > self._timeline.time_scope
@@ -134,6 +136,7 @@ class StreamDecoder:
     self.container.seek(seek_timestamp, stream=self.stream)
 
   def _decoding__loop(self):
+    self._reformatter.reset()
     self._mapper.reset()
 
     current_frame: av.VideoFrame | av.AudioFrame | None = None
@@ -144,7 +147,7 @@ class StreamDecoder:
           current_frame = None
           continue
 
-        for next_frame in self.reformatter.reformat(next_raw_frame):
+        for next_frame in self._reformatter.reformat(next_raw_frame):
           if current_frame is not None:
             beg, end = current_frame.time, next_frame.time
             mapped_frame = self._decoding__map_frame_and_set_min_frame_time(current_frame, beg, end)
@@ -155,7 +158,7 @@ class StreamDecoder:
               return  # begin seeking
           current_frame = next_frame
 
-    self._decoding__flush_mapper() # TODO: this should also handle the last `current_frame`
+    self._decoding__flush_mapper()  # TODO: this should also handle the last `current_frame`
 
   def _decoding__map_frame_and_set_min_frame_time(self,
                                                   current_frame: av.AudioFrame | av.VideoFrame,

@@ -1,68 +1,39 @@
+from .media import AudioConfig, VideoConfig
+
 import av
-from enum import Enum
-
-
-class MediaType(Enum):
-  AUDIO = 'audio'
-  VIDEO = 'video'
 
 
 class AudioReformatter:
 
-  def __init__(self, fmt: av.AudioFormat, layout: av.AudioLayout, sample_rate: int):
-    self._format = fmt
-    self._layout = layout
-    self._sample_rate = sample_rate
-    self._resampler = av.AudioResampler(format=fmt, layout=layout, rate=sample_rate)
+  def __init__(self, config: AudioConfig):
+    self._config = config
+    self._resampler = av.AudioResampler(format=config.format,
+                                        layout=config.layout,
+                                        rate=config.sample_rate)
 
-  @property
-  def media_type(self) -> MediaType:
-    return MediaType.AUDIO
-
-  @property
-  def format(self) -> av.AudioFormat:
-    return self._format
-
-  @property
-  def layout(self) -> av.AudioLayout:
-    return self._layout
-
-  @property
-  def channels_num(self) -> int:
-    return len(self._layout.channels)
-
-  @property
-  def sample_rate(self) -> int:
-    return self._sample_rate
-
-  def clear(self):
-    pass  # av.AudioResampler does not have a persistent state
+  def reset(self):
+    self._resampler = av.AudioResampler(format=self._config.format,
+                                        layout=self._config.layout,
+                                        rate=self._config.sample_rate)
 
   def reformat(self, frame: av.AudioFrame):
     for reformatted_frame in self._resampler.resample(frame):
-      yield reformatted_frame
+      if reformatted_frame is not None:
+        yield reformatted_frame
 
 
 class VideoReformatter:
 
-  def __init__(self, fmt: av.AudioFormat):
-    self._format = fmt
+  def __init__(self, config: VideoConfig):
+    self._config = config
     self._reformatter = av.video.reformatter.VideoReformatter()
 
-  @property
-  def media_type(self) -> MediaType:
-    return MediaType.VIDEO
-
-  @property
-  def format(self) -> av.VideoFormat:
-    return self._format
-
-  def clear(self):
+  def reset(self):
     pass  # av.video.VideoReformatter does not have a persistent state
 
   def reformat(self, frame: av.VideoFrame):
     # TODO: this can also handle resize, etc
-    yield self._reformatter.reformat(frame, format=self._format)
+    yield self._reformatter.reformat(frame, format=self._config.format)
 
 
 # import errno

@@ -8,23 +8,26 @@ from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 from jerboa.media import normalized_audio
 from jerboa.timeline import FragmentedTimeline
 from .decoder import StreamDecoder
-from .reformatters import MediaType, AudioReformatter, VideoReformatter
+from .media import MediaType, AudioConfig, VideoConfig
 
 VIDEO_FORMAT_PYGLET = 'RGB'
 VIDEO_FORMAT = av.VideoFormat('rgb24')
 AUDIO_FORMAT = av.AudioFormat('s16').packed
 AUDIO_MAX_LAYOUT = av.AudioLayout('stereo')
 
-def create_reformatter(stream: av.stream.Stream) -> AudioReformatter | VideoReformatter:
-  if MediaType(stream.type) == MediaType.AUDIO:
-    layout = stream.layout
-    if len(stream.layout.channels) > len(AUDIO_MAX_LAYOUT.channels):
-      layout = AUDIO_MAX_LAYOUT
-    return AudioReformatter(AUDIO_FORMAT, layout, stream.sample_rate)
 
-  return VideoReformatter(VIDEO_FORMAT)
+def create_stream_config(stream: av.stream.Stream) -> AudioConfig | VideoConfig:
+  if MediaType(stream.type) == MediaType.AUDIO:
+    config = AudioConfig(AUDIO_FORMAT, stream.layout, stream.sample_rate)
+    if len(config.layout.channels) > len(AUDIO_MAX_LAYOUT.channels):
+      config.layout = AUDIO_MAX_LAYOUT
+    return config
+
+  return VideoConfig(VIDEO_FORMAT)
+
 
 #TODO: fix desync after seeking, does not happen when: pause -> seek 0 -> play
+
 
 class JBSource(StreamingSource):
 
@@ -34,40 +37,39 @@ class JBSource(StreamingSource):
         # *[TMSection(i * 1.0, i * 1.0 + 0.5, 1 - 0.5 * (i % 2)) for i in range(200)]
         # TMSection(0, 4, 0.75),
         # TMSection(0, math.inf, 1 / 1.5)
-        TMSection(0, math.inf)
-    )
+        TMSection(0, math.inf))
 
     self.container = av.open(filepath)
     self.decoders: dict[MediaType, StreamDecoder] = {}
     if self.container.streams.audio:
       audio_stream = self.container.streams.audio[0]
-      audio_reformatter = create_reformatter(audio_stream)
-
-      self.audio_format = AudioFormat(channels=audio_reformatter.channels_num,
-                                      sample_size=audio_reformatter.format.bits,
-                                      sample_rate=audio_reformatter.sample_rate)
+      audio_config = create_stream_config(audio_stream)
 
       audio_decoder = StreamDecoder(filepath,
                                     audio_stream.index,
-                                    reformatter=audio_reformatter,
+                                    media_config=audio_config,
                                     init_timeline=debug_timeline)
       self.decoders[MediaType.AUDIO] = audio_decoder
 
+      self.audio_format = AudioFormat(channels=audio_config.channels_num,
+                                      sample_size=audio_config.format.bits,
+                                      sample_rate=audio_config.sample_rate)
+
     if self.container.streams.video:
       video_stream = self.container.streams.video[0]
-      video_reformatter = create_reformatter(video_stream)
+      video_config = create_stream_config(video_stream)
+
+      video_decoder = StreamDecoder(filepath,
+                                    video_stream.index,
+                                    media_config=video_config,
+                                    init_timeline=debug_timeline)
+      self.decoders[MediaType.VIDEO] = video_decoder
 
       sar = video_stream.sample_aspect_ratio
       self.video_format = VideoFormat(width=video_stream.width,
                                       height=video_stream.height,
                                       sample_aspect=sar if sar else 1.0)
       self.video_format.frame_rate = float(video_stream.average_rate)
-
-      video_decoder = StreamDecoder(filepath,
-                                    video_stream.index,
-                                    reformatter=video_reformatter,
-                                    init_timeline=debug_timeline)
-      self.decoders[MediaType.VIDEO] = video_decoder
 
     self.start_time = min(dec.start_timepoint for dec in self.decoders.values())
     self.last_video_frame: ImageData = None
@@ -81,8 +83,8 @@ class JBSource(StreamingSource):
 
   def get_audio_data(self, num_bytes, compensation_time=0.0) -> AudioData:
     audio_decoder = self.decoders[MediaType.AUDIO]
-    audio_format = audio_decoder.reformatter.format
-    sample_rate = audio_decoder.reformatter.sample_rate
+    audio_format = audio_decoder.media_config.format
+    sample_rate = audio_decoder.media_config.sample_rate
     timestamp = audio_decoder.get_next_timepoint()
     audio = audio_decoder.pop(num_bytes)
     if audio is None:
