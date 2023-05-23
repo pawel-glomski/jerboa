@@ -2,9 +2,8 @@ import av
 import math
 import librosa
 import numpy as np
-from scipy.special import expit
-
 from pylibrb import DType, SAMPLES_AXIS, CHANNELS_AXIS
+from scipy.special import expit
 
 from .media import AudioConfig
 from jerboa.utils.circular_buffer import CircularBuffer
