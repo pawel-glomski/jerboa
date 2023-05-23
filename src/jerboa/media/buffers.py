@@ -2,7 +2,7 @@ import numpy as np
 from collections import deque
 
 from jerboa.media import normalized_audio
-from .mappers import MappedNumpyFrame
+from .stretchers import StretchedFrame
 from .media import MediaType, AudioConfig, VideoConfig
 
 
@@ -32,20 +32,20 @@ class AudioBuffer:
     self._audio_beg_timepoint = None
     self._audio_end_timepoint = None
 
-  def put(self, mapped_audio_frame: MappedNumpyFrame) -> None:
-    assert mapped_audio_frame.beg_timepoint < mapped_audio_frame.end_timepoint
-    assert mapped_audio_frame.data.size > 0
+  def put(self, stretched_audio_frame: StretchedFrame) -> None:
+    assert stretched_audio_frame.beg_timepoint < stretched_audio_frame.end_timepoint
+    assert stretched_audio_frame.data.size > 0
     assert not self.is_full()
 
-    # if mapped_audio_frame.beg_timepoint != self._audio_end_timepoint:
-    # normalized_audio.smooth_out_transition(self._audio_last_sample, mapped_audio_frame.data,
+    # if stretched_audio_frame.beg_timepoint != self._audio_end_timepoint:
+    # normalized_audio.smooth_out_transition(self._audio_last_sample, stretched_audio_frame.data,
     #                                        self._transition_steps)
 
     if self._audio_beg_timepoint is None:
-      self._audio_beg_timepoint = mapped_audio_frame.beg_timepoint
-    self._audio_end_timepoint = mapped_audio_frame.end_timepoint
+      self._audio_beg_timepoint = stretched_audio_frame.beg_timepoint
+    self._audio_end_timepoint = stretched_audio_frame.end_timepoint
 
-    self._audio.put(mapped_audio_frame.data)
+    self._audio.put(stretched_audio_frame.data)
     self._audio_last_sample[:] = self._audio[-1]
 
   def pop(self, bytes_num: int) -> np.ndarray:
@@ -79,7 +79,7 @@ class VideoBuffer:
     self._max_duration = max_duration
     self._duration = 0.0
 
-    self._frames = deque[MappedNumpyFrame]()
+    self._frames = deque[StretchedFrame]()
 
   def __len__(self) -> int:
     return len(self._frames)
@@ -92,12 +92,12 @@ class VideoBuffer:
     self._frames.clear()
     self._duration = 0.0
 
-  def put(self, mapped_video_frame: MappedNumpyFrame) -> None:
+  def put(self, stretched_video_frame: StretchedFrame) -> None:
     assert not self.is_full()
-    assert mapped_video_frame.beg_timepoint < mapped_video_frame.end_timepoint
+    assert stretched_video_frame.beg_timepoint < stretched_video_frame.end_timepoint
 
-    self._frames.append(mapped_video_frame)
-    self._duration += mapped_video_frame.end_timepoint - mapped_video_frame.beg_timepoint
+    self._frames.append(stretched_video_frame)
+    self._duration += stretched_video_frame.end_timepoint - stretched_video_frame.beg_timepoint
 
   def pop(self) -> np.ndarray:
     assert not self.is_empty()
