@@ -7,7 +7,7 @@ from jerboa.timeline import TMSection, FragmentedTimeline, RangeMappingResult
 
 class TestTMSection:
 
-  @pytest.mark.parametrize("beg, end, modifier", [
+  @pytest.mark.parametrize('beg, end, modifier', [
       (0, 10, 1.0),
       (-10, 10, 2.0),
       (0, 0, 0.5),
@@ -19,7 +19,7 @@ class TestTMSection:
     assert section.end == end
     assert section.modifier == modifier
 
-  @pytest.mark.parametrize("beg, end, modifier", [
+  @pytest.mark.parametrize('beg, end, modifier', [
       (10, 0, 1.0),
       (10, 0, -1.0),
       (0, 10, -1.0),
@@ -33,7 +33,7 @@ class TestTMSection:
     with pytest.raises(AssertionError):
       TMSection(beg, end, modifier)
 
-  @pytest.mark.parametrize("section1, section2, expected_section", [
+  @pytest.mark.parametrize('section1, section2, expected_section', [
       (
           TMSection(0, 10, 1.0),
           TMSection(10, 20, 1.0),
@@ -64,7 +64,7 @@ class TestTMSection:
       self, section1: TMSection, section2: TMSection, expected_section: TMSection):
     assert section1.try_extending_with(section2) is True and section1 == expected_section
 
-  @pytest.mark.parametrize("section1, section2", [
+  @pytest.mark.parametrize('section1, section2', [
       (TMSection(-10, 10, 1.0), TMSection(-10, 10, 1.0)),
       (TMSection(5, 10, 1.0), TMSection(5, 15, 1.0)),
       (TMSection(6, 10, 0.5), TMSection(11, 15, 1.0)),
@@ -77,7 +77,7 @@ class TestTMSection:
     section1_before = TMSection(section1.beg, section1.end, section1.modifier)
     assert section1.try_extending_with(section2) is False and section1 == section1_before
 
-  @pytest.mark.parametrize("section, expected_duration", [
+  @pytest.mark.parametrize('section, expected_duration', [
       (TMSection(0, 10, 1.0), 10),
       (TMSection(-10, 10, 2.0), 40),
       (TMSection(0, 100, 0.5), 50),
@@ -91,7 +91,7 @@ class TestTMSection:
   def test_duration_should_return_expected_duration(self, section, expected_duration):
     assert section.duration == expected_duration
 
-  @pytest.mark.parametrize("section, beg, end, expected_section", [
+  @pytest.mark.parametrize('section, beg, end, expected_section', [
       (TMSection(0, 3, 2), 1, 2, TMSection(1, 2, 2)),
       (TMSection(1, 2, 2), 0, 3, TMSection(1, 2, 2)),
       (TMSection(1, 2, 1), 0, 3, TMSection(1, 2, 1)),
@@ -110,7 +110,7 @@ class TestTMSection:
 
     assert result == expected_section
 
-  @pytest.mark.parametrize("section, beg, end", [
+  @pytest.mark.parametrize('section, beg, end', [
       (TMSection(0, 1, 1), 2, 3),
       (TMSection(4, 5, 0.5), 2, 3),
   ])
@@ -166,7 +166,7 @@ class TestFragmentedTimeline:
 
     tl.append_section(TMSection(2, 3, 0.5))
 
-    assert [s for s in tl] == [(TMSection(0, 1), 1.0), (TMSection(2, 3, 0.5), 1.5)]
+    assert list(tl) == [(TMSection(0, 1), 1.0), (TMSection(2, 3, 0.5), 1.5)]
     assert tl.time_scope == 3
 
   def test_append_section_should_extend_when_direct_continuation(self):
@@ -174,7 +174,7 @@ class TestFragmentedTimeline:
 
     tl.append_section(TMSection(1, 2, 0.5))
 
-    assert [s for s in tl] == [(TMSection(0, 2, 0.5), 1.0)]
+    assert list(tl) == [(TMSection(0, 2, 0.5), 1.0)]
     assert tl.time_scope == 2
 
   def test_append_section_should_not_append_when_modifier_is_0(self):
@@ -182,7 +182,7 @@ class TestFragmentedTimeline:
 
     tl.append_section(TMSection(2, 3, 0))
 
-    assert [s for s in tl] == [(TMSection(0, 1), 1.0)]
+    assert list(tl) == [(TMSection(0, 1), 1.0)]
     assert tl.time_scope == 3
 
   def test_append_section_should_clamp_section_beg_to_0_when_negative_beg(self):
@@ -190,7 +190,7 @@ class TestFragmentedTimeline:
 
     tl.append_section(TMSection(-math.inf, math.inf))
 
-    assert [s for s in tl] == [(TMSection(0, math.inf), math.inf)]
+    assert list(tl) == [(TMSection(0, math.inf), math.inf)]
     assert tl.time_scope == math.inf
 
   def test_unmap_timepoint_to_source_should_return_none_when_empty_timeline(self):
@@ -269,7 +269,7 @@ class TestFragmentedTimeline:
           ),
       ])
   def test_map_time_range_should_return_correct_results_when_valid_ranges(
-      self, init_sections, range_to_map: tuple[float, float],
+      self, init_sections: list[TMSection], range_to_map: tuple[float, float],
       expected_mapping_results: RangeMappingResult, expected_next_timepoint: float):
     tl = FragmentedTimeline(*init_sections)
     tl.time_scope = math.inf  # mark the timeline as complete

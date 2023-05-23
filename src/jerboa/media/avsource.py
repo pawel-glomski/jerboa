@@ -5,7 +5,7 @@ from pyglet.image import ImageData
 from pyglet.media import StreamingSource
 from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
-import jerboa.media.normalized_audio as normalized_audio
+from jerboa.media import normalized_audio
 from jerboa.timeline import FragmentedTimeline
 from .decoder import StreamDecoder
 from .reformatters import MediaType, AudioReformatter, VideoReformatter
@@ -14,11 +14,6 @@ VIDEO_FORMAT_PYGLET = 'RGB'
 VIDEO_FORMAT = av.VideoFormat('rgb24')
 AUDIO_FORMAT = av.AudioFormat('s16').packed
 AUDIO_MAX_LAYOUT = av.AudioLayout('stereo')
-
-AUDIO_MAX_COMPENSATION = 0.1  # duration can be changed up to 10% at once
-
-PREFILL_DURATION = 0.1  # in seconds
-
 
 def create_reformatter(stream: av.stream.Stream) -> AudioReformatter | VideoReformatter:
   if MediaType(stream.type) == MediaType.AUDIO:
@@ -29,16 +24,17 @@ def create_reformatter(stream: av.stream.Stream) -> AudioReformatter | VideoRefo
 
   return VideoReformatter(VIDEO_FORMAT)
 
+#TODO: fix desync after seeking, does not happen when: pause -> seek 0 -> play
 
-class SLSource(StreamingSource):
+class JBSource(StreamingSource):
 
   def __init__(self, filepath: str):
     from jerboa.timeline import TMSection  # TODO: remove me, for debugging only
     debug_timeline = FragmentedTimeline(
         # *[TMSection(i * 1.0, i * 1.0 + 0.5, 1 - 0.5 * (i % 2)) for i in range(200)]
         # TMSection(0, 4, 0.75),
-        TMSection(5, math.inf, 0.5)
-        # TMSection(0, math.inf)
+        # TMSection(0, math.inf, 1 / 1.5)
+        TMSection(0, math.inf)
     )
 
     self.container = av.open(filepath)
@@ -82,8 +78,6 @@ class SLSource(StreamingSource):
   def seek(self, timepoint: float):
     for decoder in self.decoders.values():
       decoder.seek(timepoint)
-    for decoder in self.decoders.values():
-      decoder.prefill_buffer(PREFILL_DURATION)
 
   def get_audio_data(self, num_bytes, compensation_time=0.0) -> AudioData:
     audio_decoder = self.decoders[MediaType.AUDIO]

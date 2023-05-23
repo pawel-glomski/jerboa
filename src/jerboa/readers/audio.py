@@ -120,8 +120,8 @@ def read_entire_audio(file_path: str,
     command += ['-ac', '1'] if mono else []
     command += ['-ar', f'{sample_rate}'] if sample_rate is not None else []
     command += ['pipe:1']
-    process = subprocess.Popen(stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, args=command)
-    buffer, _ = process.communicate()
+    with subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL) as process:
+      buffer, _ = process.communicate()
 
     acodec = av.Codec(acodec, 'r')
     dtype = np.dtype(format_dtypes[acodec.audio_formats[0].name])

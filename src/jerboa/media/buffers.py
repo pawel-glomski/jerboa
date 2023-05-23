@@ -2,7 +2,7 @@ import av
 import numpy as np
 from collections import deque
 
-import jerboa.media.normalized_audio as normalized_audio
+from jerboa.media import normalized_audio
 from .mappers import MappedNumpyFrame
 from .reformatters import MediaType, AudioReformatter, VideoReformatter
 
@@ -42,7 +42,7 @@ class AudioBuffer:
 
     # if mapped_audio_frame.beg_timepoint != self._audio_end_timepoint:
     normalized_audio.smooth_out_transition(self._audio_last_sample, mapped_audio_frame.data,
-                                            self._transition_steps)
+                                           self._transition_steps)
 
     if self._audio_beg_timepoint is None:
       self._audio_beg_timepoint = mapped_audio_frame.beg_timepoint
