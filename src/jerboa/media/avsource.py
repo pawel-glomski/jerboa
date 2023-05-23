@@ -37,7 +37,8 @@ class JBSource(StreamingSource):
         # *[TMSection(i * 1.0, i * 1.0 + 0.5, 1 - 0.5 * (i % 2)) for i in range(200)]
         # TMSection(0, 4, 0.75),
         # TMSection(0, math.inf, 1 / 1.5)
-        TMSection(0, math.inf))
+        TMSection(0, math.inf)
+        )
 
     self.container = av.open(filepath)
     self.decoders: dict[MediaType, StreamDecoder] = {}
@@ -83,16 +84,18 @@ class JBSource(StreamingSource):
 
   def get_audio_data(self, num_bytes, compensation_time=0.0) -> AudioData:
     audio_decoder = self.decoders[MediaType.AUDIO]
-    target_media_format = audio_decoder.target_media_format
-    sample_rate = audio_decoder.processing_media_config.sample_rate
     timestamp = audio_decoder.get_next_timepoint()
-    audio = audio_decoder.pop(num_bytes)
+
+    sample_size_in_bytes = (self.audio_format.channels * AUDIO_FORMAT.bytes)
+    wanted_samples_num = int(num_bytes / sample_size_in_bytes)
+    audio = audio_decoder.pop(wanted_samples_num)
     if audio is None:
       return None
 
+    sample_rate = self.audio_format.sample_rate
     audio = normalized_audio.compensated(audio, sample_rate, compensation_time)
     duration = normalized_audio.calc_duration(audio, sample_rate)
-    audio_bytes = normalized_audio.to_real_audio(audio, target_media_format).tobytes()
+    audio_bytes = normalized_audio.to_real_audio(audio, AUDIO_FORMAT).tobytes()
 
     return AudioData(audio_bytes, len(audio_bytes), timestamp, duration, [])
 

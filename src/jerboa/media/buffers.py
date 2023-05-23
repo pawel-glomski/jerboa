@@ -13,11 +13,9 @@ class AudioBuffer:
 
     self._audio = normalized_audio.create_circular_buffer(audio_config, max_duration)
     self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
-    self._audio_beg_timepoint = None
-    self._audio_end_timepoint = None
+    self._timepoint = None
 
     self._max_samples = int(max_duration * audio_config.sample_rate)
-    self._transition_steps = normalized_audio.get_transition_steps(audio_config.sample_rate)
 
   def __len__(self) -> int:
     return len(self._audio)
@@ -29,42 +27,33 @@ class AudioBuffer:
   def clear(self) -> None:
     self._audio.clear()
     self._audio_last_sample[:] = 0
-    self._audio_beg_timepoint = None
-    self._audio_end_timepoint = None
+    self._timepoint = None
 
   def put(self, stretched_audio_frame: StretchedFrame) -> None:
-    assert stretched_audio_frame.beg_timepoint < stretched_audio_frame.end_timepoint
+    assert stretched_audio_frame.duration > 0
     assert stretched_audio_frame.data.size > 0
     assert not self.is_full()
 
-    # if stretched_audio_frame.beg_timepoint != self._audio_end_timepoint:
-    # normalized_audio.smooth_out_transition(self._audio_last_sample, stretched_audio_frame.data,
-    #                                        self._transition_steps)
-
-    if self._audio_beg_timepoint is None:
-      self._audio_beg_timepoint = stretched_audio_frame.beg_timepoint
-    self._audio_end_timepoint = stretched_audio_frame.end_timepoint
+    if self._timepoint is None:
+      self._timepoint = stretched_audio_frame.timepoint
 
     self._audio.put(stretched_audio_frame.data)
     self._audio_last_sample[:] = self._audio[-1]
 
-  def pop(self, bytes_num: int) -> np.ndarray:
+  def pop(self, samples_num: int) -> np.ndarray:
     assert not self.is_empty()
 
     all_samples_num = len(self._audio)
-    pop_samples_num = min(all_samples_num, int(bytes_num / self._audio.dtype.itemsize))
+    pop_samples_num = min(all_samples_num, samples_num)
 
     audio = self._audio.pop(pop_samples_num)
+    audio_duration = normalized_audio.calc_duration(audio, self._audio_config.sample_rate)
 
-    # to be consistent with the timeline, use the timeline timepoints to calculate the current
-    # timepoint, instead of calculating the duration of the returned audio (pop_samples_num / sr)
-    fraction = pop_samples_num / all_samples_num
-    self._audio_beg_timepoint += fraction * (self._audio_end_timepoint - self._audio_beg_timepoint)
-
+    self._timepoint += audio_duration
     return audio
 
   def get_next_timepoint(self) -> float | None:
-    return self._audio_beg_timepoint
+    return self._timepoint
 
   def is_empty(self) -> bool:
     return len(self) == 0
@@ -94,21 +83,21 @@ class VideoBuffer:
 
   def put(self, stretched_video_frame: StretchedFrame) -> None:
     assert not self.is_full()
-    assert stretched_video_frame.beg_timepoint < stretched_video_frame.end_timepoint
+    assert stretched_video_frame.duration > 0
 
     self._frames.append(stretched_video_frame)
-    self._duration += stretched_video_frame.end_timepoint - stretched_video_frame.beg_timepoint
+    self._duration += stretched_video_frame.duration
 
   def pop(self) -> np.ndarray:
     assert not self.is_empty()
 
     frame = self._frames.popleft()
-    self._duration -= frame.end_timepoint - frame.beg_timepoint
+    self._duration -= frame.duration
     self._duration *= (not self.is_empty())  # ensure _duration == 0 when is_empty() == true
     return frame.data
 
   def get_next_timepoint(self) -> float:
-    return self._frames[0].beg_timepoint
+    return self._frames[0].timepoint
 
   def is_empty(self) -> bool:
     return len(self) == 0
