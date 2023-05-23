@@ -83,8 +83,8 @@ class JBSource(StreamingSource):
 
   def get_audio_data(self, num_bytes, compensation_time=0.0) -> AudioData:
     audio_decoder = self.decoders[MediaType.AUDIO]
-    audio_format = audio_decoder.media_config.format
-    sample_rate = audio_decoder.media_config.sample_rate
+    target_media_format = audio_decoder.target_media_format
+    sample_rate = audio_decoder.processing_media_config.sample_rate
     timestamp = audio_decoder.get_next_timepoint()
     audio = audio_decoder.pop(num_bytes)
     if audio is None:
@@ -92,7 +92,7 @@ class JBSource(StreamingSource):
 
     audio = normalized_audio.compensated(audio, sample_rate, compensation_time)
     duration = normalized_audio.calc_duration(audio, sample_rate)
-    audio_bytes = normalized_audio.to_real_audio(audio, audio_format).tobytes()
+    audio_bytes = normalized_audio.to_real_audio(audio, target_media_format).tobytes()
 
     return AudioData(audio_bytes, len(audio_bytes), timestamp, duration, [])
 

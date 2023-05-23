@@ -8,17 +8,16 @@ from .media import MediaType, AudioConfig, VideoConfig
 
 class AudioBuffer:
 
-  def __init__(self, media_config: AudioConfig, max_duration: float) -> None:
-    self._audio_config = media_config
+  def __init__(self, audio_config: AudioConfig, max_duration: float) -> None:
+    self._audio_config = audio_config
 
-    self._audio = normalized_audio.create_circular_buffer(media_config.format, media_config.layout,
-                                                          media_config.sample_rate, max_duration)
+    self._audio = normalized_audio.create_circular_buffer(audio_config, max_duration)
     self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
     self._audio_beg_timepoint = None
     self._audio_end_timepoint = None
 
-    self._max_samples = int(max_duration * media_config.sample_rate)
-    self._transition_steps = normalized_audio.get_transition_steps(media_config.sample_rate)
+    self._max_samples = int(max_duration * audio_config.sample_rate)
+    self._transition_steps = normalized_audio.get_transition_steps(audio_config.sample_rate)
 
   def __len__(self) -> int:
     return len(self._audio)
@@ -39,8 +38,8 @@ class AudioBuffer:
     assert not self.is_full()
 
     # if mapped_audio_frame.beg_timepoint != self._audio_end_timepoint:
-    normalized_audio.smooth_out_transition(self._audio_last_sample, mapped_audio_frame.data,
-                                           self._transition_steps)
+    # normalized_audio.smooth_out_transition(self._audio_last_sample, mapped_audio_frame.data,
+    #                                        self._transition_steps)
 
     if self._audio_beg_timepoint is None:
       self._audio_beg_timepoint = mapped_audio_frame.beg_timepoint

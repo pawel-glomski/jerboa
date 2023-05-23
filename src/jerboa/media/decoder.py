@@ -6,9 +6,10 @@ from bisect import bisect_right
 from threading import Thread, Lock, Condition
 
 from jerboa.timeline import FragmentedTimeline
+from .media import AudioConfig, VideoConfig
 from .buffers import create_buffer
 from .mappers import MappedNumpyFrame, create_mapper
-from .media import AudioConfig, VideoConfig
+from .reformatters import create_reformatter
 
 BUFFER_DURATION = 5.0  # in seconds
 MAPPER_BUFFER_DURATION = 0.5  # in seconds
@@ -55,10 +56,10 @@ class StreamDecoder:
     self.start_timepoint = self.stream.start_time * self.stream.time_base
     assert isinstance(self.stream, (av.audio.AudioStream, av.video.VideoStream))
 
-    self._media_config = media_config
-    self._buffer = create_buffer(media_config, BUFFER_DURATION)
+    self._target_media_format = media_config.format
     self._mapper = create_mapper(media_config, MAPPER_BUFFER_DURATION)
-    self._reformatter = self._mapper.create_reformatter()
+    self._buffer = create_buffer(self._mapper.processing_media_config, BUFFER_DURATION)
+    self._reformatter = create_reformatter(self._mapper.processing_media_config)
 
     self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
     self._keyframe_pts_arr = list[float]()  # probing is done in the decoding thread
@@ -85,8 +86,12 @@ class StreamDecoder:
       self.seek(STOP_DECODING_SEEK_TIMEPOINT)
 
   @property
-  def media_config(self) -> AudioConfig | VideoConfig:
-    return self._media_config
+  def target_media_format(self) -> av.AudioFormat | av.VideoFormat:
+    return self._target_media_format
+
+  @property
+  def processing_media_config(self) -> AudioConfig | VideoConfig:
+    return self._mapper.processing_media_config
 
   def update_timeline(self, updated_timeline: FragmentedTimeline):
     assert updated_timeline.time_scope > self._timeline.time_scope
