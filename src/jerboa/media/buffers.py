@@ -1,33 +1,31 @@
-import av
 import numpy as np
 from collections import deque
 
 from jerboa.media import normalized_audio
 from .mappers import MappedNumpyFrame
-from .reformatters import MediaType, AudioReformatter, VideoReformatter
+from .media import MediaType, AudioConfig, VideoConfig
 
 
 class AudioBuffer:
 
-  def __init__(self, fmt: av.AudioFormat, layout: av.AudioLayout, sample_rate: int,
-               max_duration: float) -> None:
-    self._format = fmt
-    self._sample_rate = sample_rate
+  def __init__(self, media_config: AudioConfig, max_duration: float) -> None:
+    self._audio_config = media_config
 
-    self._audio = normalized_audio.create_circular_buffer(fmt, layout, sample_rate, max_duration)
+    self._audio = normalized_audio.create_circular_buffer(media_config.format, media_config.layout,
+                                                          media_config.sample_rate, max_duration)
     self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
     self._audio_beg_timepoint = None
     self._audio_end_timepoint = None
 
-    self._max_samples = int(max_duration * sample_rate)
-    self._transition_steps = normalized_audio.get_transition_steps(sample_rate)
+    self._max_samples = int(max_duration * media_config.sample_rate)
+    self._transition_steps = normalized_audio.get_transition_steps(media_config.sample_rate)
 
   def __len__(self) -> int:
     return len(self._audio)
 
   @property
   def duration(self) -> float:
-    return len(self._audio) / self._sample_rate
+    return len(self._audio) / self._audio_config.sample_rate
 
   def clear(self) -> None:
     self._audio.clear()
@@ -120,11 +118,8 @@ class VideoBuffer:
     return self._duration >= self._max_duration
 
 
-def create_buffer(reformatter: AudioReformatter | VideoReformatter,
+def create_buffer(media_config: AudioConfig | VideoConfig,
                   buffer_duration: float) -> AudioBuffer | VideoBuffer:
-  if reformatter.media_type == MediaType.AUDIO:
-    return AudioBuffer(reformatter.format,
-                       reformatter.layout,
-                       reformatter.sample_rate,
-                       max_duration=buffer_duration)
+  if media_config.media_type == MediaType.AUDIO:
+    return AudioBuffer(media_config, max_duration=buffer_duration)
   return VideoBuffer(max_duration=buffer_duration)
