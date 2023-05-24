@@ -4,6 +4,7 @@ import math
 import numpy as np
 from bisect import bisect_right
 from threading import Thread, Lock, Condition
+from fractions import Fraction
 
 from jerboa.timeline import FragmentedTimeline, RangeMappingResult
 from .media import MediaType, AudioConfig, VideoConfig
@@ -57,9 +58,13 @@ class StreamDecoder:
     assert isinstance(self.stream, (av.audio.AudioStream, av.video.VideoStream))
 
     if media_config.media_type == MediaType.AUDIO:
-      self._calculate_frame_end = lambda frame, _: frame.time + frame.samples / frame.sample_rate
+      if self.stream.time_base == Fraction(1, self.stream.sample_rate):
+        self._fixed_next_frame_pts = lambda frame, _: frame.pts + frame.samples
+      else:
+        self._fixed_next_frame_pts = lambda frame, _: frame.pts + round(
+            Fraction(frame.samples, frame.sample_rate) / frame.time_base)
     else:
-      self._calculate_frame_end = lambda _, next_fame: next_fame.time
+      self._fixed_next_frame_pts = lambda _, next_fame: next_fame.pts
 
     self._target_media_format = media_config.format
     self._stretcher = create_stretcher(media_config, STRETCHER_BUFFER_DURATION)
@@ -159,8 +164,9 @@ class StreamDecoder:
 
         for next_frame in self._reformatter.reformat(next_raw_frame):
           if current_frame is not None:
-            frame_beg = current_frame.time
-            frame_end = self._calculate_frame_end(current_frame, next_frame)
+            next_frame.pts = self._fixed_next_frame_pts(current_frame, next_frame)
+
+            frame_beg, frame_end = current_frame.time, next_frame.time
             mapping_results, self._min_frame_time = self._get_frame_mapping_results(
                 frame_beg, frame_end)
 
@@ -218,7 +224,7 @@ class StreamDecoder:
     stretched_frame = self._stretcher.stretch(None, None)  # TODO: push current_frame instead
     with self._mutex:
       if self._seek_timepoint is None:
-        if stretched_frame is not None:
+        if stretched_frame.duration > 0:
           self._buffer_not_full_or_seeking.wait_for(
               lambda: not self._buffer.is_full() or self._seek_timepoint is not None)
           self._buffer.put(stretched_frame)
