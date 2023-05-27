@@ -13,7 +13,7 @@ from .stretchers import create_stretcher
 from .reformatters import create_reformatter
 
 BUFFER_DURATION = 5.0  # in seconds
-STRETCHER_BUFFER_DURATION = 0.5  # in seconds
+STRETCHER_BUFFER_DURATION = 0.2  # in seconds
 
 AUDIO_SEEK_THRESHOLD = 0.5  # in seconds
 
@@ -86,7 +86,7 @@ class StreamDecoder:
     # this has the same value as _seek_timepoint after the seek, but changes during decoding
     self._min_frame_time: float = None
 
-    self._dec_thread = Thread(target=self._decode,
+    self._dec_thread = Thread(target=self._decoding,
                               name=f'Decoding #{self.stream.index} stream ({self.stream.type})',
                               daemon=True)
     self._dec_thread.start()
@@ -129,7 +129,7 @@ class StreamDecoder:
     with self._mutex:
       self._seek_without_lock(seek_timepoint)
 
-  def _decode(self):
+  def _decoding(self):
     self._keyframe_pts_arr = probe_keyframe_pts(self.container, self.stream)
     self._seek_timepoint = self.start_timepoint  # start decoding from start
     while True:
@@ -167,7 +167,7 @@ class StreamDecoder:
             next_frame.pts = self._fixed_next_frame_pts(current_frame, next_frame)
 
             frame_beg, frame_end = current_frame.time, next_frame.time
-            mapping_results, self._min_frame_time = self._get_frame_mapping_results(
+            mapping_results, self._min_frame_time = self._decoding__get_frame_mapping_results(
                 frame_beg, frame_end)
 
             if (mapping_results is None or
@@ -178,7 +178,7 @@ class StreamDecoder:
 
     self._decoding__flush_stretcher()  # TODO: this should also handle the last `current_frame`
 
-  def _get_frame_mapping_results(
+  def _decoding__get_frame_mapping_results(
       self, frame_beg: float,
       frame_end: float) -> tuple[RangeMappingResult, float] | tuple[None, None]:
     with self._mutex:
@@ -221,7 +221,7 @@ class StreamDecoder:
     return False
 
   def _decoding__flush_stretcher(self) -> None:
-    stretched_frame = self._stretcher.stretch(None, None)  # TODO: push current_frame instead
+    stretched_frame = self._stretcher.stretch(None, None)
     with self._mutex:
       if self._seek_timepoint is None:
         if stretched_frame.duration > 0:
