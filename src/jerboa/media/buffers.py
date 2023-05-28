@@ -2,7 +2,7 @@ import numpy as np
 from collections import deque
 
 from jerboa.media import normalized_audio
-from .stretchers import StretchedFrame
+from .mappers import MappedFrame
 from .media import MediaType, AudioConfig, VideoConfig
 
 
@@ -29,15 +29,15 @@ class AudioBuffer:
     self._audio_last_sample[:] = 0
     self._timepoint = None
 
-  def put(self, stretched_audio_frame: StretchedFrame) -> None:
-    assert stretched_audio_frame.duration > 0
-    assert stretched_audio_frame.data.size > 0
+  def put(self, mapped_audio_frame: MappedFrame) -> None:
+    assert mapped_audio_frame.duration > 0
+    assert mapped_audio_frame.data.size > 0
     assert not self.is_full()
 
     if self._timepoint is None:
-      self._timepoint = stretched_audio_frame.timepoint
+      self._timepoint = mapped_audio_frame.timepoint
 
-    self._audio.put(stretched_audio_frame.data)
+    self._audio.put(mapped_audio_frame.data)
     self._audio_last_sample[:] = self._audio[-1]
 
   def pop(self, samples_num: int) -> np.ndarray:
@@ -68,7 +68,7 @@ class VideoBuffer:
     self._max_duration = max_duration
     self._duration = 0.0
 
-    self._frames = deque[StretchedFrame]()
+    self._frames = deque[MappedFrame]()
 
   def __len__(self) -> int:
     return len(self._frames)
@@ -81,12 +81,12 @@ class VideoBuffer:
     self._frames.clear()
     self._duration = 0.0
 
-  def put(self, stretched_video_frame: StretchedFrame) -> None:
+  def put(self, mapped_video_frame: MappedFrame) -> None:
     assert not self.is_full()
-    assert stretched_video_frame.duration > 0
+    assert mapped_video_frame.duration > 0
 
-    self._frames.append(stretched_video_frame)
-    self._duration += stretched_video_frame.duration
+    self._frames.append(mapped_video_frame)
+    self._duration += mapped_video_frame.duration
 
   def pop(self) -> np.ndarray:
     assert not self.is_empty()

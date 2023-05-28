@@ -9,11 +9,11 @@ from fractions import Fraction
 from jerboa.timeline import FragmentedTimeline, RangeMappingResult
 from .media import MediaType, AudioConfig, VideoConfig
 from .buffers import create_buffer
-from .stretchers import create_stretcher
+from .mappers import create_mapper
 from .reformatters import create_reformatter
 
 BUFFER_DURATION = 5.0  # in seconds
-STRETCHER_BUFFER_DURATION = 0.2  # in seconds
+MAPPER_BUFFER_DURATION = 0.2  # in seconds
 
 AUDIO_SEEK_THRESHOLD = 0.5  # in seconds
 
@@ -67,9 +67,9 @@ class StreamDecoder:
       self._fixed_next_frame_pts = lambda _, next_fame: next_fame.pts
 
     self._target_media_format = media_config.format
-    self._stretcher = create_stretcher(media_config, STRETCHER_BUFFER_DURATION)
-    self._buffer = create_buffer(self._stretcher.internal_media_config, BUFFER_DURATION)
-    self._reformatter = create_reformatter(self._stretcher.internal_media_config)
+    self._mapper = create_mapper(media_config, MAPPER_BUFFER_DURATION)
+    self._buffer = create_buffer(self._mapper.internal_media_config, BUFFER_DURATION)
+    self._reformatter = create_reformatter(self._mapper.internal_media_config)
 
     self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
     self._keyframe_pts_arr = list[float]()  # probing is done in the decoding thread
@@ -101,7 +101,7 @@ class StreamDecoder:
 
   @property
   def internal_media_config(self) -> AudioConfig | VideoConfig:
-    return self._stretcher.internal_media_config
+    return self._mapper.internal_media_config
 
   def update_timeline(self, updated_timeline: FragmentedTimeline):
     assert updated_timeline.time_scope > self._timeline.time_scope
@@ -152,7 +152,7 @@ class StreamDecoder:
 
   def _decoding__loop(self):
     self._reformatter.reset()
-    self._stretcher.reset()
+    self._mapper.reset()
 
     current_frame: av.VideoFrame | av.AudioFrame | None = None
     for next_pkt in self.container.demux(self.stream):
@@ -171,12 +171,12 @@ class StreamDecoder:
                 frame_beg, frame_end)
 
             if (mapping_results is None or
-                (not self._decoding__try_to_stretch_and_put_frame(current_frame, mapping_results)
-                 and self._decoding__try_to_skip_dropped_frames(frame_beg, frame_end))):
+                (not self._decoding__try_to_map_and_put_frame(current_frame, mapping_results) and
+                 self._decoding__try_to_skip_dropped_frames(frame_beg, frame_end))):
               return  # begin seeking
           current_frame = next_frame
 
-    self._decoding__flush_stretcher()  # TODO: this should also handle the last `current_frame`
+    self._decoding__flush_mapper()  # TODO: this should also handle the last `current_frame`
 
   def _decoding__get_frame_mapping_results(
       self, frame_beg: float,
@@ -189,17 +189,17 @@ class StreamDecoder:
 
     return self._timeline.map_time_range(frame_beg, frame_end)
 
-  def _decoding__try_to_stretch_and_put_frame(self, current_frame: av.AudioFrame | av.VideoFrame,
-                                              mapping_results: RangeMappingResult) -> bool:
-    stretched_frame = self._stretcher.stretch(current_frame, mapping_results)
-    if stretched_frame.duration > 0:
+  def _decoding__try_to_map_and_put_frame(self, current_frame: av.AudioFrame | av.VideoFrame,
+                                          mapping_results: RangeMappingResult) -> bool:
+    mapped_frame = self._mapper.map(current_frame, mapping_results)
+    if mapped_frame.duration > 0:
       with self._mutex:
         self._buffer_not_full_or_seeking.wait_for(
             lambda: not self._buffer.is_full() or self._seek_timepoint is not None)
         if self._seek_timepoint is not None:
           return False  # begin seeking
 
-        self._buffer.put(stretched_frame)
+        self._buffer.put(mapped_frame)
         self._buffer_not_empty_or_done.notify()
 
     # returns false only when interrupted, not putting a dropped frame is a success too
@@ -220,14 +220,14 @@ class StreamDecoder:
       return True  # return to begin seeking
     return False
 
-  def _decoding__flush_stretcher(self) -> None:
-    stretched_frame = self._stretcher.stretch(None, None)
+  def _decoding__flush_mapper(self) -> None:
+    mapped_frame = self._mapper.map(None, None)
     with self._mutex:
       if self._seek_timepoint is None:
-        if stretched_frame.duration > 0:
+        if mapped_frame.duration > 0:
           self._buffer_not_full_or_seeking.wait_for(
               lambda: not self._buffer.is_full() or self._seek_timepoint is not None)
-          self._buffer.put(stretched_frame)
+          self._buffer.put(mapped_frame)
         self._is_done = True
         self._buffer_not_empty_or_done.notify()
 

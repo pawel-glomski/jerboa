@@ -11,13 +11,13 @@ DEFAULT_MIN_AUDIO_DURATION = 0.25
 
 
 @dataclass
-class StretchedFrame:
+class MappedFrame:
   timepoint: float
   duration: float
   data: np.ndarray
 
 
-class AudioStretcher:
+class AudioMapper:
 
   def __init__(self,
                audio_config: AudioConfig,
@@ -43,7 +43,7 @@ class AudioStretcher:
     self._beg_timepoint = None
     self._stretcher.reset()
 
-  def stretch(self, frame: av.AudioFrame, mapping_results: RangeMappingResult) -> StretchedFrame:
+  def map(self, frame: av.AudioFrame, mapping_results: RangeMappingResult) -> MappedFrame:
     flush = frame is None
 
     if not flush:
@@ -67,9 +67,9 @@ class AudioStretcher:
       audio = self._audio.pop(len(self._audio))
       duration = naudio.calc_duration(audio, self._processing_audio_config.sample_rate)
       self._beg_timepoint = None  # += duration
-      return StretchedFrame(beg_timepoint, duration, audio)
+      return MappedFrame(beg_timepoint, duration, audio)
 
-    return StretchedFrame(0, 0, np.array([]))  # empty frame
+    return MappedFrame(0, 0, np.array([]))  # empty frame
 
   def _cut_according_to_mapping_results(self, frame: av.AudioFrame,
                                         mapping_results: RangeMappingResult):
@@ -84,7 +84,7 @@ class AudioStretcher:
         yield audio_section, section.modifier
 
 
-class VideoStretcher:
+class VideoMapper:
 
   def __init__(self, video_config: VideoConfig) -> None:
     self._video_config = video_config
@@ -96,17 +96,17 @@ class VideoStretcher:
   def reset(self) -> None:
     pass
 
-  def stretch(self, frame: av.VideoFrame, mapping_results: RangeMappingResult) -> StretchedFrame:
+  def map(self, frame: av.VideoFrame, mapping_results: RangeMappingResult) -> MappedFrame:
     flush = frame is None
     if not flush and mapping_results.beg < mapping_results.end:
       duration = mapping_results.end - mapping_results.beg
-      return StretchedFrame(mapping_results.beg, duration, frame.to_ndarray())
+      return MappedFrame(mapping_results.beg, duration, frame.to_ndarray())
 
-    return StretchedFrame(0, 0, np.array([]))  # empty frame
+    return MappedFrame(0, 0, np.array([]))  # empty frame
 
 
-def create_stretcher(media_config: AudioConfig | VideoConfig,
-                     stretcher_buffer_duration: float) -> AudioStretcher | VideoStretcher:
+def create_mapper(media_config: AudioConfig | VideoConfig,
+                  mapper_buffer_duration: float) -> AudioMapper | VideoMapper:
   if media_config.media_type == MediaType.AUDIO:
-    return AudioStretcher(media_config, stretcher_buffer_duration)
-  return VideoStretcher(media_config)
+    return AudioMapper(media_config, mapper_buffer_duration)
+  return VideoMapper(media_config)
