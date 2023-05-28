@@ -7,14 +7,13 @@ class AudioReformatter:
 
   def __init__(self, config: AudioConfig):
     self._config = config
-    self._resampler = av.AudioResampler(format=config.format,
-                                        layout=config.layout,
-                                        rate=config.sample_rate)
+    self.reset()
 
   def reset(self):
     self._resampler = av.AudioResampler(format=self._config.format,
                                         layout=self._config.layout,
-                                        rate=self._config.sample_rate)
+                                        rate=self._config.sample_rate,
+                                        frame_size=1024 * 10)
 
   def reformat(self, frame: av.AudioFrame):
     for reformatted_frame in self._resampler.resample(frame):
