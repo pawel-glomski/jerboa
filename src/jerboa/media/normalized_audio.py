@@ -12,7 +12,8 @@ FORMAT = av.AudioFormat('flt').planar
 assert DType == np.float32 and DType == np.dtype(av.audio.frame.format_dtypes[FORMAT.name])
 
 BUFFER_SIZE_MODIFIER = 1.2
-COMPENSATION_MAX_DURATION_CHANGE = 0.5  # up to 10% at once
+COMPENSATION_MAX_DURATION_CHANGE = 0.1  # up to 10% at once
+librosa.resample(np.zeros((2, 2)), axis=SAMPLES_AXIS, orig_sr=8000, target_sr=16000)
 
 AUDIO_TRANSITION_DURATION = 8.0 / 16000  # 8 steps when sample_rate == 16000
 

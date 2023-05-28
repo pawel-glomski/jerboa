@@ -5,9 +5,8 @@ from dataclasses import dataclass
 
 from jerboa.media import normalized_audio as naudio
 from jerboa.timeline import RangeMappingResult
-from jerboa.utils.circular_buffer import CircularBuffer
 from .media import MediaType, AudioConfig, VideoConfig
-from .reformatters import PROCESSING_AUDIO_FRAME_SIZE
+from .reformatters import PROCESSING_AUDIO_FRAME_DURATION
 
 
 @dataclass
@@ -20,15 +19,9 @@ class MappedFrame:
 class AudioMapper:
 
   def __init__(self, audio_config: AudioConfig) -> None:
-    self._internal_audio_config = AudioConfig(naudio.FORMAT, audio_config.layout,
-                                                audio_config.sample_rate)
-
-    samples_num = int(PROCESSING_AUDIO_FRAME_SIZE * naudio.BUFFER_SIZE_MODIFIER)
-    buffer_shape = naudio.get_shape(samples_num, audio_config.channels_num)
-    buffer_dtype = naudio.get_format_dtype(self.internal_media_config.format)
-    self._audio = CircularBuffer(buffer_shape, naudio.SAMPLES_AXIS, buffer_dtype)
-
-    self._transition_steps = naudio.get_transition_steps(audio_config.sample_rate)
+    self._audio_config = AudioConfig(naudio.FORMAT, audio_config.layout, audio_config.sample_rate)
+    self._audio = naudio.create_circular_buffer(self._audio_config, PROCESSING_AUDIO_FRAME_DURATION)
+    # self._transition_steps = naudio.get_transition_steps(audio_config.sample_rate)
 
     self._stretcher = RubberBandStretcher(
         audio_config.sample_rate, audio_config.channels_num,
@@ -37,7 +30,7 @@ class AudioMapper:
 
   @property
   def internal_media_config(self) -> AudioConfig:
-    return self._internal_audio_config
+    return self._audio_config
 
   def reset(self) -> None:
     self._audio.clear()
@@ -51,9 +44,9 @@ class AudioMapper:
       self._audio.put(self._stretcher.flush())
       beg_timepoint = self._last_frame_end_timepoint
     else:
-      assert frame.format.name == self.internal_media_config.format.name
-      assert frame.layout.name == self.internal_media_config.layout.name
-      assert frame.sample_rate == self.internal_media_config.sample_rate
+      assert frame.format.name == self._audio_config.format.name
+      assert frame.layout.name == self._audio_config.layout.name
+      assert frame.sample_rate == self._audio_config.sample_rate
 
       for audio_segment, modifier in self._cut_according_to_mapping_results(frame, mapping_results):
         self._stretcher.time_ratio = modifier
@@ -64,7 +57,7 @@ class AudioMapper:
       beg_timepoint = mapping_results.beg
 
     audio = self._audio.pop(len(self._audio))
-    duration = naudio.calc_duration(audio, self.internal_media_config.sample_rate)
+    duration = naudio.calc_duration(audio, self._audio_config.sample_rate)
     self._last_frame_end_timepoint = beg_timepoint + duration
     return MappedFrame(beg_timepoint, duration, audio)
 
@@ -73,8 +66,8 @@ class AudioMapper:
 
     frame_audio = naudio.get_from_frame(frame)
     for section in mapping_results.sections:
-      sample_idx_beg = round((section.beg - frame.time) * self.internal_media_config.sample_rate)
-      sample_idx_end = round((section.end - frame.time) * self.internal_media_config.sample_rate)
+      sample_idx_beg = round((section.beg - frame.time) * self._audio_config.sample_rate)
+      sample_idx_end = round((section.end - frame.time) * self._audio_config.sample_rate)
       audio_section = frame_audio[naudio.index_samples(sample_idx_beg, sample_idx_end)]
       if audio_section.size > 0:
         # naudio.smooth_out_transition(audio_section)
