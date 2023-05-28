@@ -17,6 +17,10 @@ COMPENSATION_MAX_DURATION_CHANGE = 0.5  # up to 10% at once
 AUDIO_TRANSITION_DURATION = 8.0 / 16000  # 8 steps when sample_rate == 16000
 
 
+def get_format_dtype(fmt: av.AudioFormat) -> np.dtype:
+  return np.dtype(av.audio.frame.format_dtypes[fmt.name])
+
+
 def get_from_frame(frame: av.AudioFrame) -> np.ndarray:
   assert frame.format.name == FORMAT.name
   return frame.to_ndarray()
@@ -86,7 +90,7 @@ def resampled(audio: np.ndarray, current_sample_rate: int, new_sample_rate: int)
 def create_circular_buffer(audio_config: AudioConfig, max_duration: float) -> CircularBuffer:
   samples_num = int(max_duration * audio_config.sample_rate * BUFFER_SIZE_MODIFIER)
   buffer_shape = get_shape(samples_num, audio_config.channels_num)
-  buffer_dtype = np.dtype(av.audio.frame.format_dtypes[audio_config.format.name])
+  buffer_dtype = get_format_dtype(audio_config.format)
   return CircularBuffer(buffer_shape, SAMPLES_AXIS, buffer_dtype)
 
 

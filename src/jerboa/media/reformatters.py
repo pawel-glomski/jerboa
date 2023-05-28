@@ -2,6 +2,8 @@ from .media import MediaType, AudioConfig, VideoConfig
 
 import av
 
+PROCESSING_AUDIO_FRAME_SIZE = 1024 * 10
+
 
 class AudioReformatter:
 
@@ -13,7 +15,7 @@ class AudioReformatter:
     self._resampler = av.AudioResampler(format=self._config.format,
                                         layout=self._config.layout,
                                         rate=self._config.sample_rate,
-                                        frame_size=1024 * 10)
+                                        frame_size=PROCESSING_AUDIO_FRAME_SIZE)
 
   def reformat(self, frame: av.AudioFrame):
     for reformatted_frame in self._resampler.resample(frame):

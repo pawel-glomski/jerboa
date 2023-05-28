@@ -12,8 +12,7 @@ from .buffers import create_buffer
 from .mappers import create_mapper
 from .reformatters import create_reformatter
 
-BUFFER_DURATION = 5.0  # in seconds
-MAPPER_BUFFER_DURATION = 0.2  # in seconds
+BUFFER_DURATION = 2.5  # in seconds
 
 AUDIO_SEEK_THRESHOLD = 0.5  # in seconds
 
@@ -67,7 +66,7 @@ class StreamDecoder:
       self._fixed_next_frame_pts = lambda _, next_fame: next_fame.pts
 
     self._target_media_format = media_config.format
-    self._mapper = create_mapper(media_config, MAPPER_BUFFER_DURATION)
+    self._mapper = create_mapper(media_config)
     self._buffer = create_buffer(self._mapper.internal_media_config, BUFFER_DURATION)
     self._reformatter = create_reformatter(self._mapper.internal_media_config)
 
@@ -166,8 +165,12 @@ class StreamDecoder:
           if current_frame is not None:
             next_frame.pts = self._fixed_next_frame_pts(current_frame, next_frame)
 
-            frame_beg, frame_end = current_frame.time, next_frame.time
-            mapping_results, self._min_frame_time = self._decoding__get_frame_mapping_results(
+            # Here we make sure that the part of the frame that lies before `self._min_frame_time`
+            # will be discarded. `frame_beg` timepoint is only used for getting the mapping results,
+            # which will be used to cut up the frame.
+            frame_beg = max(self._min_frame_time, current_frame.time)
+            frame_end = next_frame.time
+            mapping_results, self._min_frame_time = self._decoding__try_mapping_frame(
                 frame_beg, frame_end)
 
             if (mapping_results is None or
@@ -178,9 +181,11 @@ class StreamDecoder:
 
     self._decoding__flush_mapper()  # TODO: this should also handle the last `current_frame`
 
-  def _decoding__get_frame_mapping_results(
-      self, frame_beg: float,
-      frame_end: float) -> tuple[RangeMappingResult, float] | tuple[None, None]:
+  def _decoding__try_mapping_frame(
+      self,
+      frame_beg: float,
+      frame_end: float,
+  ) -> tuple[RangeMappingResult, float] | tuple[None, None]:
     with self._mutex:
       self._timeline_updated_or_seeking.wait_for(
           lambda: self._timeline.time_scope >= frame_end or self._seek_timepoint is not None)
