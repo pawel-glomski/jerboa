@@ -9,6 +9,7 @@ from .media import MediaType, AudioConfig, VideoConfig
 
 AUDIO_FRAME_DURATION = 1.0  # in seconds
 
+
 @dataclass
 class MappedFrame:
   timepoint: float
@@ -26,9 +27,9 @@ class AudioMapper:
     self._audio = naudio.create_circular_buffer(self._audio_config)
     # self._transition_steps = naudio.get_transition_steps(audio_config.sample_rate)
 
-    self._stretcher = RubberBandStretcher(
-        audio_config.sample_rate, audio_config.channels_num,
-        Option.PROCESS_REALTIME | Option.ENGINE_FINER | Option.WINDOW_SHORT)
+    self._stretcher = RubberBandStretcher(audio_config.sample_rate, audio_config.channels_num,
+                                          Option.PROCESS_REALTIME | Option.ENGINE_FASTER)
+    # self._stretcher.set_max_process_size(self._audio.max_size)
     self.reset()
 
   @property
@@ -54,8 +55,7 @@ class AudioMapper:
       for audio_segment, modifier in self._cut_according_to_mapping_results(frame, mapping_results):
         self._stretcher.time_ratio = modifier
         self._stretcher.process(audio_segment)
-        if self._stretcher.available():
-          self._audio.put(self._stretcher.retrieve(self._stretcher.available()))
+        self._audio.put(self._stretcher.retrieve_available())
 
       beg_timepoint = mapping_results.beg
 
