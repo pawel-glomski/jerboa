@@ -14,6 +14,7 @@ class AudioConfig:
   format: av.AudioFormat
   layout: av.AudioLayout
   sample_rate: int
+  frame_duration: float | None = None
 
   @property
   def media_type(self) -> MediaType:

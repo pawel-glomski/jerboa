@@ -1,6 +1,6 @@
 import av
 import math
-import librosa
+import soxr
 import numpy as np
 from pylibrb import DType, SAMPLES_AXIS, CHANNELS_AXIS
 from scipy.special import expit
@@ -13,7 +13,6 @@ assert DType == np.float32 and DType == np.dtype(av.audio.frame.format_dtypes[FO
 
 BUFFER_SIZE_MODIFIER = 1.2
 COMPENSATION_MAX_DURATION_CHANGE = 0.1  # up to 10% at once
-librosa.resample(np.zeros((2, 2)), axis=SAMPLES_AXIS, orig_sr=8000, target_sr=16000)
 
 AUDIO_TRANSITION_DURATION = 8.0 / 16000  # 8 steps when sample_rate == 16000
 
@@ -82,13 +81,13 @@ def compensated(audio: np.ndarray, sample_rate: int, compensation_time: float) -
 
 
 def resampled(audio: np.ndarray, current_sample_rate: int, new_sample_rate: int) -> np.ndarray:
-  return librosa.resample(audio.astype(np.float64),
-                          axis=SAMPLES_AXIS,
-                          orig_sr=current_sample_rate,
-                          target_sr=new_sample_rate).astype(audio.dtype)
+  return soxr.resample(audio.T, current_sample_rate, new_sample_rate, quality=soxr.HQ).T
 
 
-def create_circular_buffer(audio_config: AudioConfig, max_duration: float) -> CircularBuffer:
+def create_circular_buffer(audio_config: AudioConfig, max_duration: float = None) -> CircularBuffer:
+  if max_duration is None:
+    max_duration = audio_config.frame_duration
+
   samples_num = int(max_duration * audio_config.sample_rate * BUFFER_SIZE_MODIFIER)
   buffer_shape = get_shape(samples_num, audio_config.channels_num)
   buffer_dtype = get_format_dtype(audio_config.format)

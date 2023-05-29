@@ -6,8 +6,8 @@ from dataclasses import dataclass
 from jerboa.media import normalized_audio as naudio
 from jerboa.timeline import RangeMappingResult
 from .media import MediaType, AudioConfig, VideoConfig
-from .reformatters import PROCESSING_AUDIO_FRAME_DURATION
 
+AUDIO_FRAME_DURATION = 1.0  # in seconds
 
 @dataclass
 class MappedFrame:
@@ -19,8 +19,11 @@ class MappedFrame:
 class AudioMapper:
 
   def __init__(self, audio_config: AudioConfig) -> None:
-    self._audio_config = AudioConfig(naudio.FORMAT, audio_config.layout, audio_config.sample_rate)
-    self._audio = naudio.create_circular_buffer(self._audio_config, PROCESSING_AUDIO_FRAME_DURATION)
+    self._audio_config = AudioConfig(naudio.FORMAT,
+                                     audio_config.layout,
+                                     audio_config.sample_rate,
+                                     frame_duration=AUDIO_FRAME_DURATION)
+    self._audio = naudio.create_circular_buffer(self._audio_config)
     # self._transition_steps = naudio.get_transition_steps(audio_config.sample_rate)
 
     self._stretcher = RubberBandStretcher(
