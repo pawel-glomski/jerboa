@@ -1,22 +1,23 @@
-from .media import MediaType, AudioConfig, VideoConfig
+from jerboa.media.media import MediaType, AudioConfig, VideoConfig
 
 import av
-
-PROCESSING_AUDIO_FRAME_DURATION = 1.0 # in seconds
 
 
 class AudioReformatter:
 
   def __init__(self, config: AudioConfig):
     self._config = config
+    if config.frame_duration:
+      self._frame_size = int(config.frame_duration * self._config.sample_rate)
+    else:
+      self._frame_size = None
     self.reset()
 
   def reset(self):
     self._resampler = av.AudioResampler(format=self._config.format,
                                         layout=self._config.layout,
                                         rate=self._config.sample_rate,
-                                        frame_size=int(PROCESSING_AUDIO_FRAME_DURATION *
-                                                       self._config.sample_rate))
+                                        frame_size=self._frame_size)
 
   def reformat(self, frame: av.AudioFrame):
     for reformatted_frame in self._resampler.resample(frame):

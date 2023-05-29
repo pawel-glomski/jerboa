@@ -1,5 +1,4 @@
-from .analysis import AnalysisMethod, ARG_PREPARE_ANALYSIS_METHOD_FN
-from .spectrogram import SpectrogramAnalysis, CLI as SpectrogramCLI
-from .tfidf import TfidfAnalysis, CLI as TfidfCLI
+# from .analysis import AnalysisMethod, ARG_PREPARE_ANALYSIS_METHOD_FN
+# from .spectrogram import SpectrogramAnalysis, CLI as SpectrogramCLI
 
-ANALYSIS_METHODS = [SpectrogramCLI, TfidfCLI]
+# ANALYSIS_METHODS = [SpectrogramCLI]
