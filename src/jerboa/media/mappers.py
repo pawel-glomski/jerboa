@@ -3,7 +3,7 @@ import numpy as np
 from pylibrb import RubberBandStretcher, Option
 from dataclasses import dataclass
 
-from jerboa.media import normalized_audio as naudio
+from jerboa.media import std_audio
 from jerboa.timeline import RangeMappingResult
 from .media import MediaType, AudioConfig, VideoConfig
 
@@ -20,12 +20,12 @@ class MappedFrame:
 class AudioMapper:
 
   def __init__(self, audio_config: AudioConfig) -> None:
-    self._audio_config = AudioConfig(naudio.FORMAT,
+    self._audio_config = AudioConfig(std_audio.FORMAT,
                                      audio_config.layout,
                                      audio_config.sample_rate,
                                      frame_duration=AUDIO_FRAME_DURATION)
-    self._audio = naudio.create_circular_buffer(self._audio_config)
-    # self._transition_steps = naudio.get_transition_steps(audio_config.sample_rate)
+    self._audio = std_audio.create_circular_buffer(self._audio_config)
+    # self._transition_steps = std_audio.get_transition_steps(audio_config.sample_rate)
 
     self._stretcher = RubberBandStretcher(audio_config.sample_rate, audio_config.channels_num,
                                           Option.PROCESS_REALTIME | Option.ENGINE_FASTER)
@@ -60,20 +60,20 @@ class AudioMapper:
       beg_timepoint = mapping_results.beg
 
     audio = self._audio.pop(len(self._audio))
-    duration = naudio.calc_duration(audio, self._audio_config.sample_rate)
+    duration = std_audio.calc_duration(audio, self._audio_config.sample_rate)
     self._last_frame_end_timepoint = beg_timepoint + duration
     return MappedFrame(beg_timepoint, duration, audio)
 
   def _cut_according_to_mapping_results(self, frame: av.AudioFrame,
                                         mapping_results: RangeMappingResult):
 
-    frame_audio = naudio.get_from_frame(frame)
+    frame_audio = std_audio.get_from_frame(frame)
     for section in mapping_results.sections:
       sample_idx_beg = round((section.beg - frame.time) * self._audio_config.sample_rate)
       sample_idx_end = round((section.end - frame.time) * self._audio_config.sample_rate)
-      audio_section = frame_audio[naudio.index_samples(sample_idx_beg, sample_idx_end)]
+      audio_section = frame_audio[std_audio.index_samples(sample_idx_beg, sample_idx_end)]
       if audio_section.size > 0:
-        # naudio.smooth_out_transition(audio_section)
+        # std_audio.smooth_out_transition(audio_section)
         yield audio_section, section.modifier
 
 
