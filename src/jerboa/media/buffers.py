@@ -1,7 +1,7 @@
 import numpy as np
 from collections import deque
 
-from jerboa.media import normalized_audio
+from jerboa.media import std_audio
 from .mappers import MappedFrame
 from .media import MediaType, AudioConfig, VideoConfig
 
@@ -11,7 +11,7 @@ class AudioBuffer:
   def __init__(self, audio_config: AudioConfig, max_duration: float) -> None:
     self._audio_config = audio_config
 
-    self._audio = normalized_audio.create_circular_buffer(audio_config, max_duration)
+    self._audio = std_audio.create_circular_buffer(audio_config, max_duration)
     self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
     self._timepoint = None
 
@@ -47,7 +47,7 @@ class AudioBuffer:
     pop_samples_num = min(all_samples_num, samples_num)
 
     audio = self._audio.pop(pop_samples_num)
-    audio_duration = normalized_audio.calc_duration(audio, self._audio_config.sample_rate)
+    audio_duration = std_audio.calc_duration(audio, self._audio_config.sample_rate)
 
     self._timepoint += audio_duration
     return audio

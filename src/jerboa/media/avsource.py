@@ -5,7 +5,7 @@ from pyglet.image import ImageData
 from pyglet.media import StreamingSource
 from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
-from jerboa.media import normalized_audio
+from jerboa.media import std_audio
 from jerboa.timeline import FragmentedTimeline
 from .decoder import StreamDecoder
 from .media import MediaType, AudioConfig, VideoConfig
@@ -93,9 +93,9 @@ class JBSource(StreamingSource):
       return None
 
     sample_rate = self.audio_format.sample_rate
-    audio = normalized_audio.compensated(audio, sample_rate, compensation_time)
-    duration = normalized_audio.calc_duration(audio, sample_rate)
-    audio_bytes = normalized_audio.to_real_audio(audio, AUDIO_FORMAT).tobytes()
+    audio = std_audio.compensated(audio, sample_rate, compensation_time)
+    duration = std_audio.calc_duration(audio, sample_rate)
+    audio_bytes = std_audio.to_real_audio(audio, AUDIO_FORMAT).tobytes()
 
     return AudioData(audio_bytes, len(audio_bytes), timestamp, duration, [])
 
