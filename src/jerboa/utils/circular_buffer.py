@@ -131,6 +131,9 @@ class CircularBuffer:
     Args:
       data (np.ndarray): The data to be appended into the buffer.
     '''
+    if data.size == 0:
+      return
+
     insert_size = data.shape[self._axis]
     resulting_size = self._size + insert_size
     if resulting_size > self.max_size:
