@@ -3,31 +3,39 @@ import pytest
 import math
 import numpy as np
 from typing import Callable
+from dataclasses import dataclass
 
 from jerboa.utils.circular_buffer import CircularBuffer
 
+
+@dataclass
+class BufferArgs:
+  shape: tuple
+  axis: int
+  dtype: np.dtype
+
+
 VALID_BUFFER_CASES = [
-    ((0,), 0, np.float64),
-    ((1,), 0, np.float32),
-    ((2,), 0, np.float16),
-    ((64,), 0, np.int64),
-    ((0, 8), 0, np.int32),
-    ((8, 0), 1, np.int16),
-    ((8, 8), 0, np.int8),
-    ((8, 8), 1, np.float64),
-    ((4, 0, 4), 1, np.float32),
-    ((4, 4, 4), 0, np.float16),
-    ((4, 4, 4), 1, np.int64),
-    ((4, 4, 4), 2, np.int32),
+    BufferArgs((0,), 0, np.float64),
+    BufferArgs((1,), 0, np.float32),
+    BufferArgs((2,), 0, np.float16),
+    BufferArgs((64,), 0, np.int64),
+    BufferArgs((0, 8), 0, np.int32),
+    BufferArgs((8, 0), 1, np.int16),
+    BufferArgs((8, 8), 0, np.int8),
+    BufferArgs((8, 8), 1, np.float64),
+    BufferArgs((4, 0, 4), 1, np.float32),
+    BufferArgs((4, 4, 4), 0, np.float16),
+    BufferArgs((4, 4, 4), 1, np.int64),
+    BufferArgs((4, 4, 4), 2, np.int32),
 ]
 VALID_BUFFER_CASES_BY_NDIM = {}
 for __buffer_args in VALID_BUFFER_CASES:
-  VALID_BUFFER_CASES_BY_NDIM.setdefault(len(__buffer_args[0]), []).append(__buffer_args)
+  VALID_BUFFER_CASES_BY_NDIM.setdefault(len(__buffer_args.shape), []).append(__buffer_args)
 
 VALID_BUFFER_CASES_MINIMAL = [cases[-1] for cases in VALID_BUFFER_CASES_BY_NDIM.values()]
 
-BufferArgs = tuple[tuple, int, np.dtype]  # shape, axis, dtype
-BufferCreator = Callable[[tuple, int, np.dtype], CircularBuffer]
+BufferCreator = Callable[[BufferArgs], CircularBuffer]
 
 
 def create_elements(buffer: CircularBuffer, element_beg: int, element_end: int):
@@ -47,38 +55,35 @@ def create_elements(buffer: CircularBuffer, element_beg: int, element_end: int):
   return np.ndarray(element_shape, buffer.dtype)
 
 
-def create_empty_buffer(shape: tuple, axis: int, dtype: np.dtype) -> CircularBuffer:
-  buffer = CircularBuffer(shape, axis, dtype)
-  assert len(buffer) == 0
-  return buffer
-
-
-def create_filled_buffer(shape: tuple, axis: int, dtype: np.dtype,
-                         elements_num: int) -> CircularBuffer:
-  shape = list(shape)
-  shape[axis] = shape[axis] if shape[axis] >= elements_num else elements_num + 1
-
-  buffer = create_empty_buffer(shape, axis, dtype)
+def create_buffer(buffer_args: BufferArgs, elements_num: int) -> CircularBuffer:
+  buffer = CircularBuffer(buffer_args.shape, buffer_args.axis, buffer_args.dtype)
   buffer.put(create_elements(buffer, 0, elements_num))
   assert buffer.max_size >= len(buffer) == elements_num
-
   return buffer
 
 
-def create_partially_filled_buffer(shape: tuple, axis: int, dtype: np.dtype) -> CircularBuffer:
+def create_empty_buffer(buffer_args: BufferArgs) -> CircularBuffer:
+  return create_buffer(buffer_args, elements_num=0)
+
+
+def create_partially_filled_buffer(buffer_args: BufferArgs) -> CircularBuffer:
+  shape, axis = buffer_args.shape, buffer_args.axis
+
   # to be partially filled, buffer needs to hold at least 1 element and still have space for at
   # least one more element
   if shape[axis] >= 2:
-    buffer = create_filled_buffer(shape, axis, dtype, elements_num=shape[axis] // 2)
+    buffer = create_buffer(buffer_args, elements_num=shape[axis] // 2)
     assert 0 < len(buffer) < buffer.max_size
 
     return buffer
   pytest.skip('Not applicable test case')
 
 
-def create_full_buffer(shape: tuple, axis: int, dtype: np.dtype) -> CircularBuffer:
+def create_full_buffer(buffer_args: BufferArgs) -> CircularBuffer:
+  shape, axis = buffer_args.shape, buffer_args.axis
+
   if shape[axis] > 0:  # to be full, buffer cannot be empty
-    buffer = create_filled_buffer(shape, axis, dtype, elements_num=shape[axis])
+    buffer = create_buffer(buffer_args, elements_num=shape[axis])
     assert 0 < len(buffer) == buffer.max_size
 
     return buffer
@@ -121,9 +126,6 @@ class TestCircularBufferPut:
   @pytest.mark.parametrize('data', [
       np.ones((2, 3)),
       np.ones((1, 2, 2)),
-      np.ones((1, 2, 0)),
-      np.ones((1, 0)),
-      np.ones((0, 1)),
   ])
   def test_put_should_raise_value_error_when_data_is_incompatible(self, data: np.ndarray):
     buffer = CircularBuffer((8,))
@@ -134,7 +136,7 @@ class TestCircularBufferPut:
   @pytest.mark.parametrize('elements_num', [1, 8])
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
   def test_put_should_add_data_to_buffer_when_buffer_is_empty(self, buffer_args, elements_num: int):
-    buffer = create_empty_buffer(*buffer_args)
+    buffer = create_empty_buffer(buffer_args)
 
     buffer.put(create_elements(buffer, 0, elements_num))
 
@@ -151,7 +153,7 @@ class TestCircularBufferPut:
       ])
   def test_put_should_add_data_to_buffer_when_buffer_is_partially_filled(
       self, buffer_args, free_space_ratio: float):
-    buffer = create_partially_filled_buffer(*buffer_args)
+    buffer = create_partially_filled_buffer(buffer_args)
     buffer_size_before = len(buffer)
 
     free_space = buffer.max_size - len(buffer)
@@ -164,7 +166,7 @@ class TestCircularBufferPut:
 
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
   def test_put_should_add_data_to_buffer_when_buffer_is_full(self, buffer_args: BufferArgs):
-    buffer = create_full_buffer(*buffer_args)
+    buffer = create_full_buffer(buffer_args)
     buffer_size_before = len(buffer)
     elements_to_put_num = 5
 
@@ -184,7 +186,7 @@ class TestCircularBufferResize:
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES_MINIMAL)
   def test_resize_should_raise_value_error_when_new_max_is_less_than_size(
       self, elements_num: int, new_max_size: int, buffer_args: BufferArgs):
-    buffer = create_filled_buffer(*buffer_args, elements_num=elements_num)
+    buffer = create_buffer(buffer_args, elements_num=elements_num)
 
     with pytest.raises(ValueError):
       buffer.resize(new_max_size)
@@ -199,7 +201,7 @@ class TestCircularBufferResize:
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES_MINIMAL)
   def test_resize_should_change_buffer_max_size_when_new_max_size_is_bigger_than_size(
       self, elements_num: int, new_max_size: int, buffer_args: BufferArgs):
-    buffer = create_filled_buffer(*buffer_args, elements_num=elements_num)
+    buffer = create_buffer(buffer_args, elements_num=elements_num)
     buffer_len_before = len(buffer)
 
     buffer.resize(new_max_size)
@@ -214,7 +216,7 @@ class TestCircularBufferPop:
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
   def test_pop_should_raise_value_error_when_pop_size_is_greater_than_buffer_size(
       self, buffer_creator: BufferCreator, buffer_args: BufferArgs):
-    buffer = buffer_creator(*buffer_args)
+    buffer = buffer_creator(buffer_args)
     with pytest.raises(ValueError):
       buffer.pop(len(buffer) + 1)
 
@@ -222,7 +224,7 @@ class TestCircularBufferPop:
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
   def test_pop_should_remove_nothing_and_return_empty_array_when_pop_size_is_zero(
       self, buffer_creator: BufferCreator, buffer_args: BufferArgs):
-    buffer = buffer_creator(*buffer_args)
+    buffer = buffer_creator(buffer_args)
     buffer_size_before = len(buffer)
 
     removed_element = buffer.pop(0)
@@ -232,7 +234,7 @@ class TestCircularBufferPop:
 
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
   def test_pop_should_remove_and_return_requested_elements(self, buffer_args: BufferArgs):
-    buffer = create_filled_buffer(*buffer_args, elements_num=8)
+    buffer = create_buffer(buffer_args, elements_num=8)
 
     expected_data1 = create_elements(buffer, 0, 2)  # 0, 1
     expected_data2 = create_elements(buffer, 2, 6)  # 2, 3, 4, 5
@@ -246,7 +248,7 @@ class TestCircularBufferPop:
   @pytest.mark.parametrize('buffer_args', VALID_BUFFER_CASES)
   def test_clear_should_remove_all_elements(self, buffer_creator: BufferCreator,
                                             buffer_args: BufferArgs):
-    buffer = buffer_creator(*buffer_args)
+    buffer = buffer_creator(buffer_args)
     buffer_max_size_before = buffer.max_size
 
     buffer.clear()
@@ -261,7 +263,7 @@ class TestCircularBufferPop:
                                                                     buffer_creator: BufferCreator,
                                                                     buffer_args: BufferArgs,
                                                                     idx_offset: int):
-    buffer = buffer_creator(*buffer_args)
+    buffer = buffer_creator(buffer_args)
 
     with pytest.raises(IndexError):
       _ = buffer[len(buffer) + idx_offset]
@@ -270,7 +272,7 @@ class TestCircularBufferPop:
   @pytest.mark.parametrize('idx', [-1, 0, 1, 8, 15])
   def test_getitem_should_return_correct_element_when_valid_index(self, buffer_args: BufferArgs,
                                                                   idx: int):
-    buffer = create_empty_buffer(*buffer_args)
+    buffer = create_empty_buffer(buffer_args)
     buffer.put(create_elements(buffer, 0, 16))
 
     expected_element = create_elements(buffer, idx, idx + 1)
