@@ -1,6 +1,6 @@
 from typing import Iterable
 
-from jerboa.media.media import MediaType, AudioConfig, VideoConfig
+from jerboa.media import MediaType, AudioConfig, VideoConfig
 
 import av
 

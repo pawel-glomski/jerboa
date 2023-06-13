@@ -5,8 +5,7 @@ import math
 from fractions import Fraction
 from dataclasses import dataclass
 
-from .media import MediaType
-from .reformatters import AudioReformatter, VideoReformatter
+from jerboa.media import MediaType
 
 
 @dataclass
@@ -33,8 +32,6 @@ class SimpleDecoder:
     self._start_timepoint = self._stream.start_time * self._stream.time_base
 
     self._media_type = MediaType(self._stream.type)
-
-    self._reformatter: AudioReformatter | VideoReformatter | None = None
 
     self._end_pts_gen = self._get_end_pts_gen()
 

@@ -5,12 +5,9 @@ from pyglet.image import ImageData
 from pyglet.media import StreamingSource
 from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
-from jerboa.media import std_audio
+from jerboa.media import MediaType, AudioConfig, VideoConfig, std_audio
 from jerboa.timeline import FragmentedTimeline
-from .simple_decoder import SimpleDecoder
-from .skipping_decoder import SkippingDecoder
-from .decoder import NonlinearDecoder
-from .media import MediaType, AudioConfig, VideoConfig
+from .decoder import SimpleDecoder, SkippingDecoder, NonlinearDecoder
 
 VIDEO_FORMAT_PYGLET = 'RGB'
 VIDEO_FORMAT = av.VideoFormat('rgb24')
