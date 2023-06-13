@@ -7,7 +7,9 @@ from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
 from jerboa.media import std_audio
 from jerboa.timeline import FragmentedTimeline
-from .decoder import SimpleDecoder, SkippingDecoder, NonlinearDecoder
+from .simple_decoder import SimpleDecoder
+from .skipping_decoder import SkippingDecoder
+from .decoder import NonlinearDecoder
 from .media import MediaType, AudioConfig, VideoConfig
 
 VIDEO_FORMAT_PYGLET = 'RGB'
@@ -37,8 +39,7 @@ class JBSource(StreamingSource):
         # *[TMSection(i * 1.0, i * 1.0 + 0.5, 1 - 0.5 * (i % 2)) for i in range(200)]
         # TMSection(0, 4, 0.75),
         # TMSection(0, math.inf, 1 / 1.5)
-        TMSection(0, math.inf)
-        )
+        TMSection(0, math.inf))
 
     self.container = av.open(filepath)
     self.decoders: dict[MediaType, NonlinearDecoder] = {}
