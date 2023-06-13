@@ -1,3 +1,5 @@
+from typing import Iterable
+
 from jerboa.media.media import MediaType, AudioConfig, VideoConfig
 
 import av
@@ -8,20 +10,40 @@ class AudioReformatter:
   def __init__(self, config: AudioConfig):
     self._config = config
     if config.frame_duration:
-      self._frame_size = int(config.frame_duration * self._config.sample_rate)
+      self._frame_size = round(config.frame_duration * self._config.sample_rate)
     else:
       self._frame_size = None
-    self.reset()
-
-  def reset(self):
     self._resampler = av.AudioResampler(format=self._config.format,
                                         layout=self._config.layout,
                                         rate=self._config.sample_rate,
                                         frame_size=self._frame_size)
+    self._has_samples = False
+    self.reset()
 
-  def reformat(self, frame: av.AudioFrame):
+  def reset(self) -> None:
+    if self._has_samples:
+      self._resampler = av.AudioResampler(format=self._config.format,
+                                          layout=self._config.layout,
+                                          rate=self._config.sample_rate,
+                                          frame_size=self._frame_size)
+      self._has_samples = False
+
+  @property
+  def config(self) -> AudioConfig:
+    return self._config
+
+  def reformat(self, frame: av.AudioFrame | None) -> Iterable[av.AudioFrame]:
+    self._has_samples |= frame is not None
+
     for reformatted_frame in self._resampler.resample(frame):
       if reformatted_frame is not None:
+        yield reformatted_frame
+
+  def flush(self) -> Iterable[av.AudioFrame]:
+    if self._has_samples:
+      reformatted_frames = list(self.reformat(None))
+      self.reset()
+      for reformatted_frame in reformatted_frames:
         yield reformatted_frame
 
 
@@ -31,12 +53,15 @@ class VideoReformatter:
     self._config = config
     self._reformatter = av.video.reformatter.VideoReformatter()
 
-  def reset(self):
-    pass  # av.video.VideoReformatter does not have a persistent state
+  @property
+  def config(self) -> VideoConfig:
+    return self._config
 
-  def reformat(self, frame: av.VideoFrame):
-    # TODO: this can also handle resize, etc
-    yield self._reformatter.reformat(frame, format=self._config.format)
+  def reset(self) -> None:
+    pass  # av.video.VideoReformatter is stateless
+
+  def reformat(self, frame: av.VideoFrame | None) -> av.VideoFrame:
+    return self._reformatter.reformat(frame, format=self._config.format)
 
 
 def create_reformatter(media_config: AudioConfig | VideoConfig):

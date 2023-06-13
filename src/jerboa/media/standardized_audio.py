@@ -2,7 +2,7 @@ import av
 import math
 import soxr
 import numpy as np
-from pylibrb import DType, SAMPLES_AXIS, CHANNELS_AXIS
+from pylibrb import DType, SAMPLES_AXIS, CHANNELS_AXIS, create_audio_array
 from scipy.special import expit
 
 from .media import AudioConfig
@@ -11,10 +11,14 @@ from jerboa.utils.circular_buffer import CircularBuffer
 FORMAT = av.AudioFormat('flt').planar
 assert DType == np.float32 and DType == np.dtype(av.audio.frame.format_dtypes[FORMAT.name])
 
+# bigger frames are faster - less conversions to numpy and less iterations on the python side
+# usually 1 second gives good results, bigger than that may actually slow things down
+FRAME_DURATION = 1.0  # in seconds
+
+TRANSITION_DURATION = 8.0 / 16000  # in seconds, 8 steps when sample_rate == 16000
+
 BUFFER_SIZE_MODIFIER = 1.2
 COMPENSATION_MAX_DURATION_CHANGE = 0.1  # up to 10% at once
-
-AUDIO_TRANSITION_DURATION = 8.0 / 16000  # 8 steps when sample_rate == 16000
 
 
 def get_format_dtype(fmt: av.AudioFormat) -> np.dtype:
@@ -95,4 +99,4 @@ def create_circular_buffer(audio_config: AudioConfig, max_duration: float = None
 
 
 def get_transition_steps(sample_rate: int) -> int:
-  return int(math.ceil(AUDIO_TRANSITION_DURATION * sample_rate))
+  return int(math.ceil(TRANSITION_DURATION * sample_rate))

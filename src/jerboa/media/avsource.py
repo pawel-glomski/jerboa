@@ -7,7 +7,7 @@ from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
 from jerboa.media import std_audio
 from jerboa.timeline import FragmentedTimeline
-from .decoder import StreamDecoder
+from .decoder import SimpleDecoder, SkippingDecoder, NonlinearDecoder
 from .media import MediaType, AudioConfig, VideoConfig
 
 VIDEO_FORMAT_PYGLET = 'RGB'
@@ -41,15 +41,14 @@ class JBSource(StreamingSource):
         )
 
     self.container = av.open(filepath)
-    self.decoders: dict[MediaType, StreamDecoder] = {}
+    self.decoders: dict[MediaType, NonlinearDecoder] = {}
     if self.container.streams.audio:
       audio_stream = self.container.streams.audio[0]
       audio_config = create_stream_config(audio_stream)
 
-      audio_decoder = StreamDecoder(filepath,
-                                    audio_stream.index,
-                                    media_config=audio_config,
-                                    init_timeline=debug_timeline)
+      audio_decoder = NonlinearDecoder(SkippingDecoder(SimpleDecoder(filepath, audio_stream.index)),
+                                       media_config=audio_config,
+                                       init_timeline=debug_timeline)
       self.decoders[MediaType.AUDIO] = audio_decoder
 
       self.audio_format = AudioFormat(channels=audio_config.channels_num,
@@ -60,10 +59,9 @@ class JBSource(StreamingSource):
       video_stream = self.container.streams.video[0]
       video_config = create_stream_config(video_stream)
 
-      video_decoder = StreamDecoder(filepath,
-                                    video_stream.index,
-                                    media_config=video_config,
-                                    init_timeline=debug_timeline)
+      video_decoder = NonlinearDecoder(SkippingDecoder(SimpleDecoder(filepath, video_stream.index)),
+                                       media_config=video_config,
+                                       init_timeline=debug_timeline)
       self.decoders[MediaType.VIDEO] = video_decoder
 
       sar = video_stream.sample_aspect_ratio
