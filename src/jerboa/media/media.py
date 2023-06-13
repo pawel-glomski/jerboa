@@ -24,12 +24,29 @@ class AudioConfig:
   def channels_num(self) -> int:
     return len(self.layout.channels)
 
+  @staticmethod
+  def from_stream(stream: av.audio.AudioStream) -> 'AudioConfig':
+    if MediaType(stream.type) != MediaType.AUDIO:
+      raise ValueError(f'Wrong stream type: {stream.type}')
+    return AudioConfig(stream.format, stream.layout, stream.sample_rate)
+
 
 @dataclass
 class VideoConfig:
   format: av.VideoFormat
-  # add resolution?
 
   @property
   def media_type(self) -> MediaType:
     return MediaType.VIDEO
+
+  @staticmethod
+  def from_stream(stream: av.video.VideoStream) -> 'VideoConfig':
+    if MediaType(stream.type) != MediaType.VIDEO:
+      raise ValueError(f'Wrong stream type: {stream.type}')
+    return VideoConfig(stream.format)
+
+
+def config_from_stream(stream: av.audio.AudioStream | av.video.VideoStream):
+  if MediaType(stream.type) == MediaType.AUDIO:
+    return AudioConfig.from_stream(stream)
+  return VideoConfig.from_stream(stream)

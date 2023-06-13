@@ -7,9 +7,6 @@ from jerboa.media import std_audio
 from jerboa.timeline import RangeMappingResult
 from .media import MediaType, AudioConfig, VideoConfig
 
-AUDIO_FRAME_DURATION = 1.0  # in seconds
-
-
 @dataclass
 class MappedFrame:
   timepoint: float
@@ -23,7 +20,7 @@ class AudioMapper:
     self._audio_config = AudioConfig(std_audio.FORMAT,
                                      audio_config.layout,
                                      audio_config.sample_rate,
-                                     frame_duration=AUDIO_FRAME_DURATION)
+                                     frame_duration=std_audio.FRAME_DURATION)
     self._audio = std_audio.create_circular_buffer(self._audio_config)
     # self._transition_steps = std_audio.get_transition_steps(audio_config.sample_rate)
 
@@ -39,14 +36,15 @@ class AudioMapper:
   def reset(self) -> None:
     self._audio.clear()
     self._stretcher.reset()
-    self._last_frame_end_timepoint = 0
+    self._last_frame_end_timepoint = None
 
   def map(self, frame: av.AudioFrame, mapping_results: RangeMappingResult) -> MappedFrame:
     flush = frame is None
 
-    if flush:
-      self._audio.put(self._stretcher.flush())
-      beg_timepoint = self._last_frame_end_timepoint
+    if flush and self._last_frame_end_timepoint is not None:
+      flushing_packet = std_audio.create_audio_array(self._audio_config.channels_num,
+                                                     self._stretcher.get_samples_required())
+      self._stretcher.process(flushing_packet, final=True)
     else:
       assert frame.format.name == self._audio_config.format.name
       assert frame.layout.name == self._audio_config.layout.name
@@ -57,12 +55,16 @@ class AudioMapper:
         self._stretcher.process(audio_segment)
         self._audio.put(self._stretcher.retrieve_available())
 
-      beg_timepoint = mapping_results.beg
+      if self._last_frame_end_timepoint is None and len(self._audio) > 0:
+        self._last_frame_end_timepoint = mapping_results.beg
 
-    audio = self._audio.pop(len(self._audio))
-    duration = std_audio.calc_duration(audio, self._audio_config.sample_rate)
-    self._last_frame_end_timepoint = beg_timepoint + duration
-    return MappedFrame(beg_timepoint, duration, audio)
+    if len(self._audio) > 0:
+      audio = self._audio.pop(len(self._audio))
+      beg_timepoint = self._last_frame_end_timepoint
+      duration = std_audio.calc_duration(audio, self._audio_config.sample_rate)
+      self._last_frame_end_timepoint = beg_timepoint + duration
+      return MappedFrame(beg_timepoint, duration, audio)
+    return MappedFrame(0, 0, None)
 
   def _cut_according_to_mapping_results(self, frame: av.AudioFrame,
                                         mapping_results: RangeMappingResult):
@@ -95,7 +97,7 @@ class VideoMapper:
       duration = mapping_results.end - mapping_results.beg
       return MappedFrame(mapping_results.beg, duration, frame.to_ndarray())
 
-    return MappedFrame(0, 0, np.array([]))  # empty frame
+    return MappedFrame(0, 0, None)  # empty frame
 
 
 def create_mapper(media_config: AudioConfig | VideoConfig) -> AudioMapper | VideoMapper:
