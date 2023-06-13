@@ -4,7 +4,7 @@ import numpy as np
 from typing import Generator
 from pathlib import Path
 
-from jerboa.media.media import AudioConfig
+from jerboa.media import AudioConfig, std_audio
 from jerboa.media.reformatters import AudioReformatter
 
 
@@ -19,10 +19,6 @@ class AudioReader:
           same format as it is in the recording.
     """
     self._config = config
-    if self._config is not None and self._config.frame_duration is None:
-      # bigger frames are faster, less conversions to numpy and less iterations on the python side
-      # usually 1 second gives good results, bigger than that may actually slow things down
-      self._config.frame_duration = 1
 
   def read_stream(self, file_path: Path, stream_idx: int = 0) -> Generator[np.ndarray, None, None]:
     """Creates a generator of audio frames of a given audio stream in the recording
@@ -52,6 +48,10 @@ class AudioReader:
         config = AudioConfig(audio_stream.format, audio_stream.layout, audio_stream.sample_rate)
       else:
         config = self._config
+
+      if config.frame_duration is None:
+        config.frame_duration = std_audio.FRAME_DURATION
+
       reformatter = AudioReformatter(config)
 
       for raw_frame in container.decode(audio_stream):
