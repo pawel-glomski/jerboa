@@ -1,2 +1,2 @@
-from .audio import AudioReader, read_entire_audio
+from .audio import AudioReader
 from .transcript import read_transcript
