@@ -3,7 +3,7 @@ import pyglet
 from imgui.integrations.pyglet import create_renderer
 
 # from testwindow import show_test_window
-from jerboa.media.avsource import JBSource
+from jerboa.media.source import JBSource
 # from player import SLPlayer
 from pyglet.media import Player as SLPlayer
 

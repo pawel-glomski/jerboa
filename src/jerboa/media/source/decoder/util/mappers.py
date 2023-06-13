@@ -3,9 +3,9 @@ import numpy as np
 from pylibrb import RubberBandStretcher, Option
 from dataclasses import dataclass
 
-from jerboa.media import std_audio
+from jerboa.media import MediaType, AudioConfig, VideoConfig, std_audio
 from jerboa.timeline import RangeMappingResult
-from .media import MediaType, AudioConfig, VideoConfig
+
 
 @dataclass
 class MappedFrame:

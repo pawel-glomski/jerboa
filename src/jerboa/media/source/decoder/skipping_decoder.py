@@ -2,9 +2,9 @@ from collections.abc import Generator
 
 from dataclasses import dataclass
 
-from .media import MediaType, AudioConfig, VideoConfig, config_from_stream
-from .reformatters import AudioReformatter, VideoReformatter, create_reformatter
+from jerboa.media import MediaType, AudioConfig, VideoConfig, config_from_stream
 from .simple_decoder import SimpleDecoder, TimedFrame
+from .util import AudioReformatter, VideoReformatter, create_reformatter
 
 
 @dataclass

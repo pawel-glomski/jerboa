@@ -1,9 +1,8 @@
 import numpy as np
 from collections import deque
 
-from jerboa.media import std_audio
+from jerboa.media import MediaType, AudioConfig, VideoConfig, std_audio
 from .mappers import MappedFrame
-from .media import MediaType, AudioConfig, VideoConfig
 
 
 class AudioBuffer:

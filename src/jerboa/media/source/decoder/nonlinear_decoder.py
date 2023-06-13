@@ -6,10 +6,9 @@ from bisect import bisect_right
 from threading import Thread, Lock, Condition
 
 from jerboa.timeline import FragmentedTimeline, RangeMappingResult
-from .media import AudioConfig, VideoConfig
-from .buffers import create_buffer
-from .mappers import create_mapper
+from jerboa.media import AudioConfig, VideoConfig
 from .skipping_decoder import SkippingDecoder, SkippingFrame
+from .util import create_buffer, create_mapper
 
 BUFFER_DURATION = 2.5  # in seconds
 
