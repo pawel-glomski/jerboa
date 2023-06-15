@@ -70,8 +70,6 @@ class JBSource(StreamingSource):
 
     self.start_time = min(dec.start_timepoint for dec in self.decoders.values())
     self.last_video_frame: ImageData = None
-
-  def __del__(self):
     self.container.close()
 
   def seek(self, timepoint: float):

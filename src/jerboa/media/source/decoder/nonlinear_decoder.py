@@ -2,7 +2,6 @@ import av
 import copy
 import math
 import numpy as np
-from bisect import bisect_right
 from threading import Thread, Lock, Condition
 
 from jerboa.timeline import FragmentedTimeline, RangeMappingResult
@@ -11,8 +10,6 @@ from .skipping_decoder import SkippingDecoder, SkippingFrame
 from .util import create_buffer, create_mapper
 
 BUFFER_DURATION = 2.5  # in seconds
-
-AUDIO_SEEK_THRESHOLD = 0.25  # in seconds
 
 STOP_DECODING_SEEK_TIMEPOINT = math.nan
 
@@ -30,7 +27,6 @@ class NonlinearDecoder:
     self._buffer = create_buffer(self._mapper.internal_media_config, BUFFER_DURATION)
 
     self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
-    self._keyframe_timepoints = list[float]()  # probing is done in the decoding thread
 
     self._seek_timepoint: None | float = skipping_decoder.start_timepoint
     self._is_done = False
@@ -90,7 +86,6 @@ class NonlinearDecoder:
       self._seek_without_lock(seek_timepoint)
 
   def _decoding(self):
-    self._keyframe_timepoints = self._skipping_decoder.probe_keyframe_pts()
     self._seek_timepoint = self._skipping_decoder.start_timepoint  # start decoding from start
     while True:
       seek_timepoint = self._decoding__wait_for_seek()
@@ -119,9 +114,9 @@ class NonlinearDecoder:
       if (mapping_results is None or
           (not self._decoding__try_to_map_and_put_frame(timed_frame, mapping_results) and
            self._decoding__try_to_skip_dropped_frames(timed_frame, skip_timepoint))):
-        return  # begin seeking
-
-    self._decoding__flush_mapper()  # TODO: this should also handle the last `current_frame`
+        break  # begin seeking
+    else:
+      self._decoding__flush_mapper()
 
   def _decoding__try_mapping_frame(
       self,
@@ -158,14 +153,7 @@ class NonlinearDecoder:
 
   def _decoding__try_to_skip_dropped_frames(self, current_frame: SkippingFrame,
                                             skip_timepoint: float) -> bool:
-    if self._keyframe_timepoints:
-      current_keyframe_idx = bisect_right(self._keyframe_timepoints, current_frame.end_timepoint)
-      next_keyframe_idx = bisect_right(self._keyframe_timepoints, skip_timepoint)
-      should_seek = current_keyframe_idx < next_keyframe_idx
-    else:
-      should_seek = skip_timepoint - current_frame.end_timepoint >= AUDIO_SEEK_THRESHOLD
-
-    if should_seek:
+    if skip_timepoint - current_frame.end_timepoint >= self._skipping_decoder.seek_threshold:
       with self._mutex:
         if self._seek_timepoint is None:  # must never overwrite the user's seek
           self._seek_timepoint = skip_timepoint
@@ -201,8 +189,3 @@ class NonlinearDecoder:
       if not self._buffer.is_empty():
         return self._buffer.get_next_timepoint()
       return None
-
-  def prefill_buffer(self, duration: float) -> None:
-    with self._mutex:
-      self._buffer_not_empty_or_done.wait_for(
-          lambda: self._buffer.duration >= duration or self.is_done())
