@@ -6,6 +6,8 @@ from jerboa.media import MediaType, AudioConfig, VideoConfig, config_from_stream
 from .simple_decoder import SimpleDecoder, TimedFrame
 from .util import AudioReformatter, VideoReformatter, create_reformatter
 
+MIN_SEEK_THRESHOLD = 0.25  # in seconds
+
 
 @dataclass
 class SkippingFrame(TimedFrame):
@@ -23,6 +25,8 @@ class SkippingDecoder:
     else:
       self.decode = self._decode_video
 
+    self._seek_threshold = max(MIN_SEEK_THRESHOLD, self._simple_decoder.probe_keyframe_duration())
+
   @property
   def media_type(self) -> MediaType:
     return self._simple_decoder.media_type
@@ -34,6 +38,10 @@ class SkippingDecoder:
   @property
   def start_timepoint(self) -> float:
     return self._simple_decoder.start_timepoint
+
+  @property
+  def seek_threshold(self) -> float:
+    return self._seek_threshold
 
   def _decode_audio(
       self,
