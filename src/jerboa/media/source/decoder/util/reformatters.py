@@ -1,8 +1,9 @@
 from typing import Iterable
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig
-
 import av
+from fractions import Fraction
+
+from jerboa.media import MediaType, AudioConfig, VideoConfig
 
 
 class AudioReformatter:
@@ -33,7 +34,10 @@ class AudioReformatter:
     return self._config
 
   def reformat(self, frame: av.AudioFrame | None) -> Iterable[av.AudioFrame]:
-    self._has_samples |= frame is not None
+    if frame is not None:
+      # remove this assert when av.AudioResampler if fixed
+      assert frame.time_base == Fraction(1, frame.sample_rate)
+      self._has_samples = True
 
     for reformatted_frame in self._resampler.resample(frame):
       if reformatted_frame is not None:
