@@ -1,11 +1,14 @@
+from typing import Callable
+
 import av
 import math
 import soxr
 import numpy as np
+from fractions import Fraction
 from pylibrb import DType, SAMPLES_AXIS, CHANNELS_AXIS, create_audio_array
 from scipy.special import expit
 
-from .media import AudioConfig
+from .media import AudioConfig, MediaType
 from jerboa.utils.circular_buffer import CircularBuffer
 
 FORMAT = av.AudioFormat('flt').planar
@@ -20,6 +23,40 @@ TRANSITION_DURATION = 8.0 / 16000  # in seconds, 8 steps when sample_rate == 160
 BUFFER_SIZE_MODIFIER = 1.2
 COMPENSATION_MAX_DURATION_CHANGE = 0.1  # up to 10% at once
 
+
+def get_time_base(audio_stream: av.audio.AudioStream) -> Fraction:
+  assert audio_stream.type == MediaType.AUDIO.value
+  return Fraction(1, audio_stream.sample_rate)
+
+
+
+def get_frame_time_base_standardizer(
+    audio_stream: av.audio.AudioStream) -> Callable[[av.AudioFrame], None]:
+  assert audio_stream.type == MediaType.AUDIO.value
+
+  std_time_base = get_time_base(audio_stream)
+  if audio_stream.time_base == std_time_base:
+    return lambda _: ...  #do nothing when time base is already correct
+
+  def std_frame_audio_time_base(frame: av.AudioFrame):
+    frame.pts = int(frame.pts * frame.time_base / std_time_base)
+    frame.time_base = std_time_base
+
+  return std_frame_audio_time_base
+
+
+def get_end_pts_generator(audio_stream: av.audio.AudioStream) -> Callable[[av.AudioFrame], int]:
+
+  std_time_base = get_time_base(audio_stream)
+
+  def audio_pts_gen_simple_timebase(frame: av.AudioFrame) -> int:
+    assert frame.time_base == std_time_base
+    return frame.pts + frame.samples
+
+  return audio_pts_gen_simple_timebase
+  # def audio_pts_gen_any_timebase(frame: av.AudioFrame, _) -> int:
+  #   return frame.pts + int(Fraction(frame.samples, frame.sample_rate) / frame.time_base)
+  # return audio_pts_gen_any_timebase
 
 def get_format_dtype(fmt: av.AudioFormat) -> np.dtype:
   return np.dtype(av.audio.frame.format_dtypes[fmt.name])

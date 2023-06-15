@@ -1,11 +1,13 @@
 from collections.abc import Iterable
+from typing import Callable
 
 import av
 import math
-from fractions import Fraction
 from dataclasses import dataclass
 
 from jerboa.media import MediaType
+
+from jerboa.media import std_audio
 
 
 @dataclass
@@ -29,11 +31,12 @@ class SimpleDecoder:
       raise TypeError(f'Media type "{self._stream.type}" is not supported')
 
     self._stream.thread_type = 'AUTO'
-    self._start_timepoint = self._stream.start_time * self._stream.time_base
+    self._start_timepoint = max(0, self._stream.start_time * self._stream.time_base)
 
     self._media_type = MediaType(self._stream.type)
 
-    self._end_pts_gen = self._get_end_pts_gen()
+    self._frame_time_base_standardizer = self._get_frame_time_base_standardizer()
+    self._next_frame_pts_generator = self._get_next_frame_pts_generator()
 
   @property
   def media_type(self) -> MediaType:
@@ -47,28 +50,22 @@ class SimpleDecoder:
   def start_timepoint(self) -> float:
     return self._start_timepoint
 
-  def _get_end_pts_gen(self):
-
-    def audio_pts_gen_simple_timebase(frame: av.AudioFrame, _) -> float:
-      return frame.pts + frame.samples
-
-    def audio_pts_gen_any_timebase(frame: av.AudioFrame, _) -> float:
-      return frame.pts + round(Fraction(frame.samples, frame.sample_rate) / frame.time_base)
-
-    def video_pts_gen(_, next_frame: av.VideoFrame) -> float:
-      return next_frame.pts if next_frame is not None else math.inf
-
+  def _get_frame_time_base_standardizer(self) -> Callable[[av.AudioFrame | av.VideoFrame], None]:
     if self.media_type == MediaType.AUDIO:
-      if self.stream.time_base == Fraction(1, self.stream.sample_rate):
-        return audio_pts_gen_simple_timebase
-      return audio_pts_gen_any_timebase
-    return video_pts_gen
+      return std_audio.get_frame_time_base_standardizer(self.stream)
+    return lambda _: ...  # do nothing when video
+
+  def _get_next_frame_pts_generator(self):
+    if self.media_type == MediaType.AUDIO:
+      end_pts_gen = std_audio.get_end_pts_generator(self.stream)
+      return lambda frame, _: end_pts_gen(frame)
+    return lambda _, next_frame: next_frame.pts if next_frame is not None else math.inf
 
   def decode(self, seek_timepoint: float) -> Iterable[TimedFrame | None]:
     current_frame: av.AudioFrame | av.VideoFrame | None = None
     for next_frame in self._standard_decode(seek_timepoint):
       if current_frame is not None:
-        next_frame_pts = self._end_pts_gen(current_frame, next_frame)
+        next_frame_pts = self._next_frame_pts_generator(current_frame, next_frame)
         if next_frame is not None:
           next_frame.pts = next_frame_pts
         yield TimedFrame(current_frame,
@@ -83,26 +80,31 @@ class SimpleDecoder:
     self._container.seek(round(seek_timepoint / self._stream.time_base), stream=self._stream)
     for packet in self._container.demux(self.stream):
       for frame in packet.decode():
+        self._frame_time_base_standardizer(frame)
         yield frame
       if packet.dts is None:
         yield None
 
-  def probe_keyframe_pts(self) -> list[float]:
+  def probe_keyframe_duration(self) -> list[float]:
     '''This cannot be called inside a decoding loop'''
-    if self.media_type == MediaType.AUDIO:
-      return []  # audio stream does not need probing
-
     self._container.seek(self.stream.start_time, stream=self.stream)
 
-    start_timepoint = self.stream.start_time * self.stream.time_base
-    keyframe_pts_arr = [
-        pkt.pts
-        for pkt in self._container.demux(self.stream)
-        if pkt.is_keyframe and pkt.pts is not None and pkt.pts * pkt.time_base >= start_timepoint
-    ]
-    keyframe_pts_arr = sorted(keyframe_pts_arr)
-    keyframe_pts_arr.append(math.inf)
+    keyframe_pts_arr = []
+    last_valid_pkt_timepoint = self.start_timepoint
+    for pkt in self._container.demux(self.stream):
+      if pkt.is_keyframe and pkt.pts is not None:
+        pkt_timepoint = pkt.pts * pkt.time_base
+        if pkt_timepoint >= self.start_timepoint:
+          last_valid_pkt_timepoint = pkt_timepoint
+          keyframe_pts_arr.append(pkt_timepoint)
+          if len(keyframe_pts_arr) == 2:
+            break
+    else:
+      keyframe_pts_arr.append(last_valid_pkt_timepoint)
 
     # seek back to the beginning
     self._container.seek(self.stream.start_time, stream=self.stream)
-    return keyframe_pts_arr
+
+    if len(keyframe_pts_arr) == 2:
+      return float(abs(keyframe_pts_arr[1] - keyframe_pts_arr[0]))
+    return 0.0

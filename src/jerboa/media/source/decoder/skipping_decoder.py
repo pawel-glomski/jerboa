@@ -58,7 +58,7 @@ class SkippingDecoder:
             reformatted_frame,
             beg_timepoint=reformatted_frame.time,
             end_timepoint=(reformatted_frame.time +
-                           reformatted_frame.samples * reformatted_frame.time_base),
+                           reformatted_frame.samples / reformatted_frame.sample_rate),
             skip_aware_beg_timepoint=max(skip_timepoint, reformatted_frame.time),
         )
         skip_timepoint = yield skipping_frame
