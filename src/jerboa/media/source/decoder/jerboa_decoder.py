@@ -5,7 +5,7 @@ import numpy as np
 from threading import Thread, Lock, Condition
 
 from jerboa.timeline import FragmentedTimeline, RangeMappingResult
-from jerboa.media import AudioConfig, VideoConfig
+from jerboa.media import AudioConfig, VideoConfig, MediaType
 from .skipping_decoder import SkippingDecoder, SkippingFrame
 from .util import create_buffer, create_mapper
 
@@ -14,17 +14,18 @@ BUFFER_DURATION = 2.5  # in seconds
 STOP_DECODING_SEEK_TIMEPOINT = math.nan
 
 
-class NonlinearDecoder:
+class JerboaDecoder:
 
   def __init__(self,
                skipping_decoder: SkippingDecoder,
-               media_config: AudioConfig | VideoConfig,
+               dst_media_config: AudioConfig | VideoConfig,
                init_timeline: FragmentedTimeline = None):
     self._skipping_decoder = skipping_decoder
+    self._dst_media_config = dst_media_config
 
-    self._target_media_format = media_config.format
-    self._mapper = create_mapper(media_config)
-    self._buffer = create_buffer(self._mapper.internal_media_config, BUFFER_DURATION)
+    self._mapper = create_mapper(dst_media_config)
+    self._buffer = create_buffer(dst_media_config, BUFFER_DURATION)
+    self._intermediate_media_config = self._mapper.internal_media_config
 
     self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
 
@@ -48,16 +49,12 @@ class NonlinearDecoder:
       self.seek(STOP_DECODING_SEEK_TIMEPOINT)
 
   @property
+  def media_type(self) -> MediaType:
+    return self._skipping_decoder.media_type
+
+  @property
   def start_timepoint(self) -> float:
     return self._skipping_decoder.start_timepoint
-
-  @property
-  def target_media_format(self) -> av.AudioFormat | av.VideoFormat:
-    return self._target_media_format
-
-  @property
-  def internal_media_config(self) -> AudioConfig | VideoConfig:
-    return self._mapper.internal_media_config
 
   def update_timeline(self, updated_timeline: FragmentedTimeline):
     assert updated_timeline.time_scope > self._timeline.time_scope
@@ -106,19 +103,20 @@ class NonlinearDecoder:
     self._mapper.reset()
 
     skip_timepoint = seek_timepoint
-    decoder = self._skipping_decoder.decode(seek_timepoint, self.internal_media_config)
-    for timed_frame in decoder:
-      mapping_results, skip_timepoint = self._decoding__try_mapping_frame(timed_frame)
-      decoder.send(skip_timepoint)
+    skipping_decoder = self._skipping_decoder.decode(seek_timepoint,
+                                                     self._intermediate_media_config)
+    for skipping_frame in skipping_decoder:
+      mapping_scheme, skip_timepoint = self._decoding__try_getting_mapping_scheme(skipping_frame)
+      skipping_decoder.send(skip_timepoint)
 
-      if (mapping_results is None or
-          (not self._decoding__try_to_map_and_put_frame(timed_frame, mapping_results) and
-           self._decoding__try_to_skip_dropped_frames(timed_frame, skip_timepoint))):
+      if (mapping_scheme is None or
+          (not self._decoding__try_to_map_and_put_frame(skipping_frame, mapping_scheme) and
+           self._decoding__try_to_skip_dropped_frames(skipping_frame, skip_timepoint))):
         break  # begin seeking
     else:
       self._decoding__flush_mapper()
 
-  def _decoding__try_mapping_frame(
+  def _decoding__try_getting_mapping_scheme(
       self,
       timed_frame: SkippingFrame,
   ) -> tuple[RangeMappingResult, float] | tuple[None, None]:
@@ -135,9 +133,9 @@ class NonlinearDecoder:
     return self._timeline.map_time_range(timed_frame.skip_aware_beg_timepoint,
                                          timed_frame.end_timepoint)
 
-  def _decoding__try_to_map_and_put_frame(self, timed_frame: SkippingFrame,
-                                          mapping_results: RangeMappingResult) -> bool:
-    mapped_frame = self._mapper.map(timed_frame.av_frame, mapping_results)
+  def _decoding__try_to_map_and_put_frame(self, skipping_frame: SkippingFrame,
+                                          mapping_blueprint: RangeMappingResult) -> bool:
+    mapped_frame = self._mapper.map(skipping_frame.av_frame, mapping_blueprint)
     if mapped_frame.duration > 0:
       with self._mutex:
         self._buffer_not_full_or_seeking.wait_for(
@@ -148,7 +146,6 @@ class NonlinearDecoder:
         self._buffer.put(mapped_frame)
         self._buffer_not_empty_or_done.notify()
 
-    # returns false only when interrupted, not putting a dropped frame is a success too
     return True
 
   def _decoding__try_to_skip_dropped_frames(self, current_frame: SkippingFrame,
@@ -157,7 +154,7 @@ class NonlinearDecoder:
       with self._mutex:
         if self._seek_timepoint is None:  # must never overwrite the user's seek
           self._seek_timepoint = skip_timepoint
-      return True  # return to begin seeking
+      return True  # begin seeking
     return False
 
   def _decoding__flush_mapper(self) -> None:
@@ -174,7 +171,7 @@ class NonlinearDecoder:
   def is_done(self) -> bool:
     return self._is_done
 
-  def pop(self, *args) -> np.ndarray:
+  def pop(self, *args) -> np.ndarray | None:
     frame = None
     with self._mutex:
       self._buffer_not_empty_or_done.wait_for(lambda: not self._buffer.is_empty() or self.is_done())

@@ -25,15 +25,19 @@ class SkippingDecoder:
     else:
       self.decode = self._decode_video
 
-    self._seek_threshold = max(MIN_SEEK_THRESHOLD, self._simple_decoder.probe_keyframe_duration())
+    self._seek_threshold = MIN_SEEK_THRESHOLD
 
   @property
   def media_type(self) -> MediaType:
     return self._simple_decoder.media_type
 
   @property
-  def stream_index(self) -> SimpleDecoder:
-    return self._simple_decoder.stream.index
+  def stream_index(self) -> int:
+    return self._simple_decoder.stream_index
+
+  @property
+  def src_media_config(self) -> AudioConfig | VideoConfig:
+    return self._simple_decoder.media_config
 
   @property
   def start_timepoint(self) -> float:
@@ -41,7 +45,7 @@ class SkippingDecoder:
 
   @property
   def seek_threshold(self) -> float:
-    return self._seek_threshold
+    return self._simple_decoder.mean_keyframe_interval
 
   def _decode_audio(
       self,
