@@ -1,7 +1,7 @@
 import numpy as np
 from collections import deque
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig, std_audio
+from jerboa.media import MediaType, AudioConfig, VideoConfig, create_audio_buffer
 from .mappers import MappedFrame
 
 
@@ -10,8 +10,8 @@ class AudioBuffer:
   def __init__(self, audio_config: AudioConfig, max_duration: float) -> None:
     self._audio_config = audio_config
 
-    self._audio = std_audio.create_circular_buffer(audio_config, max_duration)
-    self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
+    self._audio = create_audio_buffer(audio_config, max_duration)
+    # self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
     self._timepoint = None
 
     self._max_samples = int(max_duration * audio_config.sample_rate)
@@ -25,7 +25,7 @@ class AudioBuffer:
 
   def clear(self) -> None:
     self._audio.clear()
-    self._audio_last_sample[:] = 0
+    # self._audio_last_sample[:] = 0
     self._timepoint = None
 
   def put(self, mapped_audio_frame: MappedFrame) -> None:
@@ -37,7 +37,7 @@ class AudioBuffer:
       self._timepoint = mapped_audio_frame.timepoint
 
     self._audio.put(mapped_audio_frame.data)
-    self._audio_last_sample[:] = self._audio[-1]
+    # self._audio_last_sample[:] = self._audio[-1]
 
   def pop(self, samples_num: int) -> np.ndarray:
     assert not self.is_empty()
@@ -46,7 +46,7 @@ class AudioBuffer:
     pop_samples_num = min(all_samples_num, samples_num)
 
     audio = self._audio.pop(pop_samples_num)
-    audio_duration = std_audio.calc_duration(audio, self._audio_config.sample_rate)
+    audio_duration = pop_samples_num / self._audio_config.sample_rate
 
     self._timepoint += audio_duration
     return audio
@@ -92,7 +92,7 @@ class VideoBuffer:
 
     frame = self._frames.popleft()
     self._duration -= frame.duration
-    self._duration *= (not self.is_empty())  # ensure _duration == 0 when is_empty() == true
+    self._duration *= (not self.is_empty())  # ensure `_duration == 0` when `is_empty() == true`
     return frame.data
 
   def get_next_timepoint(self) -> float:

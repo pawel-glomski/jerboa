@@ -5,9 +5,9 @@ from pyglet.image import ImageData
 from pyglet.media import StreamingSource
 from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig, std_audio
+from jerboa.media import MediaType, AudioConfig, VideoConfig
 from jerboa.timeline import FragmentedTimeline
-from .decoder import SimpleDecoder, SkippingDecoder, NonlinearDecoder
+from .decoder import SimpleDecoder, SkippingDecoder, JerboaDecoder
 
 VIDEO_FORMAT_PYGLET = 'RGB'
 VIDEO_FORMAT = av.VideoFormat('rgb24')
@@ -39,14 +39,14 @@ class JBSource(StreamingSource):
         TMSection(0, math.inf))
 
     self.container = av.open(filepath)
-    self.decoders: dict[MediaType, NonlinearDecoder] = {}
+    self.decoders: dict[MediaType, JerboaDecoder] = {}
     if self.container.streams.audio:
       audio_stream = self.container.streams.audio[0]
       audio_config = create_stream_config(audio_stream)
 
-      audio_decoder = NonlinearDecoder(SkippingDecoder(SimpleDecoder(filepath, audio_stream.index)),
-                                       media_config=audio_config,
-                                       init_timeline=debug_timeline)
+      audio_decoder = JerboaDecoder(SkippingDecoder(SimpleDecoder(filepath, audio_stream.index)),
+                                    dst_media_config=audio_config,
+                                    init_timeline=debug_timeline)
       self.decoders[MediaType.AUDIO] = audio_decoder
 
       self.audio_format = AudioFormat(channels=audio_config.channels_num,
@@ -57,9 +57,9 @@ class JBSource(StreamingSource):
       video_stream = self.container.streams.video[0]
       video_config = create_stream_config(video_stream)
 
-      video_decoder = NonlinearDecoder(SkippingDecoder(SimpleDecoder(filepath, video_stream.index)),
-                                       media_config=video_config,
-                                       init_timeline=debug_timeline)
+      video_decoder = JerboaDecoder(SkippingDecoder(SimpleDecoder(filepath, video_stream.index)),
+                                    dst_media_config=video_config,
+                                    init_timeline=debug_timeline)
       self.decoders[MediaType.VIDEO] = video_decoder
 
       sar = video_stream.sample_aspect_ratio
@@ -87,9 +87,8 @@ class JBSource(StreamingSource):
       return None
 
     sample_rate = self.audio_format.sample_rate
-    audio = std_audio.compensated(audio, sample_rate, compensation_time)
-    duration = std_audio.calc_duration(audio, sample_rate)
-    audio_bytes = std_audio.to_real_audio(audio, AUDIO_FORMAT).tobytes()
+    duration = audio.size / self.audio_format.channels / sample_rate
+    audio_bytes = audio.tobytes()
 
     return AudioData(audio_bytes, len(audio_bytes), timestamp, duration, [])
 
