@@ -56,6 +56,10 @@ class JerboaDecoder:
   def start_timepoint(self) -> float:
     return self._skipping_decoder.start_timepoint
 
+  @property
+  def dst_media_config(self) -> AudioConfig | VideoConfig:
+    return self._dst_media_config
+
   def update_timeline(self, updated_timeline: FragmentedTimeline):
     assert updated_timeline.time_scope > self._timeline.time_scope
     with self._mutex:

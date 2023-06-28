@@ -1,85 +1,133 @@
-import imgui
-import pyglet
-from imgui.integrations.pyglet import create_renderer
+import sys
+# import PyQt6.QtCore as QtCore
+import PyQt6.QtGui as QtGui
+import PyQt6.QtWidgets as QtW
+import PyQt6.QtMultimedia as QtMedia
+from PyQt6.QtCore import Qt
 
-# from testwindow import show_test_window
-from jerboa.media.source import JBSource
-# from player import SLPlayer
-from pyglet.media import Player as SLPlayer
+# from jerboa.media.source import JBSource
+
+
+class PlayerView(QtW.QMainWindow):
+
+  def __init__(self):
+    super().__init__()
+
+    self.create_algorithm_starting_bar()
+    self.create_algorithm_run_details_bar()
+    self.create_display()
+    self.create_timeline()
+
+    splitter = QtW.QSplitter()
+    # splitter.setStyleSheet('''
+    #   QSplitter::handle {
+    #     border-right: 1px solid #413F42;
+    #     margin: 50px 1px;
+    #   }
+    #   ''')
+
+    splitter.setLayoutDirection(Qt.LayoutDirection.LeftToRight)
+    splitter.addWidget(self.side_bar)
+    splitter.addWidget(self._canvas)
+    splitter.addWidget(self.side_bar2)
+    splitter.setSizes([self.side_bar.minimumWidth() + 50,
+                       self._canvas.minimumWidth() * 2,
+                       0])  # Set the initial sizes of the side bar and canvas
+
+    self.setCentralWidget(splitter)
+
+    # self.algorithm_options_side_bar
+    # self.algorithm_timeline_options_side_bar
+    # self._frame_display
+    # self._timeline
+
+  def create_side_bar(self):
+    # self.side_bar = QtW.QFrame()
+    # self.side_bar.setMinimumWidth(200)
+    # self.side_bar.setSizePolicy(QtW.QSizePolicy.Policy.MinimumExpanding,
+    #                             QtW.QSizePolicy.Policy.Expanding)
+
+    # side_layout = QtW.QVBoxLayout()
+    # side_layout.addWidget(tab_widget)
+
+    # self.side_bar.setLayout(side_layout)
+
+    self.side_bar = QtW.QTabWidget()
+    self.side_bar.setMinimumWidth(200)
+    tab1 = QtW.QLabel("Tab 1")
+    tab2 = QtW.QLabel("Tab 2")
+    self.side_bar.addTab(tab1, "Tab 1")
+    self.side_bar.addTab(tab2, "Tab 2")
+
+    self.side_bar2 = QtW.QTabWidget()
+    self.side_bar2.setMinimumWidth(200)
+    tab1 = QtW.QLabel("Tab 1")
+    tab2 = QtW.QLabel("Tab 2")
+    self.side_bar2.addTab(tab1, "Tab 1")
+    self.side_bar2.addTab(tab2, "Tab 2")
+
+  def create_canvas(self):
+    self._canvas = QtW.QFrame()
+    self._canvas.setMinimumSize(400, 200)
+    self._canvas.setSizePolicy(QtW.QSizePolicy.Policy.MinimumExpanding,
+                               QtW.QSizePolicy.Policy.MinimumExpanding)
+    layout = QtW.QVBoxLayout()
+    layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    layout.addWidget(QtW.QLabel('test123'))
+    layout.addWidget(QtW.QLabel('test123'))
+    self._canvas.setLayout(layout)
+
+
+class MainWindow(QtW.QMainWindow):
+
+  def __init__(self):
+    super().__init__()
+
+    self._create_menu_bar()
+    self._create_status_bar()
+
+    self._player_view = PlayerView()
+
+    self._views = QtW.QStackedWidget()
+    self._views.addWidget(self._player_view)
+    self._views.setCurrentIndex(0)
+    self.setCentralWidget(self._views)
+
+  def _create_menu_bar(self):
+    menu_bar = self.menuBar()
+
+    file_menu = menu_bar.addMenu('File')
+    settings_menu = menu_bar.addMenu('Settings')
+    plugins_menu = menu_bar.addMenu('Plugins')
+
+  def _create_status_bar(self):
+    status_bar = self.statusBar()
+    status_bar.showMessage('Ready')
+    status_bar.setStyleSheet('''
+      QStatusBar {
+        border-top: 1px solid #413F42;
+      }
+      ''')
 
 
 def main():
-  window = pyglet.window.Window(width=1920, height=1080, resizable=True)
+  # src = JBSource('tests/test_recordings/test.mp4')
+  # src = JBSource('tests/test_recordings/sintel.mp4')
+  # src = JBSource('http://clips.vorwaerts-gmbh.de/big_buck_bunny.mp4')
+  # src = JBSource('https://rr1---sn-u2oxu-bqok.googlevideo.com/videoplayback?expire=1686940512&ei=AFeMZI64G4fRyAWbubyYDA&ip=37.47.205.215&id=o-AKgua88ILVszzG3n9vdfXmhH9yQjBvJUXFgYMsPgv5TN&itag=22&source=youtube&requiressl=yes&mh=l0&mm=31%2C29&mn=sn-u2oxu-bqok%2Csn-u2oxu-f5fe7&ms=au%2Crdu&mv=m&mvi=1&pcm2cms=yes&pl=21&initcwndbps=601250&spc=qEK7B-90RKtXnokdg99lflBxPSxD-t8&vprv=1&svpuc=1&mime=video%2Fmp4&cnr=14&ratebypass=yes&dur=3884.489&lmt=1668186987208939&mt=1686918562&fvip=3&fexp=24007246&beids=24350017&c=ANDROID&txp=5432434&sparams=expire%2Cei%2Cip%2Cid%2Citag%2Csource%2Crequiressl%2Cspc%2Cvprv%2Csvpuc%2Cmime%2Ccnr%2Cratebypass%2Cdur%2Clmt&sig=AOq0QJ8wRgIhAJm-xYTallggu4bz2c-uCVSWsDBEUbn-LfuvjshMhSfhAiEAx8yJeh13X460YDbkxtoJkxSJTks20U6TrfrviydAApk%3D&lsparams=mh%2Cmm%2Cmn%2Cms%2Cmv%2Cmvi%2Cpcm2cms%2Cpl%2Cinitcwndbps&lsig=AG3C_xAwRAIgdqW8zvbIbdBLex5MR97bSU-FjEmDs3lpejhnbt_DBaECIEmzMq-9VoGRfcfixIszqfsbBGcaJyIMkOxsoJRujeLw')
 
-  imgui.create_context()
-  impl = create_renderer(window)
+  app = QtW.QApplication(sys.argv)
 
-  src = JBSource('tests/test_recordings/sintel.mp4')
-  # src = SLSource('data/debugging.mp4')#'before.mp4')
+  main_win = MainWindow()
+  available_geometry = main_win.screen().availableGeometry()
+  main_win.resize(available_geometry.width() // 2, available_geometry.height() // 2)
+  main_win.show()
 
-  video_player = SLPlayer()
-  # manually create a square texture - this is slightly modified version of Player._create_texture
-  # function, which creates a rectangle texture instead of a square one
-  # video_player._texture = pyglet.image.Texture.create(src.video_format.width,
-  #                                                     src.video_format.height)
-  # video_player._texture = video_player._texture.get_transform(flip_y=True)
-  # video_player._texture.anchor_y = 0
-
-  # video_player.start(src)
-  video_player.queue(src)
-  video_player.play()
-
-  def update(dt):
-    imgui.new_frame()
-    if imgui.begin_main_menu_bar():
-      if imgui.is_key_pressed(imgui.KEY_RIGHT_ARROW):
-        video_player.seek(video_player.time + 2.0)
-      if imgui.is_key_pressed(imgui.KEY_LEFT_ARROW):
-        video_player.seek(video_player.time - 2.0)
-      if imgui.is_key_pressed(imgui.KEY_SPACE):
-        if video_player.playing:
-          video_player.pause()
-        else:
-          video_player.play()
-      if imgui.begin_menu('File', True):
-        clicked_quit, selected_quit = imgui.menu_item('Quit', 'Cmd+Q', False, True)
-        if clicked_quit:
-          pyglet.app.exit()
-        imgui.end_menu()
-      imgui.end_main_menu_bar()
-
-  def draw(dt):
-    update(dt)
-    window.clear()
-
-    # show_test_window()
-    imgui.begin('test')
-
-    imgui.text('this is a test')
-    video_texture = video_player.texture
-    if video_texture is not None:
-      texture_ar = video_texture.width / video_texture.height
-      canvas_size = imgui.get_content_region_available()
-      image_width = min(canvas_size.x, canvas_size.y * texture_ar)
-      image_height = image_width / texture_ar
-
-      imgui.image(texture_id=video_texture.id,
-                  width=image_width,
-                  height=image_height,
-                  uv0=(0, 0),
-                  uv1=((video_texture.width / video_texture.owner.width),
-                       (video_texture.height / video_texture.owner.height)))
-
-    imgui.end()
-
-    imgui.render()
-    impl.render(imgui.get_draw_data())
-
-  pyglet.clock.schedule_interval(draw, 1 / 60)
-  pyglet.app.run()
-  video_player.delete()
-  impl.shutdown()
+  sys.exit(app.exec())
 
 
 if __name__ == '__main__':
+  import multiprocessing as mp
+  mp.set_start_method('spawn')
+
   main()
