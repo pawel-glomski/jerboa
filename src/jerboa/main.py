@@ -1,12 +1,14 @@
 from typing import Callable
+from abc import ABC, abstractmethod
 
 import sys
-from abc import ABC, abstractmethod
+
 from PyQt5 import QtCore
 from PyQt5 import QtGui
 # from PyQt5 import QtMultimedia as QtMedia
 import PyQt5.QtWidgets as QtW
 from PyQt5.QtCore import Qt
+from PyQt5.QtWidgets import QWidget
 
 from jerboa.media import MediaType
 from jerboa.media.source.decoder import JerboaDecoder, SkippingDecoder, SimpleDecoder
@@ -143,6 +145,68 @@ class JerboaUI(ABC):
     raise NotImplementedError()
 
 
+class OpenMediaFileDialog(QtW.QDialog):
+
+  def __init__(self,
+               parent: QWidget | None = None,
+               flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Dialog) -> None:
+    super().__init__(parent, flags)
+    self._select_file_button = QtW.QPushButton('Select from device')
+    self._select_file_button.setAutoDefault(False)
+    self._select_file_button.clicked.connect(self._on_select_file_button_click)
+    self._file_path_input = QtW.QLineEdit()
+    self._apply_button = QtW.QPushButton('Apply')
+    self._apply_button.clicked.connect(self._on_apply_click)
+
+    separator = QtW.QFrame()
+    separator.setFrameShape(QtW.QFrame.VLine)
+
+    input_layout = QtW.QHBoxLayout()
+    input_layout.addWidget(self._select_file_button)
+    input_layout.addWidget(separator)
+    input_layout.addWidget(self._file_path_input)
+    input_layout.addWidget(self._apply_button)
+
+    self._ok_button = QtW.QPushButton('OK')
+    self._ok_button.clicked.connect(self.accept)
+    self._cancel_button = QtW.QPushButton('Cancel')
+    self._cancel_button.clicked.connect(self.reject)
+
+    bottom_layout = QtW.QHBoxLayout()
+    bottom_layout.addWidget(self._ok_button)
+    bottom_layout.addWidget(self._cancel_button)
+
+    main_layout = QtW.QVBoxLayout(self)
+    main_layout.addLayout(input_layout)
+    main_layout.addLayout(bottom_layout)
+    self.setLayout(main_layout)
+
+    self._reset()
+
+  def _on_select_file_button_click(self):
+    file_path, _ = QtW.QFileDialog.getOpenFileName()
+    if file_path:
+      self._file_path_input.setText(file_path)
+      self._on_apply_click()
+
+  def _on_apply_click(self):
+    provided_path = QtCore.QUrl(self._file_path_input.text())
+    if provided_path.isValid():
+      if provided_path.isLocalFile():
+        ... # show stream selection
+      else:
+        ... # use yt-dlp to query the available video quality options and links
+      self._ok_button.setDisabled(False)
+      self._apply_button.setDefault(False)
+      self._ok_button.setDefault(True)
+    else:
+      self._reset()
+
+  def _reset(self):
+    self._apply_button.setDefault(True)
+    self._ok_button.setDisabled(True)
+
+
 class JerboaGUI(JerboaUI):
 
   def __init__(self) -> None:
@@ -150,8 +214,9 @@ class JerboaGUI(JerboaUI):
     self._app_window = QtW.QMainWindow()
     self._app_window.setMinimumSize(640, 360)
 
-    # menu_bar = self.menuBar()
-    # file_menu = menu_bar.addMenu('File')
+    menu_bar = self._app_window.menuBar()
+    file_menu = menu_bar.addMenu('File')
+    file_menu.addAction('Open', self._open_file)
     # settings_menu = menu_bar.addMenu('Settings')
     # plugins_menu = menu_bar.addMenu('Plugins')
 
@@ -171,6 +236,18 @@ class JerboaGUI(JerboaUI):
     self._app_window.setCentralWidget(self._views)
     # available_geometry = self._app_window.screen().availableGeometry()
     # self._app_window.resize(available_geometry.width() // 2, available_geometry.height() // 2)
+
+  def _open_file(self):
+    open_media_file_dialog = OpenMediaFileDialog(parent=self._app_window)
+    print(open_media_file_dialog.exec())
+
+    # audio_decoder = JerboaDecoder(dst_media_config=AudioConfig())
+    # video_decoder = JerboaDecoder(dst_media_config=VideoConfig())
+
+    # audio_decoder.start('path_to_file.mp4', stream_index=0, init_timeline=FragmentedTimeline())
+    # video_decoder.start('path_to_file.mp4', stream_index=0, init_timeline=FragmentedTimeline())
+
+    # self._media_player.play(audio_decoder, video_decoder)
 
   def run_event_loop(self) -> int:
     self._app_window.show()
