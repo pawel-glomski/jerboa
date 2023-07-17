@@ -1,5 +1,3 @@
-from typing import Callable
-
 from pathlib import Path
 
 import PyQt5.QtWidgets as QtW
@@ -7,104 +5,7 @@ from PyQt5 import QtCore
 from PyQt5 import QtGui
 from PyQt5.QtCore import Qt
 
-from jerboa.media import MediaType
-from jerboa.ui.gui.common import LabelValuePair
-from .media_stream_selector import MediaStreamSelector
-
-
-class MediaSourceSelector(QtW.QWidget):
-
-  def __init__(self) -> None:
-    super().__init__()
-
-    self._select_local_file_button = QtW.QPushButton('Select a local file')
-    self._select_local_file_button.setAutoDefault(False)
-    self._select_local_file_button.clicked.connect(self._on_select_local_file_button_click)
-
-    separator = QtW.QFrame()
-    separator.setFrameShape(QtW.QFrame.VLine)
-
-    self._media_source_path_input = QtW.QLineEdit()
-    self._media_source_path_input.setPlaceholderText('Media file path (or URL)...')
-    self._media_source_path_input.returnPressed.connect(self._apply_media_source_path)
-
-    self._apply_button = QtW.QPushButton('Apply')
-    self._apply_button.setAutoDefault(False)
-    self._apply_button.clicked.connect(self._apply_media_source_path)
-
-    layout = QtW.QHBoxLayout()
-    layout.addWidget(self._select_local_file_button)
-    layout.addWidget(separator)
-    layout.addWidget(self._media_source_path_input)
-    layout.addWidget(self._apply_button)
-    self.setLayout(layout)
-
-    self._on_selected_callback: Callable[[str], None] = lambda _: ...
-
-  def _on_select_local_file_button_click(self) -> None:
-    file_path, _ = QtW.QFileDialog.getOpenFileName(
-        filter='Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)')
-    if file_path:
-      self._media_source_path_input.setText(file_path)
-      self._apply_media_source_path()
-
-  def set_on_selected_callback(self, on_selected_callback: Callable[[str], None]) -> None:
-    self._on_selected_callback = on_selected_callback
-
-  def _apply_media_source_path(self) -> None:
-    self._media_source_path_input.clearFocus()
-    self._on_selected_callback(self._media_source_path_input.text())
-
-
-class LoadingSpinnerPanel(QtW.QWidget):
-
-  def __init__(self):
-    super().__init__()
-    spinner_movie = QtGui.QMovie(':/loading_spinner.gif')
-    spinner_movie.setScaledSize(QtCore.QSize(30, 30))
-    spinner = QtW.QLabel()
-    spinner.setMovie(spinner_movie)
-    spinner.show()
-    spinner.movie().start()
-
-    layout = QtW.QVBoxLayout()
-    layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    layout.addWidget(spinner)
-    self.setLayout(layout)
-
-
-class AVContainerPanel(QtW.QWidget):
-
-  def __init__(self):
-    super().__init__()
-    self._file_name = LabelValuePair('File name')
-
-    self._audio_stream_selector = MediaStreamSelector(MediaType.AUDIO)
-    self._video_stream_selector = MediaStreamSelector(MediaType.VIDEO)
-    streams_selection_layout = QtW.QHBoxLayout()
-    streams_selection_layout.addWidget(self._audio_stream_selector)
-    streams_selection_layout.addWidget(self._video_stream_selector)
-
-    main_layout = QtW.QVBoxLayout()
-    main_layout.setAlignment(QtCore.Qt.AlignmentFlag.AlignTop)
-    main_layout.addWidget(self._file_name)
-    main_layout.addLayout(streams_selection_layout)
-    self.setLayout(main_layout)
-
-  # TODO: remove PyAV references and use dataclasses instead
-  def set_container(self, container) -> None:
-    self._file_name.set_value(container.name)
-    self._audio_stream_selector.set_available_streams(container.streams.audio)
-    self._video_stream_selector.set_available_streams(container.streams.video)
-
-
-class StreamingSitePanel(QtW.QWidget):
-
-  def __init__(self):
-    super().__init__()
-    layout = QtW.QVBoxLayout()
-    layout.addWidget(QtW.QLabel('Remote'))
-    self.setLayout(layout)
+from . import components
 
 
 class MediaSourceSelectionDialog(QtW.QDialog):
@@ -112,11 +13,11 @@ class MediaSourceSelectionDialog(QtW.QDialog):
 
   def __init__(
       self,
-      media_source_selector: MediaSourceSelector,
+      media_source_path_selector: components.MediaSourcePathSelector,
       panel_init: QtW.QLabel,
-      panel_loading_spinner: LoadingSpinnerPanel,
-      panel_avcontainer: AVContainerPanel,
-      panel_streaming_site: StreamingSitePanel,
+      panel_loading_spinner: components.LoadingSpinnerPanel,
+      panel_avcontainer: components.AVContainerPanel,
+      panel_streaming_site: components.StreamingSitePanel,
       decision_button_box: QtW.QDialogButtonBox,
       parent: QtW.QWidget | None = None,
       flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Dialog,
@@ -124,7 +25,7 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     super().__init__(parent, flags)
     self.setMinimumSize(600, 300)
 
-    media_source_selector.set_on_selected_callback(self._on_media_source_selected)
+    media_source_path_selector.set_on_selected_callback(self._on_media_source_selected)
 
     self._panel_init = panel_init
     self._panel_init.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -151,7 +52,7 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     decision_button_box.rejected.connect(self.reject)
 
     main_layout = QtW.QVBoxLayout(self)
-    main_layout.addWidget(media_source_selector)
+    main_layout.addWidget(media_source_path_selector)
     main_layout.addWidget(self._content_panel)
     main_layout.addWidget(decision_button_box)
     self.setLayout(main_layout)
@@ -220,11 +121,11 @@ class MediaSourceSelectionDialog(QtW.QDialog):
       button.setIcon(QtGui.QIcon())
 
     return MediaSourceSelectionDialog(
-        media_source_selector=MediaSourceSelector(),
+        media_source_path_selector=components.MediaSourcePathSelector(),
         panel_init=QtW.QLabel(),
-        panel_loading_spinner=LoadingSpinnerPanel(),
-        panel_avcontainer=AVContainerPanel(),
-        panel_streaming_site=StreamingSitePanel(),
+        panel_loading_spinner=components.LoadingSpinnerPanel(),
+        panel_avcontainer=components.AVContainerPanel(),
+        panel_streaming_site=components.StreamingSitePanel(),
         decision_button_box=decision_button_box,
         parent=parent,
         flags=flags,
