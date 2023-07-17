@@ -48,7 +48,7 @@ class MediaStreamProperties(PropertiesCollection):
         self.set_value(PROPERTY_KEY_RESOLUTION, f'{stream.width}x{stream.height}')
 
 
-class MediaStreamSelection(QtW.QWidget):
+class MediaStreamSelector(QtW.QWidget):
 
   def __init__(self, media_type: MediaType):
     super().__init__()
