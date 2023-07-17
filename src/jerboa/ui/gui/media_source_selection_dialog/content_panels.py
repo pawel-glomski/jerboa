@@ -4,7 +4,7 @@ from PyQt5 import QtGui
 from PyQt5.QtCore import Qt
 
 from jerboa.media import MediaType
-from jerboa.ui.gui_elements.common import LabelValuePair
+from jerboa.ui.gui.common import LabelValuePair
 from .media_stream_selection import MediaStreamSelection
 
 

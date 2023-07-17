@@ -5,7 +5,7 @@ from PyQt5 import QtGui
 from PyQt5.QtCore import Qt
 
 from jerboa.ui import JerboaUI
-from .gui_elements import MediaSourceSelectionDialog
+from .media_source_selection_dialog import MediaSourceSelectionDialog
 
 
 class PlayerView(QtW.QWidget):

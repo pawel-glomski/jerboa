@@ -3,7 +3,7 @@ from PyQt5 import QtCore
 
 from jerboa.media import MediaType
 from jerboa.ui.utils import seconds_to_hh_mm_ss
-from jerboa.ui.gui_elements.common import PropertiesCollection
+from jerboa.ui.gui.common import PropertiesCollection
 
 PROPERTY_KEY_START_TIME = 'Start time'
 PROPERTY_KEY_DURATION = 'Duration'
