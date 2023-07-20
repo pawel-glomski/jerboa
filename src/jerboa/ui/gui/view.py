@@ -63,7 +63,7 @@ class PlayerView(QtW.QWidget):
     self._canvas.setPixmap(pixmap)
 
 
-class JerboaGUI(JerboaUI):
+class JerboaView(JerboaUI):
 
   def __init__(self) -> None:
     self._app = QtW.QApplication([])

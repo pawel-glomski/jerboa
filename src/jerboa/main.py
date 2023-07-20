@@ -3,7 +3,7 @@ from typing import Callable
 import sys
 
 from jerboa.ui import JerboaUI
-from jerboa.ui.gui import JerboaGUI
+from jerboa.ui.gui import JerboaView
 from jerboa.media import MediaType
 from jerboa.media.source.decoder import JerboaDecoder, SkippingDecoder, SimpleDecoder
 
@@ -87,7 +87,7 @@ class JerboaApp:
 
 
 def main():
-  ui = JerboaGUI()
+  ui = JerboaView()
   app = JerboaApp(ui)
   sys.exit(app.run())
 
