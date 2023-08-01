@@ -9,6 +9,7 @@ class LabelValuePair(QtW.QWidget):
     self._label = QtW.QLabel(f'{label}:')
     self._value = QtW.QLineEdit()
     self._value.setReadOnly(read_only)
+    self._value.setDisabled(read_only)
 
     layout = QtW.QHBoxLayout()
     layout.addWidget(self._label)
@@ -36,6 +37,7 @@ class PropertiesCollection(QtW.QWidget):
     label = QtW.QLabel(f'{key}:')
     value = QtW.QLineEdit()
     value.setReadOnly(read_only)
+    value.setDisabled(read_only)
 
     self._values[key] = value
     self._labels_layout.addWidget(label)
