@@ -1,1 +1,1 @@
-from .view import JerboaView
+from .gui import GUIApp, JerboaGUI

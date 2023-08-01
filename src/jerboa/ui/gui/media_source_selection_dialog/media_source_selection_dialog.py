@@ -13,27 +13,21 @@ class MediaSourceSelectionDialog(QtW.QDialog):
 
   def __init__(
       self,
-      media_source_path_selector: components.MediaSourcePathSelector,
-      panel_init: QtW.QLabel,
-      panel_loading_spinner: components.LoadingSpinnerPanel,
-      panel_avcontainer: components.AVContainerPanel,
-      panel_streaming_site: components.StreamingSitePanel,
-      decision_button_box: QtW.QDialogButtonBox,
       parent: QtW.QWidget | None = None,
       flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Dialog,
   ) -> None:
     super().__init__(parent, flags)
     self.setMinimumSize(600, 300)
-
+    media_source_path_selector = components.MediaSourcePathSelector()
     media_source_path_selector.set_on_selected_callback(self._on_media_source_selected)
 
-    self._panel_init = panel_init
+    self._panel_init = QtW.QLabel()
     self._panel_init.setAlignment(Qt.AlignmentFlag.AlignCenter)
     self._panel_init.setText('Select a local file or enter the URL of a recording')
 
-    self._panel_loading_spinner = panel_loading_spinner
-    self._panel_avcontainer = panel_avcontainer
-    self._panel_streaming_site = panel_streaming_site
+    self._panel_loading_spinner = components.LoadingSpinnerPanel()
+    self._panel_avcontainer = components.AVContainerPanel()
+    self._panel_streaming_site = components.StreamingSitePanel()
 
     self._content_panel = QtW.QStackedWidget()
     self._content_panel.setFrameShape(QtW.QFrame.Shape.Box)
@@ -45,8 +39,13 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     self._content_panel.addWidget(self._panel_streaming_site)
     self._content_panel.setCurrentWidget(self._panel_init)
 
-    self._ok_button = decision_button_box.button(QtW.QDialogButtonBox.StandardButton.Ok)
+    decision_button_box = QtW.QDialogButtonBox(QtW.QDialogButtonBox.StandardButton.Cancel |
+                                               QtW.QDialogButtonBox.StandardButton.Ok)
     self._cancel_button = decision_button_box.button(QtW.QDialogButtonBox.StandardButton.Cancel)
+    self._ok_button = decision_button_box.button(QtW.QDialogButtonBox.StandardButton.Ok)
+
+    self._cancel_button.setIcon(QtGui.QIcon())
+    self._ok_button.setIcon(QtGui.QIcon())
 
     decision_button_box.accepted.connect(self.accept)
     decision_button_box.rejected.connect(self.reject)
@@ -109,24 +108,3 @@ class MediaSourceSelectionDialog(QtW.QDialog):
 
   def _reset(self):
     self._ok_button.setDisabled(True)
-
-  @staticmethod
-  def create_default(
-      parent: QtW.QWidget | None = None,
-      flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Dialog) -> 'MediaSourceSelectionDialog':
-
-    decision_button_box = QtW.QDialogButtonBox(QtW.QDialogButtonBox.StandardButton.Cancel |
-                                               QtW.QDialogButtonBox.StandardButton.Ok)
-    for button in decision_button_box.buttons():
-      button.setIcon(QtGui.QIcon())
-
-    return MediaSourceSelectionDialog(
-        media_source_path_selector=components.MediaSourcePathSelector(),
-        panel_init=QtW.QLabel(),
-        panel_loading_spinner=components.LoadingSpinnerPanel(),
-        panel_avcontainer=components.AVContainerPanel(),
-        panel_streaming_site=components.StreamingSitePanel(),
-        decision_button_box=decision_button_box,
-        parent=parent,
-        flags=flags,
-    )
