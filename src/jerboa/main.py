@@ -6,10 +6,10 @@ from dependency_injector.wiring import Provide, inject
 from jerboa.ui import JerboaUI, gui
 # from jerboa.ui.gui.thread_pool import ThreadPool as GUIThreadPool
 
+
 class Container(containers.DeclarativeContainer):
 
   # config = providers.Configuration()
-
 
   # audio_player = providers.Singleton(MediaPlayer)
   # video_player = providers.Singleton(MediaPlayer)
@@ -18,7 +18,6 @@ class Container(containers.DeclarativeContainer):
   #     audio_player=audio_player,
   #     video_player=video_player,
   # )
-
 
   # thread_pool = providers.Resource(GUIThreadPool)
 
@@ -79,7 +78,7 @@ class Container(containers.DeclarativeContainer):
   #     no_icons=True,
   # )
   # gui_media_source_selection_dialog = providers.Factory(
-  #     gui.action_bar.file.Open,
+  #     gui.menu_bar.file.Open,
   #     gui_app=gui_app,
   #     path_selector=gui_meida_source_path_selector,
   #     media_source_details_panel=gui_media_source_details_panel,
@@ -88,20 +87,20 @@ class Container(containers.DeclarativeContainer):
 
   # -------------------------------- action bar -------------------------------- #
 
-  # gui_action_bar_menu_file_action_open = providers.Factory(
-  #     gui.action_bar.file.Open,
+  # gui_menu_bar_file_open = providers.Factory(
+  #     gui.menu_bar.file.Open,
   #     gui_app=gui_app,
   #     media_source_selection_dialog_factory=media_source_selection_dialog.provider)
-  # gui_action_bar_menu_file = providers.Factory(
-  #     gui.action_bar.Menu,
+  # gui_menu_bar_file = providers.Factory(
+  #     gui.menu_bar.Menu,
   #     gui_app=gui_app,
   #     name='File',
-  #     actions=[gui_action_bar_menu_file_action_open],
+  #     actions=[gui_menu_bar_file_open],
   # )
-  # gui_action_bar = providers.Factory(
+  # gui_menu_bar = providers.Factory(
   #     gui.ActionBar,
   #     gui_app=gui_app,
-  #     menus=[gui_action_bar_menu_file],
+  #     menus=[gui_menu_bar_file],
   # )
 
   # -------------------------------- player view ------------------------------- #
@@ -124,16 +123,24 @@ class Container(containers.DeclarativeContainer):
 
   # ----------------------------- jerboa view stack ---------------------------- #
 
+  gui_menu_bar = providers.Factory(
+      gui.MenuBar,
+      menus=[],
+  )
+
   # gui_main_widget = providers.Factory(
   #     gui.JerboaViewStack,
   #     # player_view=player_view,
   #     # settings_view=settings_view,
   #     # plugins_view=plugins_view,
   # )
+
+  # -------------------------------- jerboa gui -------------------------------- #
+
   gui_jerboa = providers.Singleton(
       gui.JerboaGUI,
       gui_app=gui_app,
-      # action_bar=gui_action_bar,
+      menu_bar=gui_menu_bar,
       # main_widget=gui_main_widget,
       # status_bar=gui_status_bar,
   )

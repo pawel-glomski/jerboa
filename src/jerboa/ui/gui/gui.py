@@ -23,6 +23,7 @@ class JerboaGUI(JerboaUI):
   def __init__(
       self,
       gui_app: GUIApp,
+      menu_bar: QtW.QMenuBar,
   ) -> None:
     self._gui_app = gui_app
 
@@ -32,12 +33,7 @@ class JerboaGUI(JerboaUI):
     available_geometry = self._window.screen().availableGeometry()
     self._window.resize(available_geometry.width() // 2, available_geometry.height() // 2)
 
-    # menu_bar = self._window.menuBar()
-    # file_menu = menu_bar.addMenu('File')
-    # file_menu.addAction('Open', self._on_file_open_action)
-
-    # settings_menu = menu_bar.addMenu('Settings')
-    # plugins_menu = menu_bar.addMenu('Plugins')
+    menu_bar = self._window.setMenuBar(menu_bar)
 
     # status_bar = self.statusBar()
     # status_bar.showMessage('Ready')
@@ -48,11 +44,6 @@ class JerboaGUI(JerboaUI):
     #   ''')
 
     # self._window.setCentralWidget(self._sub_views)
-
-  # def _on_file_open_action(self):
-
-  #   media_source_selection_dialog = MediaSourceSelectionDialog(parent=self._window)
-  #   print(media_source_selection_dialog.exec())
 
   def run_event_loop(self) -> int:
     self._window.show()
