@@ -84,23 +84,6 @@ class Container(containers.DeclarativeContainer):
   #     decision_button_box=gui_cancel_ok_button_box,
   # )
 
-  # -------------------------------- player view ------------------------------- #
-
-  # gui_player_view_frame_display = providers.Factory(
-  #   gui.player_view.FrameDisplay,
-  #   # frame_changed_signal=gui_video_player.frame_changed
-  # )
-  # gui_player_view_timeline = providers.Factory(
-  #   gui.player_view.Timeline,
-  #   # playback_update_signal=gui_media_player.playback_update
-  # )
-
-  # player_view = providers.Factory(
-  #     PlayerView,
-  #     frame_display=gui_player_view_frame_display
-  #     timeline=gui_player_view_timeline,
-  # )
-
   # --------------------------------- menu bar --------------------------------- #
 
   gui_menu_bar_file_open = providers.Factory(
@@ -120,9 +103,27 @@ class Container(containers.DeclarativeContainer):
 
   # ----------------------------- jerboa view stack ---------------------------- #
 
+  # -------------------------------- player view ------------------------------- #
+
+  # gui_player_view_frame_display = providers.Factory(
+  #   gui.player_view.FrameDisplay,
+  #   # frame_changed_signal=gui_video_player.frame_changed
+  # )
+  # gui_player_view_timeline = providers.Factory(
+  #   gui.player_view.Timeline,
+  #   # playback_update_signal=gui_media_player.playback_update
+  # )
+
+  player_view = providers.Factory(
+      gui.PlayerView,
+      # frame_display=gui_player_view_frame_display
+      # timeline=gui_player_view_timeline,
+  )
+
+
   gui_main_widget = providers.Factory(
       gui.MainViewStack,
-      # player_view=player_view,
+      player_view=player_view,
       # settings_view=settings_view,
       # plugins_view=plugins_view,
   )
