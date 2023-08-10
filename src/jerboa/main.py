@@ -4,6 +4,7 @@ from dependency_injector import containers, providers
 from dependency_injector.wiring import Provide, inject
 
 from jerboa.ui import JerboaUI, gui
+from jerboa.signal import Signal
 # from jerboa.ui.gui.thread_pool import ThreadPool as GUIThreadPool
 
 
@@ -20,6 +21,12 @@ class Container(containers.DeclarativeContainer):
   # )
 
   # thread_pool = providers.Resource(GUIThreadPool)
+
+  # ---------------------------------------------------------------------------- #
+  #                                    signals                                   #
+  # ---------------------------------------------------------------------------- #
+
+  select_media_source_signal = providers.Singleton(Signal)
 
   # ---------------------------------------------------------------------------- #
   #                                      gui                                     #
@@ -41,24 +48,19 @@ class Container(containers.DeclarativeContainer):
 
   # gui_media_source_details_panel_init = providers.Factory(
   #     gui.media_source_selection.details_panel.InitPanel,
-  #     gui_app=gui_app,
   #     text='Select a local file or enter the URL of a recording')
   # gui_media_source_details_panel_loading = providers.Factory(
   #     gui.media_source_selection.details_panel.LoadingSpinnerPanel,
-  #     gui_app=gui_app,
   #     spinner_gif=gui_resource_loading_spinner,
   # )
   # gui_media_source_details_panel_streaming_quality_selection = providers.Factory(
   #     gui.media_source_selection.details_panel.InitPanel,
-  #     gui_app=gui_app,
   # )
   # gui_media_source_details_panel_stream_selection = providers.Factory(
   #     gui.media_source_selection.details_panel.InitPanel,
-  #     gui_app=gui_app,
   # )
   # gui_media_source_details_panel = providers.Factory(
   #     gui.media_source_selection.details_panel.InitPanel,
-  #     gui_app=gui_app,
   #     init_panel=gui_media_source_details_panel_init,
   #     loading_panel=gui_media_source_details_panel_loading,
   #     streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
@@ -67,40 +69,19 @@ class Container(containers.DeclarativeContainer):
 
   # gui_meida_source_path_selector = providers.Factory(
   #     gui.common.PathSelector,
-  #     gui_app=gui_app,
   #     placeholder_text='Media file path (or URL)...',
   # )
   # gui_cancel_ok_button_box = providers.Factory(
   #     gui.common.DecisionBox,
-  #     gui_app=gui_app,
   #     reject_button='cancel',
   #     accept_button='ok',
   #     no_icons=True,
   # )
   # gui_media_source_selection_dialog = providers.Factory(
   #     gui.menu_bar.file.Open,
-  #     gui_app=gui_app,
   #     path_selector=gui_meida_source_path_selector,
   #     media_source_details_panel=gui_media_source_details_panel,
   #     decision_button_box=gui_cancel_ok_button_box,
-  # )
-
-  # -------------------------------- action bar -------------------------------- #
-
-  # gui_menu_bar_file_open = providers.Factory(
-  #     gui.menu_bar.file.Open,
-  #     gui_app=gui_app,
-  #     media_source_selection_dialog_factory=media_source_selection_dialog.provider)
-  # gui_menu_bar_file = providers.Factory(
-  #     gui.menu_bar.Menu,
-  #     gui_app=gui_app,
-  #     name='File',
-  #     actions=[gui_menu_bar_file_open],
-  # )
-  # gui_menu_bar = providers.Factory(
-  #     gui.ActionBar,
-  #     gui_app=gui_app,
-  #     menus=[gui_menu_bar_file],
   # )
 
   # -------------------------------- player view ------------------------------- #
@@ -116,17 +97,29 @@ class Container(containers.DeclarativeContainer):
 
   # player_view = providers.Factory(
   #     PlayerView,
-  #     gui_app=gui_app,
   #     frame_display=gui_player_view_frame_display
   #     timeline=gui_player_view_timeline,
   # )
 
-  # ----------------------------- jerboa view stack ---------------------------- #
+  # --------------------------------- menu bar --------------------------------- #
+
+  gui_menu_bar_file_open = providers.Factory(
+      gui.menu_bar.MenuAction,
+      name='Open',
+      signal=select_media_source_signal,
+  )
+  gui_menu_bar_file = providers.Factory(
+      gui.menu_bar.Menu,
+      name='File',
+      actions=providers.List(gui_menu_bar_file_open,),
+  )
 
   gui_menu_bar = providers.Factory(
       gui.MenuBar,
-      menus=[],
+      menus=providers.List(gui_menu_bar_file,),
   )
+
+  # ----------------------------- jerboa view stack ---------------------------- #
 
   # gui_main_widget = providers.Factory(
   #     gui.JerboaViewStack,
