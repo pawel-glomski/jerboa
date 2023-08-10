@@ -109,15 +109,15 @@ class Container(containers.DeclarativeContainer):
     gui.player_view.Canvas,
     # frame_changed_signal=gui_video_player.frame_changed
   )
-  # gui_player_view_timeline = providers.Factory(
-  #   gui.player_view.Timeline,
-  #   # playback_update_signal=gui_media_player.playback_update
-  # )
+  gui_player_view_timeline = providers.Factory(
+    gui.player_view.Timeline,
+    # playback_update_signal=gui_media_player.playback_update
+  )
 
   player_view = providers.Factory(
       gui.PlayerView,
-      canvas=gui_player_view_canvas
-      # timeline=gui_player_view_timeline,
+      canvas=gui_player_view_canvas,
+      timeline=gui_player_view_timeline,
   )
 
 
