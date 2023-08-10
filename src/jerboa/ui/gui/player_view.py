@@ -4,12 +4,10 @@ from PyQt5 import QtGui
 # from PyQt5 import QtMultimedia as QtMedia
 from PyQt5.QtCore import Qt
 
-from jerboa.model import PlayerModel
-
 
 class PlayerView(QtW.QWidget):
 
-  def __init__(self, player_model: PlayerModel):
+  def __init__(self):
     super().__init__()
     self._splitter = PlayerView._create_splitter()
     self._canvas = PlayerView._add_canvas(self._splitter)
