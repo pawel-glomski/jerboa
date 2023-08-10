@@ -24,6 +24,7 @@ class JerboaGUI(JerboaUI):
       self,
       gui_app: GUIApp,
       menu_bar: QtW.QMenuBar,
+      main_widget: QtW.QWidget,
   ) -> None:
     self._gui_app = gui_app
 
@@ -33,7 +34,8 @@ class JerboaGUI(JerboaUI):
     available_geometry = self._window.screen().availableGeometry()
     self._window.resize(available_geometry.width() // 2, available_geometry.height() // 2)
 
-    menu_bar = self._window.setMenuBar(menu_bar)
+    self._window.setMenuBar(menu_bar)
+    self._window.setCentralWidget(main_widget)
 
     # status_bar = self.statusBar()
     # status_bar.showMessage('Ready')
@@ -43,21 +45,6 @@ class JerboaGUI(JerboaUI):
     #   }
     #   ''')
 
-    # self._window.setCentralWidget(self._sub_views)
-
   def run_event_loop(self) -> int:
     self._window.show()
     return self._gui_app.run_event_loop()
-
-
-class JerboaViewStack(QtW.QStackedWidget):
-
-  def __init__(
-      self,
-      player_view: PlayerView,
-      # settings_view,
-      # plugins_view,
-  ):
-    super().__init__()
-    self.addWidget(player_view)
-    self.setCurrentWidget(player_view)

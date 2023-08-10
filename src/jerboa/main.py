@@ -113,7 +113,6 @@ class Container(containers.DeclarativeContainer):
       name='File',
       actions=providers.List(gui_menu_bar_file_open,),
   )
-
   gui_menu_bar = providers.Factory(
       gui.MenuBar,
       menus=providers.List(gui_menu_bar_file,),
@@ -121,12 +120,12 @@ class Container(containers.DeclarativeContainer):
 
   # ----------------------------- jerboa view stack ---------------------------- #
 
-  # gui_main_widget = providers.Factory(
-  #     gui.JerboaViewStack,
-  #     # player_view=player_view,
-  #     # settings_view=settings_view,
-  #     # plugins_view=plugins_view,
-  # )
+  gui_main_widget = providers.Factory(
+      gui.MainViewStack,
+      # player_view=player_view,
+      # settings_view=settings_view,
+      # plugins_view=plugins_view,
+  )
 
   # -------------------------------- jerboa gui -------------------------------- #
 
@@ -134,7 +133,7 @@ class Container(containers.DeclarativeContainer):
       gui.JerboaGUI,
       gui_app=gui_app,
       menu_bar=gui_menu_bar,
-      # main_widget=gui_main_widget,
+      main_widget=gui_main_widget,
       # status_bar=gui_status_bar,
   )
 
