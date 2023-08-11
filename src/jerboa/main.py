@@ -83,19 +83,24 @@ class Container(containers.DeclarativeContainer):
   #     accept_button='ok',
   #     no_icons=True,
   # )
-  # gui_media_source_selection_dialog = providers.Factory(
-  #     gui.menu_bar.file.Open,
-  #     path_selector=gui_meida_source_path_selector,
-  #     media_source_details_panel=gui_media_source_details_panel,
-  #     decision_button_box=gui_cancel_ok_button_box,
-  # )
+  gui_media_source_selection_dialog = providers.Factory(
+      gui.MediaSourceSelectionDialog,
+      parent=gui_main_window,
+      # path_selector=gui_meida_source_path_selector,
+      # media_source_details_panel=gui_media_source_details_panel,
+      # decision_button_box=gui_cancel_ok_button_box,
+  )
 
   # --------------------------------- menu bar --------------------------------- #
 
   gui_menu_bar_file_open = providers.Singleton(
       gui.menu_bar.MenuAction,
       name='Open',
-      signal=Signal(max_subscribers=1),
+      signal=providers.Singleton(
+          Signal,
+          gui_media_source_selection_dialog.provided.exec,
+          max_subscribers='init',
+      ),
   )
   gui_menu_bar_file = providers.Singleton(
       gui.menu_bar.Menu,
