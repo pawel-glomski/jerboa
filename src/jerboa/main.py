@@ -81,17 +81,18 @@ class Container(containers.DeclarativeContainer):
       local_file_extension_filter=
       'Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)',
   )
-  # gui_cancel_ok_button_box = providers.Factory(
-  #     gui.common.DecisionBox,
-  #     reject_button='cancel',
-  #     accept_button='ok',
-  #     no_icons=True,
-  # )
+  gui_media_source_selection_dialog_button_box = providers.Factory(
+      gui.common.RejectAcceptDialogButtonBox,
+      reject_button='cancel',
+      accept_button='ok',
+      icons=False,
+      accept_disabled_by_default=True,
+  )
   gui_media_source_selection_dialog = providers.Factory(
       gui.MediaSourceSelectionDialog,
       path_selector=gui_meida_source_path_selector,
       # media_source_details_panel=gui_media_source_details_panel,
-      # decision_button_box=gui_cancel_ok_button_box,
+      button_box=gui_media_source_selection_dialog_button_box,
       parent=gui_main_window,
   )
 

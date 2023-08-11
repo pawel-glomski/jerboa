@@ -5,7 +5,7 @@ from PyQt5 import QtCore
 from PyQt5 import QtGui
 from PyQt5.QtCore import Qt
 
-from jerboa.ui.gui.common import PathSelector
+from jerboa.ui.gui.common import PathSelector, RejectAcceptDialogButtonBox
 from . import components
 
 
@@ -15,12 +15,19 @@ class MediaSourceSelectionDialog(QtW.QDialog):
   def __init__(
       self,
       path_selector: PathSelector,
+      button_box: RejectAcceptDialogButtonBox,
       parent: QtW.QWidget | None = None,
       flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Dialog,
   ) -> None:
     super().__init__(parent, flags)
     self.setMinimumSize(600, 300)
+
     path_selector.path_selected_signal.connect(self._on_media_source_selected)
+
+    button_box.accepted.connect(self.accept)
+    button_box.rejected.connect(self.reject)
+
+    self._button_box = button_box
 
     self._panel_init = QtW.QLabel()
     self._panel_init.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -40,31 +47,18 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     self._content_panel.addWidget(self._panel_streaming_site)
     self._content_panel.setCurrentWidget(self._panel_init)
 
-    decision_button_box = QtW.QDialogButtonBox(QtW.QDialogButtonBox.StandardButton.Cancel |
-                                               QtW.QDialogButtonBox.StandardButton.Ok)
-    self._cancel_button = decision_button_box.button(QtW.QDialogButtonBox.StandardButton.Cancel)
-    self._ok_button = decision_button_box.button(QtW.QDialogButtonBox.StandardButton.Ok)
-
-    self._cancel_button.setIcon(QtGui.QIcon())
-    self._ok_button.setIcon(QtGui.QIcon())
-
-    decision_button_box.accepted.connect(self.accept)
-    decision_button_box.rejected.connect(self.reject)
-
     main_layout = QtW.QVBoxLayout(self)
     main_layout.addWidget(path_selector)
     main_layout.addWidget(self._content_panel)
-    main_layout.addWidget(decision_button_box)
+    main_layout.addWidget(button_box)
     self.setLayout(main_layout)
 
     self._error_dialog = QtW.QErrorMessage(parent=self)
 
-    self._reset()
-
     self.update_gui.connect(lambda fn: fn())
 
   def _on_media_source_selected(self, media_source_path: str) -> None:
-    self._reset()
+    self._button_box.reset()
 
     url = QtCore.QUrl.fromUserInput(
         media_source_path,
@@ -88,7 +82,7 @@ class MediaSourceSelectionDialog(QtW.QDialog):
             def update_gui():
               self._content_panel.setCurrentWidget(self._panel_avcontainer)
               self._panel_avcontainer.set_container(container)
-              self._ok_button.setDisabled(False)
+              self._button_box.enable_accept()
 
             # QtCore.QTimer.singleShot(1, update_gui)
             self.update_gui.emit(update_gui)
@@ -106,6 +100,3 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     if error_message is not None:
       self._error_dialog.showMessage(error_message)
       # self._error_dialog.exec()
-
-  def _reset(self):
-    self._ok_button.setDisabled(True)
