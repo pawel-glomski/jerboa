@@ -32,7 +32,15 @@ class Container(containers.DeclarativeContainer):
   #                                      gui                                     #
   # ---------------------------------------------------------------------------- #
 
-  gui_app = providers.Resource(gui.GUIApp)  # this has to be created before any gui element
+  # this has to be created before any gui element, thus it is a resource initialized with
+  # init_resources() call below
+  gui_app = providers.Resource(gui.GUIApp)
+
+  gui_main_window = providers.Singleton(
+      gui.MainWindow,
+      min_size=(640, 360),
+      relative_size=(0.5, 0.5),
+  )
 
   # ------------------------------- gui resources ------------------------------ #
 
@@ -101,17 +109,16 @@ class Container(containers.DeclarativeContainer):
       menus=providers.List(gui_menu_bar_file,),
   )
 
-  # ----------------------------- jerboa view stack ---------------------------- #
+  # ----------------------------- main view stack ---------------------------- #
 
   # -------------------------------- player view ------------------------------- #
 
-  gui_player_view_canvas = providers.Factory(
-    gui.player_view.Canvas,
-    # frame_changed_signal=gui_video_player.frame_changed
-  )
+  gui_player_view_canvas = providers.Factory(gui.player_view.Canvas,
+                                             # frame_changed_signal=gui_video_player.frame_changed
+                                            )
   gui_player_view_timeline = providers.Factory(
-    gui.player_view.Timeline,
-    # playback_update_signal=gui_media_player.playback_update
+      gui.player_view.Timeline,
+      # playback_update_signal=gui_media_player.playback_update
   )
 
   player_view = providers.Factory(
@@ -119,7 +126,6 @@ class Container(containers.DeclarativeContainer):
       canvas=gui_player_view_canvas,
       timeline=gui_player_view_timeline,
   )
-
 
   gui_main_widget = providers.Factory(
       gui.MainViewStack,
@@ -133,6 +139,7 @@ class Container(containers.DeclarativeContainer):
   gui_jerboa = providers.Singleton(
       gui.JerboaGUI,
       gui_app=gui_app,
+      main_window=gui_main_window,
       menu_bar=gui_menu_bar,
       main_widget=gui_main_widget,
       # status_bar=gui_status_bar,
