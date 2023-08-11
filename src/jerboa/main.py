@@ -26,8 +26,6 @@ class Container(containers.DeclarativeContainer):
   #                                    signals                                   #
   # ---------------------------------------------------------------------------- #
 
-  select_media_source_signal = providers.Singleton(Signal)
-
   # ---------------------------------------------------------------------------- #
   #                                      gui                                     #
   # ---------------------------------------------------------------------------- #
@@ -94,17 +92,17 @@ class Container(containers.DeclarativeContainer):
 
   # --------------------------------- menu bar --------------------------------- #
 
-  gui_menu_bar_file_open = providers.Factory(
+  gui_menu_bar_file_open = providers.Singleton(
       gui.menu_bar.MenuAction,
       name='Open',
-      signal=select_media_source_signal,
+      signal=Signal(max_subscribers=1),
   )
-  gui_menu_bar_file = providers.Factory(
+  gui_menu_bar_file = providers.Singleton(
       gui.menu_bar.Menu,
       name='File',
       actions=providers.List(gui_menu_bar_file_open,),
   )
-  gui_menu_bar = providers.Factory(
+  gui_menu_bar = providers.Singleton(
       gui.MenuBar,
       menus=providers.List(gui_menu_bar_file,),
   )
@@ -113,21 +111,22 @@ class Container(containers.DeclarativeContainer):
 
   # -------------------------------- player view ------------------------------- #
 
-  gui_player_view_canvas = providers.Factory(gui.player_view.Canvas,
-                                             # frame_changed_signal=gui_video_player.frame_changed
-                                            )
-  gui_player_view_timeline = providers.Factory(
+  gui_player_view_canvas = providers.Singleton(
+      gui.player_view.Canvas,
+      # frame_changed_signal=gui_video_player.frame_changed,
+  )
+  gui_player_view_timeline = providers.Singleton(
       gui.player_view.Timeline,
       # playback_update_signal=gui_media_player.playback_update
   )
 
-  player_view = providers.Factory(
+  player_view = providers.Singleton(
       gui.PlayerView,
       canvas=gui_player_view_canvas,
       timeline=gui_player_view_timeline,
   )
 
-  gui_main_widget = providers.Factory(
+  gui_main_widget = providers.Singleton(
       gui.MainViewStack,
       player_view=player_view,
       # settings_view=settings_view,
