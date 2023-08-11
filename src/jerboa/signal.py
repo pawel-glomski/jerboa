@@ -1,7 +1,5 @@
 from typing import Callable
 
-import math
-
 
 class Signal:
 
@@ -10,9 +8,18 @@ class Signal:
     def __init__(self, message: str):
       super().__init__(message)
 
-  def __init__(self, *subscribers: Callable, max_subscribers: int | float | str = math.inf):
+  def __init__(self, subscribers: list[Callable] = [], max_subscribers: int | str = 'min'):
     self._subscribers = []
-    self._max_subscribers = float(len(subscribers) if max_subscribers == 'init' else subscribers)
+    match max_subscribers:
+      case 'min':
+        self._max_subscribers = float(max(1, len(subscribers)))
+      case 'inf':
+        self._max_subscribers = float('inf')
+      case _:
+        self._max_subscribers = float(max_subscribers)
+
+    if self._max_subscribers <= 0:
+      raise ValueError(f'Invalid value of {max_subscribers=} renders this signal useless')
 
     for subscriber in subscribers:
       self.connect(subscriber)

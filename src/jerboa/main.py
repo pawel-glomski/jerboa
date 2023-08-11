@@ -73,10 +73,14 @@ class Container(containers.DeclarativeContainer):
   #     stream_selection_panel=gui_media_source_details_panel_stream_selection,
   # )
 
-  # gui_meida_source_path_selector = providers.Factory(
-  #     gui.common.PathSelector,
-  #     placeholder_text='Media file path (or URL)...',
-  # )
+  gui_meida_source_path_selector = providers.Factory(
+      gui.common.PathSelector,
+      select_local_file_button_text='Select a local file',
+      placeholder_text='Media file path (or URL)...',
+      apply_button_text='Apply',
+      local_file_extension_filter=
+      'Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)',
+  )
   # gui_cancel_ok_button_box = providers.Factory(
   #     gui.common.DecisionBox,
   #     reject_button='cancel',
@@ -85,10 +89,10 @@ class Container(containers.DeclarativeContainer):
   # )
   gui_media_source_selection_dialog = providers.Factory(
       gui.MediaSourceSelectionDialog,
-      parent=gui_main_window,
-      # path_selector=gui_meida_source_path_selector,
+      path_selector=gui_meida_source_path_selector,
       # media_source_details_panel=gui_media_source_details_panel,
       # decision_button_box=gui_cancel_ok_button_box,
+      parent=gui_main_window,
   )
 
   # --------------------------------- menu bar --------------------------------- #
@@ -96,10 +100,9 @@ class Container(containers.DeclarativeContainer):
   gui_menu_bar_file_open = providers.Singleton(
       gui.menu_bar.MenuAction,
       name='Open',
-      signal=providers.Singleton(
+      signal=providers.Factory(
           Signal,
-          gui_media_source_selection_dialog.provided.exec,
-          max_subscribers='init',
+          subscribers=providers.List(gui_media_source_selection_dialog.provided.exec),
       ),
   )
   gui_menu_bar_file = providers.Singleton(

@@ -19,51 +19,6 @@ PROPERTY_KEY_RESOLUTION = 'Resolution'
 
 # TODO: remove references to PyAV, introduce stream properties dataclass
 
-
-class MediaSourcePathSelector(QtW.QWidget):
-
-  def __init__(self) -> None:
-    super().__init__()
-
-    self._select_local_file_button = QtW.QPushButton('Select a local file')
-    self._select_local_file_button.setAutoDefault(False)
-    self._select_local_file_button.clicked.connect(self._on_select_local_file_button_click)
-
-    separator = QtW.QFrame()
-    separator.setFrameShape(QtW.QFrame.VLine)
-
-    self._media_source_path_input = QtW.QLineEdit()
-    self._media_source_path_input.setPlaceholderText('Media file path (or URL)...')
-    self._media_source_path_input.returnPressed.connect(self._apply_media_source_path)
-
-    self._apply_button = QtW.QPushButton('Apply')
-    self._apply_button.setAutoDefault(False)
-    self._apply_button.clicked.connect(self._apply_media_source_path)
-
-    layout = QtW.QHBoxLayout()
-    layout.addWidget(self._select_local_file_button)
-    layout.addWidget(separator)
-    layout.addWidget(self._media_source_path_input)
-    layout.addWidget(self._apply_button)
-    self.setLayout(layout)
-
-    self._on_selected_callback: Callable[[str], None] = lambda _: ...
-
-  def _on_select_local_file_button_click(self) -> None:
-    file_path, _ = QtW.QFileDialog.getOpenFileName(
-        filter='Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)')
-    if file_path:
-      self._media_source_path_input.setText(file_path)
-      self._apply_media_source_path()
-
-  def set_on_selected_callback(self, on_selected_callback: Callable[[str], None]) -> None:
-    self._on_selected_callback = on_selected_callback
-
-  def _apply_media_source_path(self) -> None:
-    self._media_source_path_input.clearFocus()
-    self._on_selected_callback(self._media_source_path_input.text())
-
-
 class LoadingSpinnerPanel(QtW.QWidget):
 
   def __init__(self):

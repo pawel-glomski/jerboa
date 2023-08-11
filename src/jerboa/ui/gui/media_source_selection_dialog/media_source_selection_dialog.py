@@ -5,6 +5,7 @@ from PyQt5 import QtCore
 from PyQt5 import QtGui
 from PyQt5.QtCore import Qt
 
+from jerboa.ui.gui.common import PathSelector
 from . import components
 
 
@@ -13,13 +14,13 @@ class MediaSourceSelectionDialog(QtW.QDialog):
 
   def __init__(
       self,
+      path_selector: PathSelector,
       parent: QtW.QWidget | None = None,
       flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Dialog,
   ) -> None:
     super().__init__(parent, flags)
     self.setMinimumSize(600, 300)
-    media_source_path_selector = components.MediaSourcePathSelector()
-    media_source_path_selector.set_on_selected_callback(self._on_media_source_selected)
+    path_selector.path_selected_signal.connect(self._on_media_source_selected)
 
     self._panel_init = QtW.QLabel()
     self._panel_init.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -51,7 +52,7 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     decision_button_box.rejected.connect(self.reject)
 
     main_layout = QtW.QVBoxLayout(self)
-    main_layout.addWidget(media_source_path_selector)
+    main_layout.addWidget(path_selector)
     main_layout.addWidget(self._content_panel)
     main_layout.addWidget(decision_button_box)
     self.setLayout(main_layout)
