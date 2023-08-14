@@ -19,6 +19,7 @@ PROPERTY_KEY_RESOLUTION = 'Resolution'
 
 # TODO: remove references to PyAV, introduce stream properties dataclass
 
+
 class LoadingSpinnerPanel(QtW.QWidget):
 
   def __init__(self):
@@ -139,3 +140,36 @@ class StreamingSitePanel(QtW.QWidget):
     layout = QtW.QVBoxLayout()
     layout.addWidget(QtW.QLabel('Remote'))
     self.setLayout(layout)
+
+
+class DetailsPanel(QtW.QStackedWidget):
+
+  def __init__(self) -> None:
+    super().__init__()
+
+    self.setFrameShape(QtW.QFrame.Shape.Box)
+    self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
+
+    self._panel_init = QtW.QLabel()
+    self._panel_init.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    self._panel_init.setText('Select a local file or enter the URL of a recording')
+
+    self._panel_loading_spinner = LoadingSpinnerPanel()
+    self._panel_avcontainer = AVContainerPanel()
+    self._panel_streaming_site = StreamingSitePanel()
+
+    self.addWidget(self._panel_init)
+    self.addWidget(self._panel_loading_spinner)
+    self.addWidget(self._panel_avcontainer)
+    self.addWidget(self._panel_streaming_site)
+    self.setCurrentWidget(self._panel_init)
+
+  def display_loading_spinner(self) -> None:
+    self.setCurrentWidget(self._panel_loading_spinner)
+
+  def display_avcontainer(self, avcontainer) -> None:
+    self._panel_avcontainer.set_container(avcontainer)
+    self.setCurrentWidget(self._panel_avcontainer)
+
+  def display_streaming_site(self) -> None:
+    self.setCurrentWidget(self._panel_streaming_site)

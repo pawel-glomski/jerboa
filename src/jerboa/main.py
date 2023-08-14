@@ -65,13 +65,13 @@ class Container(containers.DeclarativeContainer):
   # gui_media_source_details_panel_stream_selection = providers.Factory(
   #     gui.media_source_selection.details_panel.InitPanel,
   # )
-  # gui_media_source_details_panel = providers.Factory(
-  #     gui.media_source_selection.details_panel.InitPanel,
-  #     init_panel=gui_media_source_details_panel_init,
-  #     loading_panel=gui_media_source_details_panel_loading,
-  #     streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
-  #     stream_selection_panel=gui_media_source_details_panel_stream_selection,
-  # )
+  gui_media_source_details_panel = providers.Factory(
+      gui.media_source_selection_dialog.DetailsPanel,
+      # init_panel=gui_media_source_details_panel_init,
+      # loading_panel=gui_media_source_details_panel_loading,
+      # streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
+      # stream_selection_panel=gui_media_source_details_panel_stream_selection,
+  )
 
   gui_meida_source_path_selector = providers.Factory(
       gui.common.PathSelector,
@@ -91,7 +91,7 @@ class Container(containers.DeclarativeContainer):
   gui_media_source_selection_dialog = providers.Factory(
       gui.MediaSourceSelectionDialog,
       path_selector=gui_meida_source_path_selector,
-      # media_source_details_panel=gui_media_source_details_panel,
+      media_source_details_panel=gui_media_source_details_panel,
       button_box=gui_media_source_selection_dialog_button_box,
       parent=gui_main_window,
   )

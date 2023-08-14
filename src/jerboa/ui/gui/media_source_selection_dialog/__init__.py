@@ -1,1 +1,2 @@
 from .media_source_selection_dialog import MediaSourceSelectionDialog
+from .details_panel import DetailsPanel

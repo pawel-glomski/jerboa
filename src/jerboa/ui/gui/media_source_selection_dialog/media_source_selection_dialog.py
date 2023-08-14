@@ -6,7 +6,7 @@ from PyQt5 import QtGui
 from PyQt5.QtCore import Qt
 
 from jerboa.ui.gui.common import PathSelector, RejectAcceptDialogButtonBox
-from . import components
+from .details_panel import DetailsPanel
 
 
 class MediaSourceSelectionDialog(QtW.QDialog):
@@ -15,6 +15,7 @@ class MediaSourceSelectionDialog(QtW.QDialog):
   def __init__(
       self,
       path_selector: PathSelector,
+      media_source_details_panel: DetailsPanel,
       button_box: RejectAcceptDialogButtonBox,
       parent: QtW.QWidget | None = None,
       flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Dialog,
@@ -28,28 +29,11 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     button_box.rejected.connect(self.reject)
 
     self._button_box = button_box
-
-    self._panel_init = QtW.QLabel()
-    self._panel_init.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    self._panel_init.setText('Select a local file or enter the URL of a recording')
-
-    self._panel_loading_spinner = components.LoadingSpinnerPanel()
-    self._panel_avcontainer = components.AVContainerPanel()
-    self._panel_streaming_site = components.StreamingSitePanel()
-
-    self._content_panel = QtW.QStackedWidget()
-    self._content_panel.setFrameShape(QtW.QFrame.Shape.Box)
-    self._content_panel.setSizePolicy(QtW.QSizePolicy.Policy.Expanding,
-                                      QtW.QSizePolicy.Policy.Expanding)
-    self._content_panel.addWidget(self._panel_init)
-    self._content_panel.addWidget(self._panel_loading_spinner)
-    self._content_panel.addWidget(self._panel_avcontainer)
-    self._content_panel.addWidget(self._panel_streaming_site)
-    self._content_panel.setCurrentWidget(self._panel_init)
+    self._media_source_details_panel = media_source_details_panel
 
     main_layout = QtW.QVBoxLayout(self)
     main_layout.addWidget(path_selector)
-    main_layout.addWidget(self._content_panel)
+    main_layout.addWidget(media_source_details_panel)
     main_layout.addWidget(button_box)
     self.setLayout(main_layout)
 
@@ -68,7 +52,7 @@ class MediaSourceSelectionDialog(QtW.QDialog):
 
     error_message = None
     if url.isValid():
-      self._content_panel.setCurrentWidget(self._panel_loading_spinner)
+      self._media_source_details_panel.display_loading_spinner()
 
       if url.isLocalFile():
         if Path(url.toLocalFile()).is_file():
@@ -77,11 +61,10 @@ class MediaSourceSelectionDialog(QtW.QDialog):
           from threading import Thread
 
           def open_container_task():
-            container = av.open(url.toLocalFile())
+            avcontainer = av.open(url.toLocalFile())
 
             def update_gui():
-              self._content_panel.setCurrentWidget(self._panel_avcontainer)
-              self._panel_avcontainer.set_container(container)
+              self._media_source_details_panel.display_avcontainer(avcontainer)
               self._button_box.enable_accept()
 
             # QtCore.QTimer.singleShot(1, update_gui)
