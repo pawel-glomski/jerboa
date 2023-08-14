@@ -6,3 +6,4 @@ from .media_source_selection import MediaSourceSelectionDialog
 
 from . import common
 from . import media_source_selection
+from . import resources

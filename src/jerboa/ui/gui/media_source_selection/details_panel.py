@@ -1,8 +1,7 @@
 from typing import Callable
 
 import PyQt5.QtWidgets as QtW
-from PyQt5 import QtCore
-from PyQt5 import QtGui
+from PyQt5 import QtCore, QtGui
 from PyQt5.QtCore import Qt
 
 from jerboa.media import MediaType
@@ -29,10 +28,8 @@ class InitPanel(QtW.QLabel):
 
 class LoadingSpinnerPanel(QtW.QWidget):
 
-  def __init__(self):
+  def __init__(self, spinner_movie: QtGui.QMovie):
     super().__init__()
-    spinner_movie = QtGui.QMovie(':/loading_spinner.gif')
-    spinner_movie.setScaledSize(QtCore.QSize(30, 30))
     spinner = QtW.QLabel()
     spinner.setMovie(spinner_movie)
     spinner.show()
