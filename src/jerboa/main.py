@@ -75,9 +75,9 @@ class Container(containers.DeclarativeContainer):
       ),
       media_source_details_panel=providers.Factory(
           gui.media_source_selection.DetailsPanel,
-          init_panel=providers.Factory(gui.media_source_selection.details_panel.InitPanel,
+          init_panel=providers.Factory(gui.media_source_selection.InitPanel,
                                        text='Select a local file or enter the URL of a recording'),
-          # loading_panel=gui_media_source_details_panel_loading,
+          loading_panel=providers.Factory(gui.media_source_selection.LoadingSpinnerPanel,)
           # streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
           # stream_selection_panel=gui_media_source_details_panel_stream_selection,
       ),

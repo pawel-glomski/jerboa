@@ -154,13 +154,14 @@ class DetailsPanel(QtW.QStackedWidget):
   def __init__(
       self,
       init_panel: InitPanel,
+      loading_panel: LoadingSpinnerPanel,
   ) -> None:
     super().__init__()
 
     self.setFrameShape(QtW.QFrame.Shape.Box)
     self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
 
-    self._panel_loading_spinner = LoadingSpinnerPanel()
+    self._panel_loading_spinner = loading_panel
     self._panel_avcontainer = AVContainerPanel()
     self._panel_streaming_site = StreamingSitePanel()
 
