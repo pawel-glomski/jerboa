@@ -1,6 +1,5 @@
 import PyQt5.QtWidgets as QtW
-from PyQt5 import QtCore
-from PyQt5 import QtGui
+from PyQt5 import QtCore, QtGui
 # from PyQt5 import QtMultimedia as QtMedia
 from PyQt5.QtCore import Qt
 
