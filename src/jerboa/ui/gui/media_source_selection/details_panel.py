@@ -20,6 +20,10 @@ PROPERTY_KEY_RESOLUTION = 'Resolution'
 # TODO: remove references to PyAV, introduce stream properties dataclass
 
 
+class InitPanel(QtW.QLabel):
+  def __init__(self, text:str):
+    super().__init__(text)
+
 class LoadingSpinnerPanel(QtW.QWidget):
 
   def __init__(self):

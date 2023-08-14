@@ -66,7 +66,7 @@ class Container(containers.DeclarativeContainer):
   #     gui.media_source_selection.details_panel.InitPanel,
   # )
   gui_media_source_details_panel = providers.Factory(
-      gui.media_source_selection_dialog.DetailsPanel,
+      gui.media_source_selection.DetailsPanel,
       # init_panel=gui_media_source_details_panel_init,
       # loading_panel=gui_media_source_details_panel_loading,
       # streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
