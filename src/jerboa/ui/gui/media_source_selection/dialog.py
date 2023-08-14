@@ -82,4 +82,3 @@ class MediaSourceSelectionDialog(QtW.QDialog):
 
     if error_message is not None:
       self._error_dialog.showMessage(error_message)
-      # self._error_dialog.exec()

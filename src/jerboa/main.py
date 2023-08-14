@@ -52,9 +52,6 @@ class Container(containers.DeclarativeContainer):
 
   # ------------------------------- details panel ------------------------------ #
 
-  gui_media_source_details_panel_init = providers.Factory(
-      gui.media_source_selection.details_panel.InitPanel,
-      text='Select a local file or enter the URL of a recording')
   # gui_media_source_details_panel_loading = providers.Factory(
   #     gui.media_source_selection.details_panel.LoadingSpinnerPanel,
   #     spinner_gif=gui_resource_loading_spinner,
@@ -65,34 +62,32 @@ class Container(containers.DeclarativeContainer):
   # gui_media_source_details_panel_stream_selection = providers.Factory(
   #     gui.media_source_selection.details_panel.InitPanel,
   # )
-  gui_media_source_details_panel = providers.Factory(
-      gui.media_source_selection.DetailsPanel,
-      init_panel=gui_media_source_details_panel_init,
-      # loading_panel=gui_media_source_details_panel_loading,
-      # streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
-      # stream_selection_panel=gui_media_source_details_panel_stream_selection,
-  )
 
-  gui_meida_source_path_selector = providers.Factory(
-      gui.common.PathSelector,
-      select_local_file_button_text='Select a local file',
-      placeholder_text='Media file path (or URL)...',
-      apply_button_text='Apply',
-      local_file_extension_filter=
-      'Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)',
-  )
-  gui_media_source_selection_dialog_button_box = providers.Factory(
-      gui.common.RejectAcceptDialogButtonBox,
-      reject_button='cancel',
-      accept_button='ok',
-      icons=False,
-      accept_disabled_by_default=True,
-  )
-  gui_media_source_selection_dialog = providers.Factory(
+  gui_media_source_selection_dialog_factory = providers.Factory(
       gui.MediaSourceSelectionDialog,
-      path_selector=gui_meida_source_path_selector,
-      media_source_details_panel=gui_media_source_details_panel,
-      button_box=gui_media_source_selection_dialog_button_box,
+      path_selector=providers.Factory(
+          gui.common.PathSelector,
+          select_local_file_button_text='Select a local file',
+          placeholder_text='Media file path (or URL)...',
+          apply_button_text='Apply',
+          local_file_extension_filter=
+          'Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)',
+      ),
+      media_source_details_panel=providers.Factory(
+          gui.media_source_selection.DetailsPanel,
+          init_panel=providers.Factory(gui.media_source_selection.details_panel.InitPanel,
+                                       text='Select a local file or enter the URL of a recording'),
+          # loading_panel=gui_media_source_details_panel_loading,
+          # streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
+          # stream_selection_panel=gui_media_source_details_panel_stream_selection,
+      ),
+      button_box=providers.Factory(
+          gui.common.RejectAcceptDialogButtonBox,
+          reject_button='cancel',
+          accept_button='ok',
+          icons=False,
+          accept_disabled_by_default=True,
+      ),
       parent=gui_main_window,
   )
 
@@ -103,7 +98,7 @@ class Container(containers.DeclarativeContainer):
       name='Open',
       signal=providers.Factory(
           Signal,
-          subscribers=providers.List(gui_media_source_selection_dialog.provided.exec),
+          subscribers=[lambda: Container.gui_media_source_selection_dialog_factory().exec()],
       ),
   )
   gui_menu_bar_file = providers.Singleton(
