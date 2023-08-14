@@ -21,8 +21,11 @@ PROPERTY_KEY_RESOLUTION = 'Resolution'
 
 
 class InitPanel(QtW.QLabel):
-  def __init__(self, text:str):
+
+  def __init__(self, text: str):
     super().__init__(text)
+    self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
 
 class LoadingSpinnerPanel(QtW.QWidget):
 
@@ -148,25 +151,24 @@ class StreamingSitePanel(QtW.QWidget):
 
 class DetailsPanel(QtW.QStackedWidget):
 
-  def __init__(self) -> None:
+  def __init__(
+      self,
+      init_panel: InitPanel,
+  ) -> None:
     super().__init__()
 
     self.setFrameShape(QtW.QFrame.Shape.Box)
     self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
 
-    self._panel_init = QtW.QLabel()
-    self._panel_init.setAlignment(Qt.AlignmentFlag.AlignCenter)
-    self._panel_init.setText('Select a local file or enter the URL of a recording')
-
     self._panel_loading_spinner = LoadingSpinnerPanel()
     self._panel_avcontainer = AVContainerPanel()
     self._panel_streaming_site = StreamingSitePanel()
 
-    self.addWidget(self._panel_init)
+    self.addWidget(init_panel)
     self.addWidget(self._panel_loading_spinner)
     self.addWidget(self._panel_avcontainer)
     self.addWidget(self._panel_streaming_site)
-    self.setCurrentWidget(self._panel_init)
+    self.setCurrentWidget(init_panel)
 
   def display_loading_spinner(self) -> None:
     self.setCurrentWidget(self._panel_loading_spinner)
