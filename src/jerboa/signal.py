@@ -19,7 +19,7 @@ class Signal:
         self._max_subscribers = float(max_subscribers)
 
     if self._max_subscribers <= 0:
-      raise ValueError(f'Invalid value of {max_subscribers=} renders this signal useless')
+      raise ValueError('To be useful, signal should have `max_subscribers` >= 1')
 
     for subscriber in subscribers:
       self.connect(subscriber)
