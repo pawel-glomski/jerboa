@@ -34,6 +34,7 @@ class RejectAcceptDialogButtonBox(QtW.QDialogButtonBox):
       self._ok_button.setIcon(QtGui.QIcon())
 
     self._accept_disabled_by_default = accept_disabled_by_default
+
     self.reset()
 
   def reset(self) -> None:

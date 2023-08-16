@@ -44,9 +44,14 @@ class PathSelector(QtW.QWidget):
 
     self._path_selected_signal = Signal()
 
+    self.reset()
+
   @property
   def path_selected_signal(self) -> Signal:
     return self._path_selected_signal
+
+  def reset(self) -> None:
+    self._media_source_path_input.clear()
 
   def _on_select_local_file_button_click(self, extension_filter: str) -> None:
     file_path, _ = QtW.QFileDialog.getOpenFileName(filter=extension_filter)

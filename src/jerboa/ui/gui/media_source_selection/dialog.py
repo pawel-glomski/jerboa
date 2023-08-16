@@ -27,8 +27,9 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     button_box.accepted.connect(self.accept)
     button_box.rejected.connect(self.reject)
 
-    self._button_box = button_box
+    self._path_selector = path_selector
     self._media_source_details_panel = media_source_details_panel
+    self._button_box = button_box
 
     main_layout = QtW.QVBoxLayout(self)
     main_layout.addWidget(path_selector)
@@ -39,6 +40,17 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     self._error_dialog = QtW.QErrorMessage(parent=self)
 
     self.update_gui.connect(lambda fn: fn())
+
+    self.reset()
+
+  def open_clear(self) -> int:
+    self.reset()
+    return self.exec()
+
+  def reset(self) -> None:
+    self._path_selector.reset()
+    self._media_source_details_panel.reset()
+    self._button_box.reset()
 
   def _on_media_source_selected(self, media_source_path: str) -> None:
     self._button_box.reset()

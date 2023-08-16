@@ -158,15 +158,20 @@ class DetailsPanel(QtW.QStackedWidget):
     self.setFrameShape(QtW.QFrame.Shape.Box)
     self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
 
+    self._panel_init = init_panel
     self._panel_loading_spinner = loading_panel
     self._panel_avcontainer = AVContainerPanel()
     self._panel_streaming_site = StreamingSitePanel()
 
-    self.addWidget(init_panel)
+    self.addWidget(self._panel_init)
     self.addWidget(self._panel_loading_spinner)
     self.addWidget(self._panel_avcontainer)
     self.addWidget(self._panel_streaming_site)
-    self.setCurrentWidget(init_panel)
+
+    self.reset()
+
+  def reset(self) -> None:
+    self.setCurrentWidget(self._panel_init)
 
   def display_loading_spinner(self) -> None:
     self.setCurrentWidget(self._panel_loading_spinner)

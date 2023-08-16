@@ -59,7 +59,7 @@ class Container(containers.DeclarativeContainer):
   #     gui.media_source_selection.details_panel.InitPanel,
   # )
 
-  gui_media_source_selection_dialog_factory = providers.Factory(
+  gui_media_source_selection_dialog = providers.Singleton(
       gui.MediaSourceSelectionDialog,
       path_selector=providers.Factory(
           gui.common.PathSelector,
@@ -95,7 +95,7 @@ class Container(containers.DeclarativeContainer):
       name='Open',
       signal=providers.Factory(
           Signal,
-          subscribers=[lambda: Container.gui_media_source_selection_dialog_factory().exec()],
+          subscribers=providers.List(gui_media_source_selection_dialog.provided.open_clear,),
       ),
   )
   gui_menu_bar_file = providers.Singleton(
