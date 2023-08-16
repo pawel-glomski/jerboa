@@ -42,20 +42,16 @@ class Container(containers.DeclarativeContainer):
 
   # ------------------------------- gui resources ------------------------------ #
 
-  # gui_resource_loading_spinner = providers.Resource(
-  #     gui.resources.LoadingSpinner,
-  #     path=':/loading_spinner.gif',
-  #     size=(30, 30),
-  # )
+  gui_resource_loading_spinner = providers.Singleton(
+      gui.resources.LoadingSpinner,
+      path=':/loading_spinner.gif',
+      size=(30, 30),
+  )
 
   # ----------------------- media source selection dialog ---------------------- #
 
   # ------------------------------- details panel ------------------------------ #
 
-  # gui_media_source_details_panel_loading = providers.Factory(
-  #     gui.media_source_selection.details_panel.LoadingSpinnerPanel,
-  #     spinner_gif=gui_resource_loading_spinner,
-  # )
   # gui_media_source_details_panel_streaming_quality_selection = providers.Factory(
   #     gui.media_source_selection.details_panel.InitPanel,
   # )
@@ -77,7 +73,8 @@ class Container(containers.DeclarativeContainer):
           gui.media_source_selection.DetailsPanel,
           init_panel=providers.Factory(gui.media_source_selection.InitPanel,
                                        text='Select a local file or enter the URL of a recording'),
-          loading_panel=providers.Factory(gui.media_source_selection.LoadingSpinnerPanel,)
+          loading_panel=providers.Factory(gui.media_source_selection.LoadingSpinnerPanel,
+                                          spinner_movie=gui_resource_loading_spinner)
           # streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
           # stream_selection_panel=gui_media_source_details_panel_stream_selection,
       ),
