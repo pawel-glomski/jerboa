@@ -19,17 +19,17 @@ class Signal:
         self._max_subscribers = float(max_subscribers)
 
     if self._max_subscribers <= 0:
-      raise ValueError('To be useful, signal should have `max_subscribers` >= 1')
+      raise ValueError('For the signal to be functional, `max_subscribers` must be at least 1')
 
     for subscriber in subscribers:
       self.connect(subscriber)
 
-  def emit(self, *args, **kwargs) -> None:
+  def emit(self, *args) -> None:
     for subscriber in self._subscribers:
-      subscriber(*args, **kwargs)
+      subscriber(*args)
 
   def connect(self, subscriber: Callable) -> None:
     if len(self._subscribers) >= self._max_subscribers:
       raise Signal.TooManySubscribers(
-          f'This signal can have at most {self._max_subscribers} subscribers')
+          f'Maximum number of subscribers ({self._max_subscribers}) reached.',)
     self._subscribers.append(subscriber)
