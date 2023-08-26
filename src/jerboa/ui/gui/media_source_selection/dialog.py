@@ -8,7 +8,6 @@ from .details_panel import DetailsPanel
 
 
 class MediaSourceSelectionDialog(QtW.QDialog):
-  update_gui = QtCore.pyqtSignal(object)
 
   def __init__(
       self,
@@ -42,8 +41,6 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     main_layout.addWidget(button_box)
     self.setLayout(main_layout)
 
-    self.update_gui.connect(lambda fn: fn())
-
     self.reset()
 
   def open_clean(self) -> int:
@@ -57,10 +54,15 @@ class MediaSourceSelectionDialog(QtW.QDialog):
 
   def _on_media_source_selected(self, media_source_path: str) -> None:
     self._button_box.reset()
-    self._recognizer.recognize(media_source_path,)
+    self._recognizer.recognize(
+        media_source_path,
+        on_success=self._on_media_source_recognition_success,
+        on_failure=self._on_media_source_recognition_failure,
+    )
 
   def _on_media_source_recognition_success(self, media_source: MediaSource) -> None:
-    ...
+    self._media_source_details_panel.display_avcontainer(media_source.avcontainer)
+    self._button_box.enable_accept()
 
   def _on_media_source_recognition_failure(self, recognition_error: RecognitionError) -> None:
-    ...
+    self._error_dialog.showMessage(recognition_error.message)

@@ -5,7 +5,7 @@ from jerboa.media import MediaSource
 
 
 class RecognitionError:
-  ...
+  message: str
 
 
 class MediaSorceRecognizer:
@@ -14,6 +14,8 @@ class MediaSorceRecognizer:
                # thread_pool: ThreadPool,
               ) -> None:
     self._recognition_finished_signal = recognition_finished_signal
+    self._recognition_finished_signal.connect(lambda fn: fn())
+
     self._thread_pool = ...
 
   def recognize(
@@ -22,44 +24,21 @@ class MediaSorceRecognizer:
       on_success: Callable[[MediaSource], None],
       on_failure: Callable[[RecognitionError], None],
   ):
-    error_message = None
-    if url.isValid():
-      self._media_source_details_panel.display_loading_spinner()
+    import av
 
-      if url.isLocalFile():
-        if Path(url.toLocalFile()).is_file():
-          import av
+    from threading import Thread
 
-          from threading import Thread
+    def job():
+      avcontainer = av.open(media_source_path)
 
-          def open_container_task():
-            avcontainer = av.open(url.toLocalFile())
+      def callback_call():
+        # if media_source is not None:
+        on_success(MediaSource(avcontainer))
+        # else:
+        #   on_failure(media_source_error)
 
-            def update_gui():
-              self._media_source_details_panel.display_avcontainer(avcontainer)
-              self._button_box.enable_accept()
+      self._recognition_finished_signal.emit(callback_call)
 
-            # QtCore.QTimer.singleShot(1, update_gui)
-            self.update_gui.emit(update_gui)
-
-          # QtCore.QThread().
-          Thread(target=open_container_task, daemon=True).start()
-        else:
-          error_message = 'Local file not found!'
-      else:
-        # related_content_panel = self._content_panel_streaming_site
-        ...
-    else:
-      error_message = 'Media source path is invalid!'
-
-    if error_message is not None:
-      self._error_dialog.showMessage(error_message)
-
-    # def job():
-    #   ...
-    #   if media_source is not None:
-    #     self._recognition_finished_signal.emit(on_success, media_source)
-    #   else:
-    #     self._recognition_finished_signal.emit(on_failure, media_source_error)
+    Thread(target=job, daemon=True).start()
 
     # self._thread_pool.start(job)
