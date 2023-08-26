@@ -3,8 +3,10 @@ import sys
 from dependency_injector import containers, providers
 from dependency_injector.wiring import Provide, inject
 
+from jerboa import media
 from jerboa.ui import JerboaUI, gui
 from jerboa.signal import Signal
+from jerboa.utils.file import PathProcessor
 # from jerboa.ui.gui.thread_pool import ThreadPool as GUIThreadPool
 
 
@@ -21,6 +23,18 @@ class Container(containers.DeclarativeContainer):
   # )
 
   # thread_pool = providers.Resource(GUIThreadPool)
+
+  # ---------------------------------------------------------------------------- #
+  #                            media source recognizer                           #
+  # ---------------------------------------------------------------------------- #
+
+  media_source_recognizer = providers.Singleton(
+      media.recognizer.MediaSorceRecognizer,
+      recognition_finished_signal=providers.Factory(
+          gui.GUISignal,
+          object,  # accepts a callable
+      ),
+  )
 
   # ---------------------------------------------------------------------------- #
   #                                    signals                                   #
@@ -61,13 +75,28 @@ class Container(containers.DeclarativeContainer):
 
   gui_media_source_selection_dialog = providers.Singleton(
       gui.MediaSourceSelectionDialog,
+      recognizer=media_source_recognizer,
       path_selector=providers.Factory(
           gui.common.PathSelector,
+          path_processor=providers.Factory(
+            PathProcessor,
+            invalid_path_msg='Path "{path}" has invalid format',
+            local_file_not_found_msg='Local file "{path}" not found',
+            not_a_file_msg='"{path}" is not a file',
+          ),
           select_local_file_button_text='Select a local file',
           placeholder_text='Media file path (or URL)...',
           apply_button_text='Apply',
           local_file_extension_filter=
           'Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)',
+          path_invalid_signal=providers.Factory(
+              gui.GUISignal,
+              str,
+          ),
+          path_selected_signal=providers.Factory(
+              gui.GUISignal,
+              str,
+          ),
       ),
       media_source_details_panel=providers.Factory(
           gui.media_source_selection.DetailsPanel,
@@ -95,7 +124,7 @@ class Container(containers.DeclarativeContainer):
       name='Open',
       signal=providers.Factory(
           Signal,
-          subscribers=providers.List(gui_media_source_selection_dialog.provided.open_clear,),
+          subscribers=providers.List(gui_media_source_selection_dialog.provided.open_clean,),
       ),
   )
   gui_menu_bar_file = providers.Singleton(

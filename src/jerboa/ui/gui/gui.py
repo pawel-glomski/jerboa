@@ -1,9 +1,48 @@
-import typing
-from PyQt5 import QtCore
+from typing import Any, Callable
 import PyQt5.QtWidgets as QtW
-from PyQt5.QtWidgets import QWidget
+from PyQt5 import QtCore
 
+from jerboa.signal import Signal
 from jerboa.ui import JerboaUI
+
+
+class GUISignal(Signal):
+
+  def __init__(  # pylint: disable=W0102:dangerous-default-value
+      self,
+      *arg_types: type,
+      subscribers: list[Callable] = [],  # this is fine, it is read-only
+      max_subscribers: int | str = 'min',
+  ):
+    self._signal_wrapper = GUISignal._dynamic_qt_signal(*arg_types)
+    super().__init__(subscribers, max_subscribers)
+
+  def connect(self, subscriber: Callable) -> None:
+    super().connect(subscriber)
+    self._signal_wrapper.connect(subscriber)
+
+  def emit(self, *args) -> None:
+    self._signal_wrapper.emit(*args)
+
+  @staticmethod
+  def _dynamic_qt_signal(*arg_types: type) -> QtCore.pyqtBoundSignal:
+
+    class SignalWrapper(QtCore.QObject):
+      _signal = QtCore.pyqtSignal(*arg_types)
+
+      def __getattr__(self, name: str) -> Any:
+        return getattr(self._signal, name)
+
+      def __setattr__(self, name, value):
+        if name == "_signal":
+          super().__setattr__(name, value)
+        else:
+          setattr(self._signal, name, value)
+
+      def __delattr__(self, name):
+        delattr(self._signal, name)
+
+    return SignalWrapper()
 
 
 class GUIApp:

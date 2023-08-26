@@ -25,10 +25,7 @@ def create_stream_config(stream: av.stream.Stream) -> AudioConfig | VideoConfig:
   return VideoConfig(VIDEO_FORMAT)
 
 
-#TODO: fix desync after seeking, does not happen when: pause -> seek 0 -> play
-
-
-class JBSource(StreamingSource):
+class MediaStreamer(StreamingSource):
 
   def __init__(self, filepath: str):
     from jerboa.timeline import TMSection  # TODO: remove me, for debugging only

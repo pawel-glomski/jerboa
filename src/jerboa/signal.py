@@ -4,11 +4,13 @@ from typing import Callable
 class Signal:
 
   class TooManySubscribers(Exception):
+    pass
 
-    def __init__(self, message: str):
-      super().__init__(message)
-
-  def __init__(self, subscribers: list[Callable] = [], max_subscribers: int | str = 'min'):
+  def __init__(  # pylint: disable=W0102:dangerous-default-value
+      self,
+      subscribers: list[Callable] = [],  # this is fine, it is read-only
+      max_subscribers: int | str = 'min',
+  ):
     self._subscribers = []
     match max_subscribers:
       case 'min':
@@ -19,7 +21,7 @@ class Signal:
         self._max_subscribers = float(max_subscribers)
 
     if self._max_subscribers <= 0:
-      raise ValueError('For the signal to be functional, `max_subscribers` must be at least 1')
+      raise ValueError('For a signal to be functional, `max_subscribers` must be at least 1')
 
     for subscriber in subscribers:
       self.connect(subscriber)
