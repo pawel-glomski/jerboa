@@ -1,6 +1,7 @@
 import os
 
 from pathlib import Path
+from dataclasses import dataclass
 
 from PyQt5.QtCore import QUrl
 
@@ -9,7 +10,16 @@ DEFAULT_CACHE_DIR_PATH = Path.home() / '.jerboa/'
 CACHE_DIR_PATH = Path(os.environ.get(CACHE_DIR_ENV_VAR_NAME, DEFAULT_CACHE_DIR_PATH)).resolve()
 
 
+@dataclass
+class JbPath:
+  path: str
+  is_local: bool
+
+
 class PathProcessor:
+
+  class InvalidPathError(Exception):
+    ...
 
   def __init__(
       self,
@@ -21,7 +31,7 @@ class PathProcessor:
     self._local_file_not_found_msg = local_file_not_found_msg
     self._not_a_file_msg = not_a_file_msg
 
-  def process(self, raw_path: str) -> tuple[str, bool]:
+  def process(self, raw_path: str) -> JbPath:
     url = QUrl.fromUserInput(
         raw_path,
         str(Path('.').resolve()),
@@ -38,14 +48,12 @@ class PathProcessor:
       if not local_path.is_file():
         error_message = self._not_a_file_msg.format(path=local_path)
 
-    if error_message is None:
-      if url.isLocalFile():
-        path = url.toLocalFile()
-      else:
-        path = url.toString()
-      return path, True
-    else:
-      return error_message, False
+    if error_message is not None:
+      raise PathProcessor.InvalidPathError(error_message)
+
+    if url.isLocalFile():
+      return JbPath(url.toLocalFile(), is_local=True)
+    return JbPath(url.toString(), is_local=False)
 
 
 def create_cache_dir_rel(relative_dir_path: str) -> Path:

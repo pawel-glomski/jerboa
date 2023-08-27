@@ -2,6 +2,7 @@ from collections.abc import Callable
 
 from jerboa.signal import Signal
 from jerboa.media import MediaSource
+from jerboa.utils.file import JbPath
 
 
 class RecognitionError:
@@ -20,7 +21,7 @@ class MediaSorceRecognizer:
 
   def recognize(
       self,
-      media_source_path: str,
+      media_source_path: JbPath,
       on_success: Callable[[MediaSource], None],
       on_failure: Callable[[RecognitionError], None],
   ):
@@ -29,7 +30,10 @@ class MediaSorceRecognizer:
     from threading import Thread
 
     def job():
-      avcontainer = av.open(media_source_path)
+      try:
+        avcontainer = av.open(media_source_path.path)
+      except av.error.InvalidDataError:  # unsupported format
+        ...
 
       def callback_call():
         # if media_source is not None:

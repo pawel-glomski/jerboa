@@ -1,7 +1,7 @@
 import PyQt5.QtWidgets as QtW
-from PyQt5 import QtCore
 from PyQt5.QtCore import Qt
 
+from jerboa.utils.file import JbPath
 from jerboa.media.recognizer import MediaSource, MediaSorceRecognizer, RecognitionError
 from jerboa.ui.gui.common import PathSelector, RejectAcceptDialogButtonBox
 from .details_panel import DetailsPanel
@@ -52,7 +52,7 @@ class MediaSourceSelectionDialog(QtW.QDialog):
     self._media_source_details_panel.reset()
     self._button_box.reset()
 
-  def _on_media_source_selected(self, media_source_path: str) -> None:
+  def _on_media_source_selected(self, media_source_path: JbPath) -> None:
     self._button_box.reset()
     self._recognizer.recognize(
         media_source_path,

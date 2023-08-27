@@ -6,7 +6,7 @@ from dependency_injector.wiring import Provide, inject
 from jerboa import media
 from jerboa.ui import JerboaUI, gui
 from jerboa.signal import Signal
-from jerboa.utils.file import PathProcessor
+from jerboa.utils.file import JbPath, PathProcessor
 # from jerboa.ui.gui.thread_pool import ThreadPool as GUIThreadPool
 
 
@@ -79,10 +79,10 @@ class Container(containers.DeclarativeContainer):
       path_selector=providers.Factory(
           gui.common.PathSelector,
           path_processor=providers.Factory(
-            PathProcessor,
-            invalid_path_msg='Path "{path}" has invalid format',
-            local_file_not_found_msg='Local file "{path}" not found',
-            not_a_file_msg='"{path}" is not a file',
+              PathProcessor,
+              invalid_path_msg='Path "{path}" has invalid format',
+              local_file_not_found_msg='Local file "{path}" not found',
+              not_a_file_msg='"{path}" is not a file',
           ),
           select_local_file_button_text='Select a local file',
           placeholder_text='Media file path (or URL)...',
@@ -95,7 +95,7 @@ class Container(containers.DeclarativeContainer):
           ),
           path_selected_signal=providers.Factory(
               gui.GUISignal,
-              str,
+              JbPath,
           ),
       ),
       media_source_details_panel=providers.Factory(

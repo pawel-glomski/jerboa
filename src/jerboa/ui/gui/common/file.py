@@ -72,13 +72,12 @@ class PathSelector(QtW.QWidget):
   def _use_current_path(self) -> None:
     self._path_input.clearFocus()
 
-    output, is_valid = self._path_processor.process(self._path_input.text())
-
     def job():
-      if is_valid:
-        self._path_selected_signal.emit(output)
-      else:
-        self._path_invalid_signal.emit(output)
+      try:
+        path = self._path_processor.process(self._path_input.text())
+        self._path_selected_signal.emit(path)
+      except PathProcessor.InvalidPathError as err:
+        self._path_invalid_signal.emit(str(err))
 
     # had to add a delay, so when the path is selected with an 'Enter' press, the event won't
     # transfer to the gui elements created by the signal subscribers
