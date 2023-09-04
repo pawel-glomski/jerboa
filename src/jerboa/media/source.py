@@ -1,23 +1,73 @@
 from typing import Optional
 
-from dataclasses import dataclass, field
+from bisect import bisect_right
+from dataclasses import dataclass
 
 from jerboa.media import MediaType
 
+DEFAULT_SAMPLE_RATE = 44100
+DEFAULT_RESOLUTION = 720
 
-@dataclass
+
+@dataclass(order=True, frozen=True)
+class AudioFeatures:
+    sample_rate: int | None
+    channels: int | None
+
+    def __str__(self) -> str:
+        return f"{self.channels}x {self.sample_rate}"
+
+    @staticmethod
+    def find_default(features_alternatives: list["AudioFeatures"]) -> int | None:
+        if features_alternatives:
+            idx = bisect_right(
+                features_alternatives,
+                DEFAULT_SAMPLE_RATE,
+                key=lambda audio_variant: audio_variant.sample_rate,
+            )
+            return max(0, idx - 1)
+        return None
+
+
+@dataclass(order=True, frozen=True)
+class VideoFeatures:
+    width: int | None
+    height: int | None
+    fps: float | None
+
+    def __str__(self) -> str:
+        return f"{self.width}x{self.height}, {self.fps:.1f}fps"
+
+    @staticmethod
+    def find_default(features_alternatives: list["VideoFeatures"]) -> int | None:
+        if features_alternatives:
+            idx = bisect_right(
+                features_alternatives,
+                DEFAULT_RESOLUTION,
+                key=lambda video_variant: min(video_variant.width, video_variant.height),
+            )
+            return max(0, idx - 1)
+        return None
+
+
+@dataclass(frozen=True)
 class MediaStreamVariant:
     path: str
     single_stream: bool
     protocol_or_container: str
     # codec_name: str
     bit_rate: float
+    grouping_features: AudioFeatures | VideoFeatures
 
 
-@dataclass
+@dataclass(frozen=True)
 class AudioSourceVariant(MediaStreamVariant):
     sample_rate: int
     channels: int
+
+    @property
+    def media_type(self) -> MediaType:
+        return MediaType.AUDIO
 
     @staticmethod
     def from_yt_dlp_dict(info: dict) -> Optional["AudioSourceVariant"]:
@@ -29,6 +79,10 @@ class AudioSourceVariant(MediaStreamVariant):
                 bit_rate=info.get("tbr"),
                 sample_rate=info.get("asr"),
                 channels=info.get("audio_channels"),
+                grouping_features=AudioFeatures(
+                    sample_rate=info.get("asr"),
+                    channels=info.get("audio_channels"),
+                ),
             )
         return None
 
@@ -43,6 +97,10 @@ class AudioSourceVariant(MediaStreamVariant):
                 bit_rate=stream.bit_rate,
                 sample_rate=stream.sample_rate,
                 channels=stream.channels,
+                grouping_features=AudioFeatures(
+                    sample_rate=stream.sample_rate,
+                    channels=stream.channels,
+                ),
             )
         return None
 
@@ -65,11 +123,15 @@ class AudioSourceVariant(MediaStreamVariant):
         return True
 
 
-@dataclass
+@dataclass(frozen=True)
 class VideoSourceVariant(MediaStreamVariant):
     fps: int
     width: int
     height: int
+
+    @property
+    def media_type(self) -> MediaType:
+        return MediaType.VIDEO
 
     @staticmethod
     def from_yt_dlp_dict(info: dict) -> Optional["VideoSourceVariant"]:
@@ -82,6 +144,11 @@ class VideoSourceVariant(MediaStreamVariant):
                 fps=info.get("fps"),
                 width=info.get("width"),
                 height=info.get("height"),
+                grouping_features=VideoFeatures(
+                    width=info.get("width"),
+                    height=info.get("height"),
+                    fps=info.get("fps"),
+                ),
             )
         return None
 
@@ -97,6 +164,11 @@ class VideoSourceVariant(MediaStreamVariant):
                 fps=stream.guessed_rate,
                 width=stream.width,
                 height=stream.height,
+                grouping_features=VideoFeatures(
+                    width=stream.width,
+                    height=stream.height,
+                    fps=stream.guessed_rate,
+                ),
             )
         return None
 
@@ -129,39 +201,74 @@ class VideoSourceVariant(MediaStreamVariant):
         )
 
 
-@dataclass
 class MediaStreamSource:
-    media_type: MediaType
-    selected_variants: list[int] = field(default_factory=list)
-    variants: list[AudioSourceVariant | VideoSourceVariant] = field(default_factory=list)
+    def __init__(
+        self,
+        variants: list[AudioSourceVariant | VideoSourceVariant],
+    ):
+        self._media_type = variants[0].media_type if variants else None
+        assert all(variant.media_type == self._media_type for variant in variants)
+
+        self._variants_by_features = dict[
+            AudioFeatures | VideoFeatures, list[AudioSourceVariant | VideoSourceVariant]
+        ]()
+
+        for variant in variants:
+            self._variants_by_features.setdefault(variant.grouping_features, []).append(variant)
+
+        # sort by features in an ascending order
+        self._features_list = sorted(list(self._variants_by_features.keys()))
+
+        if variants:
+            Features = type(variants[0].grouping_features)
+            self._default_features_index = Features.find_default(self._features_list)
+        else:
+            self._default_features_index = None
+
+        # there is nothing to choose from if there is only 1 variant, so the source is resolved
+        self.features_selected = 0 if len(self._features_list) == 1 else None
+
+    @property
+    def media_type(self) -> MediaType:
+        return self._media_type
 
     @property
     def is_available(self) -> bool:
-        return len(self.selected_variants) > 0 or len(self.variants) > 0
+        return self.features_selected is not None or len(self._features_list) > 0
 
     @property
     def is_resolved(self) -> bool:
-        return len(self.selected_variants) > 0 or len(self.variants) == 0
+        return self.features_selected is not None or len(self._features_list) == 0
+
+    @property
+    def features_list(self) -> list[AudioFeatures] | list[VideoFeatures]:
+        return self._features_list
+
+    @property
+    def default_features_index(self) -> int | None:
+        return self._default_features_index
+
+    @property
+    def selected_variant_group(self) -> list[AudioSourceVariant] | list[VideoSourceVariant] | None:
+        if self.features_selected is not None:
+            return self._variants_by_features[self._features_list[self.features_selected]]
+        return None
 
     @staticmethod
     def from_yt_dlp_dict(info: dict, media_type: MediaType) -> "MediaStreamSource":
-        mss = MediaStreamSource(media_type=media_type)
-
         formats = []
-        variant = None
+        Variant = None
         if media_type == MediaType.AUDIO:
             formats = MediaStreamSource._get_audio_formats(info["formats"])
-            variant = AudioSourceVariant
+            Variant = AudioSourceVariant
         elif media_type == MediaType.VIDEO:
             formats = MediaStreamSource._get_video_formats(info["formats"])
-            variant = VideoSourceVariant
+            Variant = VideoSourceVariant
 
-        mss.variants = [variant.from_yt_dlp_dict(fmt_info) for fmt_info in formats]
-        mss.variants = [fmt for fmt in mss.variants if fmt is not None]
-        if len(mss.variants) == 1:
-            mss.selected_variants = [0]
+        variants = [Variant.from_yt_dlp_dict(fmt_info) for fmt_info in formats]
+        variants = [fmt for fmt in variants if fmt is not None]
 
-        return mss
+        return MediaStreamSource(variants)
 
     @staticmethod
     def _get_audio_formats(formats: list[dict]) -> list[dict]:
@@ -180,19 +287,13 @@ class MediaStreamSource:
 
     @staticmethod
     def from_av_container(av_container, media_type: MediaType) -> "MediaStreamSource":
-        mss = MediaStreamSource(media_type=media_type)
-
         variant = None
         if media_type == MediaType.AUDIO:
             variant = AudioSourceVariant.from_av_container(av_container)
         elif media_type == MediaType.VIDEO:
             variant = VideoSourceVariant.from_av_container(av_container)
 
-        if variant is not None:
-            mss.variants = [variant]
-            mss.selected_variants = [0]
-
-        return mss
+        return MediaStreamSource([variant] if variant is not None else [])
 
 
 @dataclass

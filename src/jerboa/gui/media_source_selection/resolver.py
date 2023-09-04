@@ -1,64 +1,9 @@
-from bisect import bisect_right
-from dataclasses import dataclass
-
 import PyQt5.QtWidgets as QtW
 from PyQt5.QtCore import Qt
 
 
-from jerboa.media.source import (
-    MediaType,
-    MediaSource,
-    MediaStreamSource,
-    AudioSourceVariant,
-    VideoSourceVariant,
-)
+from jerboa.media.source import MediaSource, MediaStreamSource
 from jerboa.gui.common import LabelValuePair
-
-DEFAULT_SAMPLE_RATE = 44100
-DEFAULT_RESOLUTION = 720
-
-
-@dataclass(order=True, frozen=True)
-class AudioFeatures:
-    sample_rate: int | None
-    channels: int | None
-
-    def __str__(self) -> str:
-        return f"{self.channels}x {self.sample_rate}"
-
-    @staticmethod
-    def from_variant(variant: AudioSourceVariant) -> "AudioFeatures":
-        return AudioFeatures(sample_rate=variant.sample_rate, channels=variant.channels)
-
-    @staticmethod
-    def find_default(features_alternatives: list["AudioFeatures"]) -> int:
-        return bisect_right(
-            features_alternatives,
-            DEFAULT_SAMPLE_RATE,
-            key=lambda audio_variant: audio_variant.sample_rate,
-        )
-
-
-@dataclass(order=True, frozen=True)
-class VideoFeatures:
-    width: int | None
-    height: int | None
-    fps: float | None
-
-    def __str__(self) -> str:
-        return f"{self.width}x{self.height} at {self.fps:.1f}fps"
-
-    @staticmethod
-    def from_variant(variant: VideoSourceVariant) -> "VideoFeatures":
-        return VideoFeatures(width=variant.width, height=variant.height, fps=variant.fps)
-
-    @staticmethod
-    def find_default(features_alternatives: list["VideoFeatures"]) -> int:
-        return bisect_right(
-            features_alternatives,
-            DEFAULT_RESOLUTION,
-            key=lambda video_variant: min(video_variant.width, video_variant.height),
-        )
 
 
 class StreamVariantSelector(QtW.QWidget):
@@ -78,39 +23,19 @@ class StreamVariantSelector(QtW.QWidget):
         self.reset()
 
     def reset(self) -> None:
-        self._variant_groups: list[int] = []
-
         self._variants_combobox.clear()
 
     def set_stream_source(self, stream_source: MediaStreamSource) -> None:
         self.reset()
+        if stream_source.is_available:
+            self._variants_combobox.addItems(
+                [str(features) for features in stream_source.features_list]
+            )
+            self._variants_combobox.setCurrentIndex(stream_source.default_features_index)
 
-        Features = None
-        if stream_source.media_type == MediaType.AUDIO:
-            Features = AudioFeatures
-        elif stream_source.media_type == MediaType.VIDEO:
-            Features = VideoFeatures
-
-        if len(stream_source.variants) > 0 and Features is not None:
-            variants_by_features: dict[AudioFeatures | VideoFeatures, list[int]] = {}
-            for idx, variant in enumerate(stream_source.variants):
-                variants_by_features.setdefault(Features.from_variant(variant), []).append(idx)
-
-            # sort by featuers in an ascending order
-            features_alternatives = sorted(list(variants_by_features.keys()))
-            self._variant_groups = [
-                variants_by_features[features] for features in features_alternatives
-            ]
-
-            default_idx = Features.find_default(features_alternatives)
-            default_idx = max(0, default_idx - 1)
-
-            self._variants_combobox.addItems([str(features) for features in features_alternatives])
-            self._variants_combobox.setCurrentIndex(default_idx)
-
-    def get_current_variant_group(self) -> list[int]:
+    def get_current_variant_index(self) -> int | None:
         idx = self._variants_combobox.currentIndex()
-        return self._variant_groups[idx] if idx >= 0 else []
+        return idx if idx >= 0 else None
 
 
 class MediaSourceResolver(QtW.QWidget):
@@ -152,10 +77,10 @@ class MediaSourceResolver(QtW.QWidget):
 
     def get_resolved_media_source(self) -> MediaSource | None:
         if self._media_source is not None:
-            self._media_source.audio.selected_variants = (
-                self._audio_variant_selector.get_current_variant_group()
+            self._media_source.audio.features_selected = (
+                self._audio_variant_selector.get_current_variant_index()
             )
-            self._media_source.video.selected_variants = (
-                self._video_variant_selector.get_current_variant_group()
+            self._media_source.video.features_selected = (
+                self._video_variant_selector.get_current_variant_index()
             )
         return self._media_source
