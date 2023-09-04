@@ -3,12 +3,11 @@ import sys
 from dependency_injector import containers, providers
 from dependency_injector.wiring import Provide, inject
 
-from jerboa import media
-from jerboa.ui import JerboaUI, gui
+from jerboa import media, gui
 from jerboa.signal import Signal
 from jerboa.utils.file import JbPath, PathProcessor
 
-# from jerboa.ui.gui.thread_pool import ThreadPool as GUIThreadPool
+# from jerboa.gui.thread_pool import ThreadPool as GUIThreadPool
 
 
 class Container(containers.DeclarativeContainer):
@@ -25,20 +24,13 @@ class Container(containers.DeclarativeContainer):
     # thread_pool = providers.Resource(GUIThreadPool)
 
     # ---------------------------------------------------------------------------- #
-    #                            media source recognizer                           #
-    # ---------------------------------------------------------------------------- #
-
-    media_source_recognizer = providers.Singleton(
-        media.recognizer.MediaSorceRecognizer,
-        recognition_finished_signal=providers.Factory(
-            gui.GUISignal,
-            object,  # accepts a callable
-        ),
-    )
-
-    # ---------------------------------------------------------------------------- #
     #                                    signals                                   #
     # ---------------------------------------------------------------------------- #
+
+    media_source_selected_signal = providers.Singleton(
+        gui.GUISignal,
+        media.MediaSource,
+    )
 
     # ---------------------------------------------------------------------------- #
     #                                      gui                                     #
@@ -66,23 +58,18 @@ class Container(containers.DeclarativeContainer):
 
     # ------------------------------- details panel ------------------------------ #
 
-    # gui_media_source_details_panel_streaming_quality_selection = providers.Factory(
-    #     gui.media_source_selection.details_panel.InitPanel,
-    # )
-    # gui_media_source_details_panel_stream_selection = providers.Factory(
-    #     gui.media_source_selection.details_panel.InitPanel,
-    # )
-
     gui_media_source_selection_dialog = providers.Singleton(
-        gui.MediaSourceSelectionDialog,
-        recognizer=media_source_recognizer,
+        gui.media_source_selection.dialog.MediaSourceSelectionDialog,
+        min_size=(800, 400),
+        hint_text="Select a local file or enter the URL of a recording",
+        loading_spinner_movie=gui_resource_loading_spinner,
         path_selector=providers.Factory(
-            gui.common.PathSelector,
+            gui.common.file.PathSelector,
             path_processor=providers.Factory(
                 PathProcessor,
-                invalid_path_msg='Path "{path}" has invalid format',
-                local_file_not_found_msg='Local file "{path}" not found',
-                not_a_file_msg='"{path}" is not a file',
+                invalid_path_msg="Path '{path}' has invalid format",
+                local_file_not_found_msg="Local file '{path}' not found",
+                not_a_file_msg="'{path}' is not a file",
             ),
             select_local_file_button_text="Select a local file",
             placeholder_text="Media file path (or URL)...",
@@ -96,27 +83,37 @@ class Container(containers.DeclarativeContainer):
                 gui.GUISignal,
                 JbPath,
             ),
-        ),
-        media_source_details_panel=providers.Factory(
-            gui.media_source_selection.DetailsPanel,
-            init_panel=providers.Factory(
-                gui.media_source_selection.InitPanel,
-                text="Select a local file or enter the URL of a recording",
+            path_modified_signal=providers.Factory(
+                gui.GUISignal,
             ),
-            loading_panel=providers.Factory(
-                gui.media_source_selection.LoadingSpinnerPanel,
-                spinner_movie=gui_resource_loading_spinner,
-            )
-            # streaming_quality_selection_panel=gui_media_source_details_panel_streaming_quality_selection,
-            # stream_selection_panel=gui_media_source_details_panel_stream_selection,
+        ),
+        media_source_resolver=providers.Factory(
+            gui.media_source_selection.resolver.MediaSourceResolver,
+            title_text="Title:",
+            audio_variant_selector=providers.Factory(
+                gui.media_source_selection.resolver.StreamVariantSelector,
+                label_text="Selected audio quality:",
+            ),
+            video_variant_selector=providers.Factory(
+                gui.media_source_selection.resolver.StreamVariantSelector,
+                label_text="Selected video quality:",
+            ),
         ),
         button_box=providers.Factory(
-            gui.common.RejectAcceptDialogButtonBox,
+            gui.common.button_box.RejectAcceptDialogButtonBox,
             reject_button="cancel",
             accept_button="ok",
             icons=False,
             accept_disabled_by_default=True,
         ),
+        recognizer=providers.Factory(
+            media.recognizer.MediaSourceRecognizer,
+            recognition_finished_signal=providers.Factory(
+                gui.GUISignal,
+                object,  # accepts a callable
+            ),
+        ),
+        media_source_selected_signal=media_source_selected_signal,
         parent=gui_main_window,
     )
 
@@ -185,7 +182,7 @@ class Container(containers.DeclarativeContainer):
 
 
 @inject
-def main(ui: JerboaUI = Provide[Container.gui_jerboa]):
+def main(ui: gui.JerboaGUI = Provide[Container.gui_jerboa]):
     sys.exit(ui.run_event_loop())
 
 
@@ -195,57 +192,3 @@ if __name__ == "__main__":
     _dependencies_container.wire(modules=[__name__])
 
     main()
-
-# from typing import Callable
-# from jerboa.media import MediaType
-# from jerboa.media.source.decoder import JerboaDecoder, SkippingDecoder, SimpleDecoder
-
-# class MediaSource:
-
-#   def __init__(self):
-#     pass
-
-#   @property
-#   def audio_decoder(self) -> JerboaDecoder | None:
-#     return None
-
-#   @property
-#   def video_decoder(self) -> JerboaDecoder | None:
-#     return None
-
-# class PlaybackClock:
-
-#   def __init__(self) -> None:
-#     self._start_time = 0
-
-#   def time(self) -> float:
-#     return 0
-
-# class AudioPlayer(PlaybackClock):
-
-#   def __init__(self) -> None:
-#     super().__init__()
-
-# class MediaPlayer:
-
-#   def __init__(self, audio_player: AudioPlayer) -> None:
-#     self._audio_player = audio_player
-
-#   def play(self, audio_decoder: JerboaDecoder, video_decoder: JerboaDecoder, start_time: float):
-#     self.reset()
-
-#     if audio_decoder.has_audio:
-#       audio_decoder = media_source.decode(MediaType.Audio, start_time=start_time)
-#       self._audio_player.play(audio_decoder)
-
-#       playback_clock = self._audio_player
-#     else:
-#       playback_clock = PlaybackClock()
-
-#     if media_source.has_video:
-#       video_decoder = media_source.decode(MediaType.Video, start_time=start_time)
-#       self._video_player.play(playback_clock=playback_clock)
-
-#   def reset(self):
-#     self._audio_player.reset()
-#     self._video_player.reset()

@@ -5,10 +5,9 @@ from jerboa.logger import logger
 class LabelValuePair(QtW.QWidget):
     def __init__(self, label: str, read_only=True):
         super().__init__()
-        self._label = QtW.QLabel(f"{label}:")
+        self._label = QtW.QLabel(f"{label}")
         self._value = QtW.QLineEdit()
         self._value.setReadOnly(read_only)
-        self._value.setDisabled(read_only)
 
         layout = QtW.QHBoxLayout()
         layout.addWidget(self._label)

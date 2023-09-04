@@ -3,7 +3,6 @@ import PyQt5.QtWidgets as QtW
 from PyQt5 import QtCore
 
 from jerboa.signal import Signal
-from jerboa.ui import JerboaUI
 
 
 class GUISignal(Signal):
@@ -63,7 +62,7 @@ class MainWindow(QtW.QMainWindow):
         )
 
 
-class JerboaGUI(JerboaUI):
+class JerboaGUI:
     def __init__(
         self,
         gui_app: GUIApp,

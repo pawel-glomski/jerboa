@@ -17,6 +17,7 @@ class PathSelector(QtW.QWidget):
         local_file_extension_filter: str,
         path_invalid_signal: Signal,
         path_selected_signal: Signal,
+        path_modified_signal: Signal,
     ) -> None:
         super().__init__()
 
@@ -31,13 +32,14 @@ class PathSelector(QtW.QWidget):
             )
         )
 
-        self._path_input = QtW.QLineEdit()
-        self._path_input.setPlaceholderText(placeholder_text)
-        self._path_input.returnPressed.connect(self._use_current_path)
-
         self._apply_button = QtW.QPushButton(apply_button_text)
         self._apply_button.setAutoDefault(False)
         self._apply_button.clicked.connect(self._use_current_path)
+
+        self._path_input = QtW.QLineEdit()
+        self._path_input.setPlaceholderText(placeholder_text)
+        self._path_input.returnPressed.connect(self._use_current_path)
+        self._path_input.textChanged.connect(lambda _: path_modified_signal.emit())
 
         separator = QtW.QFrame()
         separator.setFrameShape(QtW.QFrame.VLine)
@@ -51,6 +53,7 @@ class PathSelector(QtW.QWidget):
 
         self._path_invalid_signal = path_invalid_signal
         self._path_selected_signal = path_selected_signal
+        self._path_modified_signal = path_modified_signal
 
         self.reset()
 
@@ -62,8 +65,13 @@ class PathSelector(QtW.QWidget):
     def path_selected_signal(self) -> Signal:
         return self._path_selected_signal
 
+    @property
+    def path_modified_signal(self) -> Signal:
+        return self._path_modified_signal
+
     def reset(self) -> None:
         self._path_input.clear()
+        self._path_input.setFocus()
 
     def _on_select_local_file_button_click(self, extension_filter: str) -> None:
         file_path, _ = QtW.QFileDialog.getOpenFileName(filter=extension_filter)
@@ -73,6 +81,7 @@ class PathSelector(QtW.QWidget):
 
     def _use_current_path(self) -> None:
         self._path_input.clearFocus()
+        self._apply_button.setDefault(False)
 
         def job():
             try:

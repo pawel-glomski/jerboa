@@ -41,3 +41,7 @@ class RejectAcceptDialogButtonBox(QtW.QDialogButtonBox):
 
     def enable_accept(self) -> None:
         self._ok_button.setDisabled(False)
+        self._ok_button.setDefault(True)
+
+    def loose_accept_focus(self) -> None:
+        self._ok_button.setDefault(False)
