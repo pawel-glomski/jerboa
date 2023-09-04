@@ -6,43 +6,44 @@ from jerboa.utils.file import JbPath
 
 
 class RecognitionError:
-  message: str
+    message: str
 
 
 class MediaSorceRecognizer:
+    def __init__(
+        self,
+        recognition_finished_signal: Signal
+        # thread_pool: ThreadPool,
+    ) -> None:
+        self._recognition_finished_signal = recognition_finished_signal
+        self._recognition_finished_signal.connect(lambda fn: fn())
 
-  def __init__(self, recognition_finished_signal: Signal
-               # thread_pool: ThreadPool,
-              ) -> None:
-    self._recognition_finished_signal = recognition_finished_signal
-    self._recognition_finished_signal.connect(lambda fn: fn())
+        self._thread_pool = ...
 
-    self._thread_pool = ...
+    def recognize(
+        self,
+        media_source_path: JbPath,
+        on_success: Callable[[MediaSource], None],
+        on_failure: Callable[[RecognitionError], None],
+    ):
+        import av
 
-  def recognize(
-      self,
-      media_source_path: JbPath,
-      on_success: Callable[[MediaSource], None],
-      on_failure: Callable[[RecognitionError], None],
-  ):
-    import av
+        from threading import Thread
 
-    from threading import Thread
+        def job():
+            try:
+                avcontainer = av.open(media_source_path.path)
+            except av.error.InvalidDataError:  # unsupported format
+                ...
 
-    def job():
-      try:
-        avcontainer = av.open(media_source_path.path)
-      except av.error.InvalidDataError:  # unsupported format
-        ...
+            def callback_call():
+                # if media_source is not None:
+                on_success(MediaSource(avcontainer))
+                # else:
+                #   on_failure(media_source_error)
 
-      def callback_call():
-        # if media_source is not None:
-        on_success(MediaSource(avcontainer))
-        # else:
-        #   on_failure(media_source_error)
+            self._recognition_finished_signal.emit(callback_call)
 
-      self._recognition_finished_signal.emit(callback_call)
+        Thread(target=job, daemon=True).start()
 
-    Thread(target=job, daemon=True).start()
-
-    # self._thread_pool.start(job)
+        # self._thread_pool.start(job)

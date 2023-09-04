@@ -9,19 +9,20 @@ from jerboa.media.reformatters import AudioReformatter
 
 
 class AudioReader:
+    def __init__(self, config: AudioConfig = None):
+        """Audio reader
 
-  def __init__(self, config: AudioConfig = None):
-    """Audio reader
+        Args:
+            config (optional):
+              Configuration for the output audio format. If `None`, the audio will be provided in the
+              same format as it is in the recording.
+        """
+        self._config = config
 
-    Args:
-        config (optional):
-          Configuration for the output audio format. If `None`, the audio will be provided in the
-          same format as it is in the recording.
-    """
-    self._config = config
-
-  def read_stream(self, file_path: Path, stream_idx: int = 0) -> Generator[np.ndarray, None, None]:
-    """Creates a generator of audio frames of a given audio stream in the recording
+    def read_stream(
+        self, file_path: Path, stream_idx: int = 0
+    ) -> Generator[np.ndarray, None, None]:
+        """Creates a generator of audio frames of a given audio stream in the recording
 
     Args:
       file_path:
@@ -34,26 +35,30 @@ class AudioReader:
       Tuple[Generator[np.ndarray, None, None], Dict[StreamInfo, object]]: A generator of the \
         audio frames and a dictionary with info about the stream
     """
-    file_path = Path(file_path).resolve()
+        file_path = Path(file_path).resolve()
 
-    with av.open(str(file_path)) as container:
-      if len(container.streams.audio) == 0:
-        raise ValueError('No audio streams to read')
+        with av.open(str(file_path)) as container:
+            if len(container.streams.audio) == 0:
+                raise ValueError("No audio streams to read")
 
-      if stream_idx >= len(container.streams.audio):
-        raise IndexError(f'Bad audio stream index: {stream_idx=}, {len(container.streams.audio)=}')
+            if stream_idx >= len(container.streams.audio):
+                raise IndexError(
+                    f"Bad audio stream index: {stream_idx=}, {len(container.streams.audio)=}"
+                )
 
-      audio_stream = container.streams.audio[stream_idx]
-      if self._config is None:
-        config = AudioConfig(audio_stream.format, audio_stream.layout, audio_stream.sample_rate)
-      else:
-        config = self._config
+            audio_stream = container.streams.audio[stream_idx]
+            if self._config is None:
+                config = AudioConfig(
+                    audio_stream.format, audio_stream.layout, audio_stream.sample_rate
+                )
+            else:
+                config = self._config
 
-      if config.frame_duration is None:
-        config.frame_duration = std_audio.FRAME_DURATION
+            if config.frame_duration is None:
+                config.frame_duration = std_audio.FRAME_DURATION
 
-      reformatter = AudioReformatter(config)
+            reformatter = AudioReformatter(config)
 
-      for raw_frame in container.decode(audio_stream):
-        for reformatted_frame in reformatter.reformat(raw_frame):
-          yield reformatted_frame.to_ndarray()
+            for raw_frame in container.decode(audio_stream):
+                for reformatted_frame in reformatter.reformat(raw_frame):
+                    yield reformatted_frame.to_ndarray()

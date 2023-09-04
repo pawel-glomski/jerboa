@@ -22,19 +22,19 @@ class _AudioPlayerProperty:
 
     def __init__(self, attribute, doc=None):
         self.attribute = attribute
-        self.__doc__ = doc or ''
+        self.__doc__ = doc or ""
 
     def __get__(self, obj, objtype=None):
         if obj is None:
             return self
-        if '_' + self.attribute in obj.__dict__:
-            return obj.__dict__['_' + self.attribute]
-        return getattr(objtype, '_' + self.attribute)
+        if "_" + self.attribute in obj.__dict__:
+            return obj.__dict__["_" + self.attribute]
+        return getattr(objtype, "_" + self.attribute)
 
     def __set__(self, obj, value):
-        obj.__dict__['_' + self.attribute] = value
+        obj.__dict__["_" + self.attribute] = value
         if obj._audio_player:
-            getattr(obj._audio_player, 'set_' + self.attribute)(value)
+            getattr(obj._audio_player, "set_" + self.attribute)(value)
 
 
 class PlaybackTimer:
@@ -65,19 +65,20 @@ class PlaybackTimer:
         self.reset()
         self._time = value
 
+
 class SLPlayer(pyglet.event.EventDispatcher):
     # Spacialisation attributes, preserved between audio players
     _volume = 1.0
     _min_distance = 1.0
-    _max_distance = 100000000.
+    _max_distance = 100000000.0
 
     _position = (0, 0, 0)
     _pitch = 1.0
 
     _cone_orientation = (0, 0, 1)
-    _cone_inner_angle = 360.
-    _cone_outer_angle = 360.
-    _cone_outer_gain = 1.
+    _cone_inner_angle = 360.0
+    _cone_outer_angle = 360.0
+    _cone_outer_gain = 1.0
 
     def __init__(self):
         """Initialize the Player with a MasterClock."""
@@ -96,72 +97,70 @@ class SLPlayer(pyglet.event.EventDispatcher):
         self.delete()
 
     def start(self, new_source):
-      """
-      Set the source of the player and start playing it.
+        """
+        Set the source of the player and start playing it.
 
-      Args:
-          new_source (Source or Iterable[Source]): The source to play.
-      """        
-      self.pause()
-      self._timer.reset()
-      if self._source:
-        self.seek(0.0) # Reset source to the beginning
-        self.source.is_player_source = False
+        Args:
+            new_source (Source or Iterable[Source]): The source to play.
+        """
+        self.pause()
+        self._timer.reset()
+        if self._source:
+            self.seek(0.0)  # Reset source to the beginning
+            self.source.is_player_source = False
 
-      if new_source is None:
-          self._source = None
-          self.delete()
-      else:
-        old_source = self._source
-        self._source = new_source.get_queue_source()
+        if new_source is None:
+            self._source = None
+            self.delete()
+        else:
+            old_source = self._source
+            self._source = new_source.get_queue_source()
 
-        if self._audio_player:
-          if old_source and old_source.audio_format == self._source.audio_format:
-            self._audio_player.clear()
-            self._audio_player.source = self._source
-          else:
-            self._audio_player.delete()
-            self._audio_player = None
-        if old_source and old_source.video_format != self._source.video_format:
-          pyglet.clock.unschedule(self.update_texture)
-          self._texture = None
+            if self._audio_player:
+                if old_source and old_source.audio_format == self._source.audio_format:
+                    self._audio_player.clear()
+                    self._audio_player.source = self._source
+                else:
+                    self._audio_player.delete()
+                    self._audio_player = None
+            if old_source and old_source.video_format != self._source.video_format:
+                pyglet.clock.unschedule(self.update_texture)
+                self._texture = None
 
-        self._set_playing(True)
-
+            self._set_playing(True)
 
     def _set_playing(self, playing):
-      # stopping = self._playing and not playing
-      # starting = not self._playing and playing
+        # stopping = self._playing and not playing
+        # starting = not self._playing and playing
 
-      self._playing = playing
+        self._playing = playing
 
-      if playing and self.source:
-        self._init_media_players()
+        if playing and self.source:
+            self._init_media_players()
 
-        if self._audio_player:
-          self._audio_player.play()
-        if self._texture:
-          pyglet.clock.schedule_once(self.update_texture, 0)
+            if self._audio_player:
+                self._audio_player.play()
+            if self._texture:
+                pyglet.clock.schedule_once(self.update_texture, 0)
 
-        self._timer.start()
-      else:
-        self._timer.pause()
-        pyglet.clock.unschedule(self.update_texture)
-        if self._audio_player:
-          self._audio_player.stop()
+            self._timer.start()
+        else:
+            self._timer.pause()
+            pyglet.clock.unschedule(self.update_texture)
+            if self._audio_player:
+                self._audio_player.stop()
 
     def _init_media_players(self):
-      if self.source.audio_format:
-        if self._audio_player is None:
-            self._create_audio_player()
-        if self._audio_player:
-            # We succesfully created an audio player
-            self._audio_player.prefill_audio()
+        if self.source.audio_format:
+            if self._audio_player is None:
+                self._create_audio_player()
+            if self._audio_player:
+                # We succesfully created an audio player
+                self._audio_player.prefill_audio()
 
-      if self.source.video_format:
-        if not self._texture:
-            self._create_texture()
-
+        if self.source.video_format:
+            if not self._texture:
+                self._create_texture()
 
     @property
     def playing(self):
@@ -202,7 +201,6 @@ class SLPlayer(pyglet.event.EventDispatcher):
             self._audio_player = None
         if self._texture:
             self._texture = None
-
 
     def seek(self, timestamp):
         """
@@ -246,12 +244,20 @@ class SLPlayer(pyglet.event.EventDispatcher):
         self._audio_player = audio_driver.create_audio_player(self.source, self)
 
         # Set the audio player attributes
-        for attr in ('volume', '_min_distance', '_max_distance', '_position',
-                     'pitch', '_cone_orientation', '_cone_inner_angle',
-                     '_cone_outer_angle', '_cone_outer_gain'):
+        for attr in (
+            "volume",
+            "_min_distance",
+            "_max_distance",
+            "_position",
+            "pitch",
+            "_cone_orientation",
+            "_cone_inner_angle",
+            "_cone_outer_angle",
+            "_cone_outer_gain",
+        ):
             value = getattr(self, attr)
-            if attr.startswith('_'):
-              attr = attr[len('_'):]
+            if attr.startswith("_"):
+                attr = attr[len("_") :]
             setattr(self, attr, value)
 
     @property
@@ -273,7 +279,9 @@ class SLPlayer(pyglet.event.EventDispatcher):
 
     def _create_texture(self):
         video_format = self.source.video_format
-        self._texture = pyglet.image.Texture.create(video_format.width, video_format.height, GL_TEXTURE_2D)
+        self._texture = pyglet.image.Texture.create(
+            video_format.width, video_format.height, GL_TEXTURE_2D
+        )
         self._texture = self._texture.get_transform(flip_y=True)
         # After flipping the texture along the y axis, the anchor_y is set
         # to the top of the image. We want to keep it at the bottom.
@@ -333,7 +341,6 @@ class SLPlayer(pyglet.event.EventDispatcher):
             pyglet.clock.schedule_once(self.update_texture, ts - time)
             return
 
-
         image = source.get_next_video_frame()
         if image is not None:
             if self._texture is None:
@@ -351,24 +358,30 @@ class SLPlayer(pyglet.event.EventDispatcher):
         # self.pr.enable()
 
     def on_eos(self):
-      ...
+        ...
 
-    volume = _AudioPlayerProperty('volume', doc="""
+    volume = _AudioPlayerProperty(
+        "volume",
+        doc="""
     The volume level of sound playback.
 
     The nominal level is 1.0, and 0.0 is silence.
 
     The volume level is affected by the distance from the listener (if
     positioned).
-    """)
+    """,
+    )
 
-    pitch = _AudioPlayerProperty('pitch', doc="""
+    pitch = _AudioPlayerProperty(
+        "pitch",
+        doc="""
     The pitch shift to apply to the sound.
 
     The nominal pitch is 1.0. A pitch of 2.0 will sound one octave higher,
     and play twice as fast. A pitch of 0.5 will sound one octave lower, and
     play twice as slow. A pitch of 0.0 is not permitted.
-    """)
+    """,
+    )
 
     def on_driver_reset(self):
         """The audio driver has been reset, by default this will kill the current audio player and create a new one,
@@ -381,14 +394,23 @@ class SLPlayer(pyglet.event.EventDispatcher):
             self._audio_player.on_driver_reset()
 
             # Voice has been changed, will need to reset all options on the voice.
-            for attr in ('volume', 'min_distance', 'max_distance', 'position',
-                         'pitch', 'cone_orientation', 'cone_inner_angle',
-                         'cone_outer_angle', 'cone_outer_gain'):
+            for attr in (
+                "volume",
+                "min_distance",
+                "max_distance",
+                "position",
+                "pitch",
+                "cone_orientation",
+                "cone_inner_angle",
+                "cone_outer_angle",
+                "cone_outer_gain",
+            ):
                 value = getattr(self, attr)
                 setattr(self, attr, value)
 
             if self._playing:
                 self._audio_player.play()
 
-SLPlayer.register_event_type('on_eos')
-SLPlayer.register_event_type('on_driver_reset')
+
+SLPlayer.register_event_type("on_eos")
+SLPlayer.register_event_type("on_driver_reset")

@@ -1,4 +1,3 @@
 class MediaSource:
-
-  def __init__(self, avcontainer) -> None:
-    self.avcontainer = avcontainer
+    def __init__(self, avcontainer) -> None:
+        self.avcontainer = avcontainer
