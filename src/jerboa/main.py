@@ -13,6 +13,20 @@ from jerboa.utils.file import JbPath, PathProcessor
 class Container(containers.DeclarativeContainer):
     # config = providers.Configuration()
 
+    # ---------------------------------------------------------------------------- #
+    #                                   Resources                                  #
+    # ---------------------------------------------------------------------------- #
+
+    # this has to be created before any gui element, thus it is a resource initialized with
+    # init_resources() call below
+    gui_app = providers.Resource(gui.GUIApp)
+
+    # ---------------------------------------------------------------------------- #
+    #                                     Core                                     #
+    # ---------------------------------------------------------------------------- #
+
+    thread_pool = providers.Singleton(gui.GUIThreadPool)
+
     # audio_player = providers.Singleton(MediaPlayer)
     # video_player = providers.Singleton(MediaPlayer)
     # media_player = providers.Singleton(
@@ -20,8 +34,6 @@ class Container(containers.DeclarativeContainer):
     #     audio_player=audio_player,
     #     video_player=video_player,
     # )
-
-    # thread_pool = providers.Resource(GUIThreadPool)
 
     # ---------------------------------------------------------------------------- #
     #                                    signals                                   #
@@ -35,10 +47,6 @@ class Container(containers.DeclarativeContainer):
     # ---------------------------------------------------------------------------- #
     #                                      gui                                     #
     # ---------------------------------------------------------------------------- #
-
-    # this has to be created before any gui element, thus it is a resource initialized with
-    # init_resources() call below
-    gui_app = providers.Resource(gui.GUIApp)
 
     gui_main_window = providers.Singleton(
         gui.MainWindow,
@@ -112,6 +120,7 @@ class Container(containers.DeclarativeContainer):
                 gui.GUISignal,
                 object,  # accepts a callable
             ),
+            thread_pool=thread_pool,
         ),
         media_source_selected_signal=media_source_selected_signal,
         parent=gui_main_window,

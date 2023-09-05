@@ -3,6 +3,21 @@ import PyQt5.QtWidgets as QtW
 from PyQt5 import QtCore
 
 from jerboa.signal import Signal
+from jerboa.thread_pool import ThreadPool
+
+
+class GUIThreadPool(ThreadPool):
+    def __init__(self, workers: int | None = None) -> None:
+        super().__init__(workers)
+        self._thread_pool = QtCore.QThreadPool()
+        if workers:
+            self._thread_pool.setMaxThreadCount(workers)
+
+    def start(self, fn: Callable[[], None]):
+        self._thread_pool.start(fn)
+
+    def wait(self, timeout: int = -1) -> None:
+        self._thread_pool.waitForDone(timeout)
 
 
 class GUISignal(Signal):

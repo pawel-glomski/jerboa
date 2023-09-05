@@ -3,20 +3,21 @@ from collections.abc import Callable
 import yt_dlp
 
 from jerboa.signal import Signal
-from jerboa.media import MediaSource
+from jerboa.thread_pool import ThreadPool
 from jerboa.utils.file import JbPath
+from .source import MediaSource
 
 
 class MediaSourceRecognizer:
     def __init__(
         self,
-        recognition_finished_signal: Signal
-        # thread_pool: ThreadPool,
+        recognition_finished_signal: Signal,
+        thread_pool: ThreadPool,
     ) -> None:
         self._recognition_finished_signal = recognition_finished_signal
         self._recognition_finished_signal.connect(lambda fn: fn())
 
-        self._thread_pool = ...
+        self._thread_pool = thread_pool
 
         self._context_id = 0
         self._accepting_jobs = False
@@ -50,8 +51,6 @@ class MediaSourceRecognizer:
         job_context_id = self._context_id
 
         import av
-
-        from threading import Thread
 
         def job():
             media_source = recognition_error_message = None
@@ -95,6 +94,4 @@ class MediaSourceRecognizer:
 
             self._recognition_finished_signal.emit(callback_call)
 
-        Thread(target=job, daemon=True).start()
-
-        # self._thread_pool.start(job)
+        self._thread_pool.start(job)
