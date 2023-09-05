@@ -1,17 +1,10 @@
 import av
-import numpy as np
 from pylibrb import RubberBandStretcher, Option
-from dataclasses import dataclass
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig, std_audio, create_audio_buffer
-from jerboa.timeline import RangeMappingResult
-
-
-@dataclass
-class MappedFrame:
-    timepoint: float
-    duration: float
-    data: np.ndarray
+from jerboa.media import MediaType, standardized_audio as std_audio
+from jerboa.media.config import AudioConfig, VideoConfig
+from jerboa.core.timeline import RangeMappingResult
+from .buffers import NpFrame, create_audio_circular_buffer
 
 
 class AudioMapper:
@@ -23,7 +16,7 @@ class AudioMapper:
             dst_audio_config.sample_rate,
             frame_duration=dst_audio_config.frame_duration or std_audio.FRAME_DURATION,
         )
-        self._audio = create_audio_buffer(self._std_audio_config)
+        self._audio = create_audio_circular_buffer(self._std_audio_config)
         # self._transition_steps = std_audio.get_transition_steps(audio_config.sample_rate)
 
         self._stretcher = RubberBandStretcher(
@@ -44,7 +37,7 @@ class AudioMapper:
         self._stretcher.reset()
         self._last_frame_end_timepoint = None
 
-    def map(self, frame: av.AudioFrame, mapping_scheme: RangeMappingResult) -> MappedFrame:
+    def map(self, frame: av.AudioFrame, mapping_scheme: RangeMappingResult) -> NpFrame:
         flush = frame is None
 
         if flush:
@@ -78,8 +71,8 @@ class AudioMapper:
             self._last_frame_end_timepoint = beg_timepoint + duration
 
             real_audio_data = std_audio.to_real_audio(audio, self._dst_audio_config.format)
-            return MappedFrame(beg_timepoint, duration, real_audio_data)
-        return MappedFrame(0, 0, None)
+            return NpFrame(beg_timepoint, duration, real_audio_data)
+        return NpFrame(0, 0, None)
 
     def _cut_according_to_mapping_scheme(
         self, frame: av.AudioFrame, mapping_scheme: RangeMappingResult
@@ -105,13 +98,13 @@ class VideoMapper:
     def reset(self) -> None:
         pass
 
-    def map(self, frame: av.VideoFrame, mapping_scheme: RangeMappingResult) -> MappedFrame:
+    def map(self, frame: av.VideoFrame, mapping_scheme: RangeMappingResult) -> NpFrame:
         flush = frame is None
         if not flush and mapping_scheme.beg < mapping_scheme.end:
             duration = mapping_scheme.end - mapping_scheme.beg
-            return MappedFrame(mapping_scheme.beg, duration, frame.to_ndarray())
+            return NpFrame(mapping_scheme.beg, duration, frame.to_ndarray())
 
-        return MappedFrame(0, 0, None)  # empty frame
+        return NpFrame(0, 0, None)  # empty frame
 
 
 def create_mapper(media_config: AudioConfig | VideoConfig) -> AudioMapper | VideoMapper:

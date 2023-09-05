@@ -3,8 +3,8 @@ from functools import partial
 import PyQt5.QtWidgets as QtW
 from PyQt5.QtCore import QTimer
 
-from jerboa.utils.file import PathProcessor
-from jerboa.signal import Signal
+from jerboa.core.signal import Signal
+from jerboa.core.file import PathProcessor
 
 
 class PathSelector(QtW.QWidget):

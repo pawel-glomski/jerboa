@@ -5,8 +5,9 @@ from pyglet.image import ImageData
 from pyglet.media import StreamingSource
 from pyglet.media.codecs import AudioFormat, VideoFormat, AudioData
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig
-from jerboa.timeline import FragmentedTimeline
+from jerboa.media import MediaType
+from jerboa.media.config import AudioConfig, VideoConfig
+from jerboa.core.timeline import FragmentedTimeline
 from .decoder import SimpleDecoder, SkippingDecoder, JerboaDecoder
 
 VIDEO_FORMAT_PYGLET = "RGB"
@@ -27,7 +28,7 @@ def create_stream_config(stream: av.stream.Stream) -> AudioConfig | VideoConfig:
 
 class MediaStreamer(StreamingSource):
     def __init__(self, filepath: str):
-        from jerboa.timeline import TMSection  # TODO: remove me, for debugging only
+        from jerboa.core.timeline import TMSection  # TODO: remove me, for debugging only
 
         debug_timeline = FragmentedTimeline(
             # *[TMSection(i * 1.0, i * 1.0 + 0.5, 1 - 0.5 * (i % 2)) for i in range(200)]

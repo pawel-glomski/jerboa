@@ -3,11 +3,11 @@ import sys
 from dependency_injector import containers, providers
 from dependency_injector.wiring import Provide, inject
 
-from jerboa import media, gui
-from jerboa.signal import Signal
-from jerboa.utils.file import JbPath, PathProcessor
-
-# from jerboa.gui.thread_pool import ThreadPool as GUIThreadPool
+from jerboa import gui
+from jerboa.core.signal import Signal
+from jerboa.core.file import JbPath, PathProcessor
+from jerboa.media.source import MediaSource
+from jerboa.media.recognizer import MediaSourceRecognizer
 
 
 class Container(containers.DeclarativeContainer):
@@ -19,13 +19,13 @@ class Container(containers.DeclarativeContainer):
 
     # this has to be created before any gui element, thus it is a resource initialized with
     # init_resources() call below
-    gui_app = providers.Resource(gui.GUIApp)
+    gui_app = providers.Resource(gui.core.GUIApp)
 
     # ---------------------------------------------------------------------------- #
     #                                     Core                                     #
     # ---------------------------------------------------------------------------- #
 
-    thread_pool = providers.Singleton(gui.GUIThreadPool)
+    thread_pool = providers.Singleton(gui.core.GUIThreadPool)
 
     # audio_player = providers.Singleton(MediaPlayer)
     # video_player = providers.Singleton(MediaPlayer)
@@ -40,8 +40,8 @@ class Container(containers.DeclarativeContainer):
     # ---------------------------------------------------------------------------- #
 
     media_source_selected_signal = providers.Singleton(
-        gui.GUISignal,
-        media.MediaSource,
+        gui.core.GUISignal,
+        MediaSource,
     )
 
     # ---------------------------------------------------------------------------- #
@@ -49,7 +49,7 @@ class Container(containers.DeclarativeContainer):
     # ---------------------------------------------------------------------------- #
 
     gui_main_window = providers.Singleton(
-        gui.MainWindow,
+        gui.core.MainWindow,
         min_size=(640, 360),
         relative_size=(0.5, 0.5),
     )
@@ -57,7 +57,7 @@ class Container(containers.DeclarativeContainer):
     # ------------------------------- gui resources ------------------------------ #
 
     gui_resource_loading_spinner = providers.Singleton(
-        gui.resources.LoadingSpinner,
+        gui.resources.common.LoadingSpinner,
         path=":/loading_spinner.gif",
         size=(30, 30),
     )
@@ -84,15 +84,15 @@ class Container(containers.DeclarativeContainer):
             apply_button_text="Apply",
             local_file_extension_filter="Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)",
             path_invalid_signal=providers.Factory(
-                gui.GUISignal,
+                gui.core.GUISignal,
                 str,
             ),
             path_selected_signal=providers.Factory(
-                gui.GUISignal,
+                gui.core.GUISignal,
                 JbPath,
             ),
             path_modified_signal=providers.Factory(
-                gui.GUISignal,
+                gui.core.GUISignal,
             ),
         ),
         media_source_resolver=providers.Factory(
@@ -115,9 +115,9 @@ class Container(containers.DeclarativeContainer):
             accept_disabled_by_default=True,
         ),
         recognizer=providers.Factory(
-            media.recognizer.MediaSourceRecognizer,
+            MediaSourceRecognizer,
             recognition_finished_signal=providers.Factory(
-                gui.GUISignal,
+                gui.core.GUISignal,
                 object,  # accepts a callable
             ),
             thread_pool=thread_pool,
@@ -146,7 +146,7 @@ class Container(containers.DeclarativeContainer):
         ),
     )
     gui_menu_bar = providers.Singleton(
-        gui.MenuBar,
+        gui.menu_bar.MenuBar,
         menus=providers.List(
             gui_menu_bar_file,
         ),
@@ -166,13 +166,13 @@ class Container(containers.DeclarativeContainer):
     )
 
     player_view = providers.Singleton(
-        gui.PlayerView,
+        gui.player_view.PlayerView,
         canvas=gui_player_view_canvas,
         timeline=gui_player_view_timeline,
     )
 
     gui_main_widget = providers.Singleton(
-        gui.MainViewStack,
+        gui.main_view_stack.MainViewStack,
         player_view=player_view,
         # settings_view=settings_view,
         # plugins_view=plugins_view,
@@ -181,7 +181,7 @@ class Container(containers.DeclarativeContainer):
     # -------------------------------- jerboa gui -------------------------------- #
 
     gui_jerboa = providers.Singleton(
-        gui.JerboaGUI,
+        gui.core.JerboaGUI,
         gui_app=gui_app,
         main_window=gui_main_window,
         menu_bar=gui_menu_bar,
@@ -191,7 +191,7 @@ class Container(containers.DeclarativeContainer):
 
 
 @inject
-def main(ui: gui.JerboaGUI = Provide[Container.gui_jerboa]):
+def main(ui: gui.core.JerboaGUI = Provide[Container.gui_jerboa]):
     sys.exit(ui.run_event_loop())
 
 

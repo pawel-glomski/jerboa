@@ -3,7 +3,7 @@ import io
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-from jerboa.timeline import FragmentedTimeline
+from jerboa.core.timeline import FragmentedTimeline
 
 ARG_PREPARE_ANALYSIS_METHOD_FN = "prepare_fn"
 # ANALYSIS_RESULTS_DIR = sl_file.create_cache_dir_rel('analysis_results')

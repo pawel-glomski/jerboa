@@ -3,7 +3,7 @@ from PyQt5.QtCore import Qt
 
 
 from jerboa.media.source import MediaSource, MediaStreamSource
-from jerboa.gui.common import LabelValuePair
+from jerboa.gui.common.property import LabelValuePair
 
 
 class StreamVariantSelector(QtW.QWidget):

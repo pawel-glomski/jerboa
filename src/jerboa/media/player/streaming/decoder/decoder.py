@@ -1,11 +1,10 @@
 from collections.abc import Iterable
 
 import av
-import math
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
-from jerboa.media import MediaType, std_audio
+from jerboa.media import MediaType, standardized_audio as std_audio
 
 # TODO: zrobić push architecture
 # audio processing pipeline:

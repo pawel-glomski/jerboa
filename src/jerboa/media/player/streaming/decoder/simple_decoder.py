@@ -5,7 +5,9 @@ import av
 import math
 from dataclasses import dataclass
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig, config_from_stream, std_audio
+from jerboa.media import MediaType
+from jerboa.media import standardized_audio as std_audio
+from jerboa.media.config import AudioConfig, VideoConfig, config_from_stream
 
 MEAN_KEYFRAME_INTERVAL_SAMPLE_SIZE = 8
 DEFAULT_MEAN_KEYFRAME_INTERVAL = 0

@@ -1,5 +1,6 @@
-from .config import MediaType, AudioConfig, VideoConfig, config_from_stream, create_audio_buffer
-from .source import MediaStreamSource, MediaSource
+from enum import Enum
 
-from . import standardized_audio as std_audio
-from . import recognizer
+
+class MediaType(Enum):
+    AUDIO = "audio"
+    VIDEO = "video"

@@ -2,9 +2,10 @@ from collections.abc import Generator
 
 from dataclasses import dataclass
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig, config_from_stream
+from jerboa.media import MediaType
+from jerboa.media.config import AudioConfig, VideoConfig, config_from_stream
 from .simple_decoder import SimpleDecoder, TimedFrame
-from .util import AudioReformatter, VideoReformatter, create_reformatter
+from .util.reformatters import AudioReformatter, VideoReformatter, create_reformatter
 
 MIN_SEEK_THRESHOLD = 0.25  # in seconds
 

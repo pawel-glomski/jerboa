@@ -3,8 +3,8 @@ from PyQt5 import QtGui
 from PyQt5.QtCore import Qt
 
 
-from jerboa.signal import Signal
-from jerboa.utils.file import JbPath
+from jerboa.core.signal import Signal
+from jerboa.core.file import JbPath
 from jerboa.media.source import MediaSource
 from jerboa.media.recognizer import MediaSourceRecognizer
 from jerboa.gui.common.file import PathSelector

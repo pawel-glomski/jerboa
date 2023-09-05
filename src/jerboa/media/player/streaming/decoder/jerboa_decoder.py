@@ -1,13 +1,14 @@
-import av
 import copy
 import math
 import numpy as np
 from threading import Thread, Lock, Condition
 
-from jerboa.timeline import FragmentedTimeline, RangeMappingResult
-from jerboa.media import AudioConfig, VideoConfig, MediaType
+from jerboa.core.timeline import FragmentedTimeline, RangeMappingResult
+from jerboa.media import MediaType
+from jerboa.media.config import AudioConfig, VideoConfig
 from .skipping_decoder import SkippingDecoder, SkippingFrame
-from .util import create_buffer, create_mapper
+from .util.buffers import create_buffer
+from .util.mappers import create_mapper
 
 BUFFER_DURATION = 2.5  # in seconds
 

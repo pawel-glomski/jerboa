@@ -1,15 +1,26 @@
 import numpy as np
 from collections import deque
+from dataclasses import dataclass
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig, create_audio_buffer
-from .mappers import MappedFrame
+from jerboa.core.circular_buffer import CircularBuffer
+from jerboa.media import MediaType, standardized_audio as std_audio
+from jerboa.media.config import AudioConfig, VideoConfig
+
+AUDIO_BUFFER_SIZE_MODIFIER = 1.2
+
+
+@dataclass
+class NpFrame:
+    timepoint: float
+    duration: float
+    data: np.ndarray
 
 
 class AudioBuffer:
     def __init__(self, audio_config: AudioConfig, max_duration: float) -> None:
         self._audio_config = audio_config
 
-        self._audio = create_audio_buffer(audio_config, max_duration)
+        self._audio = create_audio_circular_buffer(audio_config, max_duration)
         # self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
         self._timepoint = None
 
@@ -27,7 +38,7 @@ class AudioBuffer:
         # self._audio_last_sample[:] = 0
         self._timepoint = None
 
-    def put(self, mapped_audio_frame: MappedFrame) -> None:
+    def put(self, mapped_audio_frame: NpFrame) -> None:
         assert mapped_audio_frame.duration > 0
         assert mapped_audio_frame.data.size > 0
         assert not self.is_full()
@@ -65,7 +76,7 @@ class VideoBuffer:
         self._max_duration = max_duration
         self._duration = 0.0
 
-        self._frames = deque[MappedFrame]()
+        self._frames = deque[NpFrame]()
 
     def __len__(self) -> int:
         return len(self._frames)
@@ -78,7 +89,7 @@ class VideoBuffer:
         self._frames.clear()
         self._duration = 0.0
 
-    def put(self, mapped_video_frame: MappedFrame) -> None:
+    def put(self, mapped_video_frame: NpFrame) -> None:
         assert not self.is_full()
         assert mapped_video_frame.duration > 0
 
@@ -109,3 +120,24 @@ def create_buffer(
     if media_config.media_type == MediaType.AUDIO:
         return AudioBuffer(media_config, max_duration=buffer_duration)
     return VideoBuffer(max_duration=buffer_duration)
+
+
+def create_audio_circular_buffer(
+    audio_config: AudioConfig, max_duration: float = None
+) -> CircularBuffer:
+    if max_duration is None and audio_config.frame_duration is None:
+        raise ValueError("`max_duration` or `audio_config.frame_duration` must be provided")
+
+    if max_duration is None:
+        max_duration = audio_config.frame_duration
+
+    buffer_dtype = std_audio.get_format_dtype(audio_config.format)
+    buffer_length = int(max_duration * audio_config.sample_rate * AUDIO_BUFFER_SIZE_MODIFIER)
+    if audio_config.format.is_planar:
+        buffer_shape = [audio_config.channels_num, buffer_length]
+        axis = 1
+    else:
+        buffer_shape = [buffer_length, audio_config.channels_num]
+        axis = 0
+
+    return CircularBuffer(buffer_shape, axis, buffer_dtype)

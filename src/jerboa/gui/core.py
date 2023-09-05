@@ -1,9 +1,10 @@
 from typing import Any, Callable
+
 import PyQt5.QtWidgets as QtW
 from PyQt5 import QtCore
 
-from jerboa.signal import Signal
-from jerboa.thread_pool import ThreadPool
+from jerboa.core.signal import Signal
+from jerboa.core.thread_pool import ThreadPool
 
 
 class GUIThreadPool(ThreadPool):

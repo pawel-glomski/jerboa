@@ -2,9 +2,9 @@ from collections.abc import Callable
 
 import yt_dlp
 
-from jerboa.signal import Signal
-from jerboa.thread_pool import ThreadPool
-from jerboa.utils.file import JbPath
+from jerboa.core.signal import Signal
+from jerboa.core.thread_pool import ThreadPool
+from jerboa.core.file import JbPath
 from .source import MediaSource
 
 

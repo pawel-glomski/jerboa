@@ -11,10 +11,10 @@ from scipy.stats import entropy as kl_div
 from scipy.special import softmax
 
 from .analysis import AnalysisMethod, ARG_PREPARE_ANALYSIS_METHOD_FN
-from jerboa.readers import read_entire_audio
-from jerboa.timeline import FragmentedTimeline
-from jerboa.utils.logger import NULL_LOGGER
-from jerboa.utils.math import ranges_of_truth, kernel_2d_from_window
+from jerboa.media.readers import AudioReader
+from jerboa.core.timeline import FragmentedTimeline
+from jerboa.core.logger import NULL_LOGGER
+from jerboa.core.math import ranges_of_truth, kernel_2d_from_window
 
 SR = 16000
 NFFT = 256

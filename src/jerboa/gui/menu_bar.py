@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 import PyQt5.QtWidgets as QtW
 
-from jerboa.signal import Signal
+from jerboa.core.signal import Signal
 
 
 @dataclass

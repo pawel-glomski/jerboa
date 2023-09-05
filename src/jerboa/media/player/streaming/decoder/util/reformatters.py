@@ -3,7 +3,8 @@ from typing import Iterable
 import av
 from fractions import Fraction
 
-from jerboa.media import MediaType, AudioConfig, VideoConfig
+from jerboa.media import MediaType
+from jerboa.media.config import AudioConfig, VideoConfig
 
 
 class AudioReformatter:

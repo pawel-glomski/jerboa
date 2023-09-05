@@ -3,10 +3,8 @@ import re
 import spacy
 
 from typing import List
-from math import inf
 
-from jerboa.timeline import TMSection, FragmentedTimeline
-from jerboa.utils.math import ranges_of_truth
+from jerboa.core.timeline import TMSection, FragmentedTimeline
 
 TOKEN_SEPARATOR = " "
 SENTENCE_SEPARATOR = "." + TOKEN_SEPARATOR

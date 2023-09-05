@@ -1,5 +1,5 @@
 import PyQt5.QtWidgets as QtW
-from jerboa.logger import logger
+from jerboa.core import logger
 
 
 class LabelValuePair(QtW.QWidget):
