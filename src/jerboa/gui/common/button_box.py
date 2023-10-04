@@ -1,5 +1,5 @@
-import PyQt5.QtWidgets as QtW
-from PyQt5 import QtGui
+import PySide6.QtWidgets as QtW
+from PySide6 import QtGui
 
 QButtonEnum = QtW.QDialogButtonBox.StandardButton
 

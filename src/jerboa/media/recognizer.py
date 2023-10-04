@@ -3,7 +3,7 @@ from collections.abc import Callable
 import yt_dlp
 
 from jerboa.core.signal import Signal
-from jerboa.core.thread_pool import ThreadPool
+from jerboa.core.multithreading import ThreadPool
 from jerboa.core.file import JbPath
 from .source import MediaSource
 
@@ -58,9 +58,14 @@ class MediaSourceRecognizer:
             try:
                 avcontainer = av.open(media_source_path.path)
                 media_source = MediaSource.from_av_container(avcontainer)
-            except (av.error.OSError, av.error.HTTPError, av.error.ConnectionRefusedError) as err:
+            except (
+                av.error.FileNotFoundError,
+                av.error.OSError,
+                av.error.HTTPError,
+                av.error.ConnectionRefusedError,
+            ) as err:
                 recognition_error_message = str(err)
-            except av.error.InvalidDataError:  # unsupported format
+            except av.error.InvalidDataError:  # not a media file
                 if media_source_path.is_local:
                     recognition_error_message = (
                         'Format of the file "{path}" is not supported'.format(

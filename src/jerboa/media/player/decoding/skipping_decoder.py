@@ -2,12 +2,11 @@ from collections.abc import Generator
 
 from dataclasses import dataclass
 
-from jerboa.media import MediaType
-from jerboa.media.config import AudioConfig, VideoConfig, config_from_stream
+from jerboa.media.core import MediaType, AudioConfig, VideoConfig, AudioStreamInfo, VideoStreamInfo
 from .simple_decoder import SimpleDecoder, TimedFrame
 from .util.reformatters import AudioReformatter, VideoReformatter, create_reformatter
 
-MIN_SEEK_THRESHOLD = 0.25  # in seconds
+SEEK_THRESHOLD = 0.25  # in seconds
 
 
 @dataclass
@@ -20,32 +19,18 @@ class SkippingDecoder:
         self._simple_decoder = simple_decoder
         self._reformatter: AudioReformatter | VideoReformatter | None = None
 
-        if self.media_type == MediaType.AUDIO:
+        if self.stream_info.media_type == MediaType.AUDIO:
             self.decode = self._decode_audio
         else:
             self.decode = self._decode_video
 
-        self._seek_threshold = MIN_SEEK_THRESHOLD
-
     @property
-    def media_type(self) -> MediaType:
-        return self._simple_decoder.media_type
-
-    @property
-    def stream_index(self) -> int:
-        return self._simple_decoder.stream_index
-
-    @property
-    def src_media_config(self) -> AudioConfig | VideoConfig:
-        return self._simple_decoder.media_config
-
-    @property
-    def start_timepoint(self) -> float:
-        return self._simple_decoder.start_timepoint
+    def stream_info(self) -> AudioStreamInfo | VideoStreamInfo:
+        return self._simple_decoder.stream_info
 
     @property
     def seek_threshold(self) -> float:
-        return self._simple_decoder.mean_keyframe_interval
+        return max(SEEK_THRESHOLD, self._simple_decoder.get_mean_keyframe_interval())
 
     def _decode_audio(
         self,
@@ -82,14 +67,10 @@ class SkippingDecoder:
         self,
         media_config: AudioConfig | VideoConfig,
     ) -> Generator[SkippingFrame, float, None]:
-        if media_config.media_type != self.media_type:
-            raise TypeError(
-                f'Wrong media type! Expected "{self.media_type}", but got "{media_config.media_type}"'
-            )
+        assert media_config.media_type == self.stream_info.media_type
 
-        media_config = media_config or config_from_stream(self._stream)
         if self._reformatter is None or self._reformatter.config != media_config:
-            self._reformatter = create_reformatter(media_config)
+            self._reformatter = create_reformatter(media_config, self.stream_info)
         else:
             self._reformatter.reset()
 
@@ -113,6 +94,3 @@ class SkippingDecoder:
                 )
                 skip_timepoint = yield timed_frame
                 yield  # yield again to wait for the `next()` call of the for loop
-
-    def probe_keyframe_pts(self) -> list[float]:
-        return self._simple_decoder.probe_keyframe_pts()

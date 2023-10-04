@@ -1,13 +1,11 @@
 import copy
 import math
-import numpy as np
 from threading import Thread, Lock, Condition
 
 from jerboa.core.timeline import FragmentedTimeline, RangeMappingResult
-from jerboa.media import MediaType
-from jerboa.media.config import AudioConfig, VideoConfig
+from jerboa.media.core import AudioConfig, VideoConfig, AudioStreamInfo, VideoStreamInfo
 from .skipping_decoder import SkippingDecoder, SkippingFrame
-from .util.buffers import create_buffer
+from .util.buffers import JbAudioFrame, JbVideoFrame, create_buffer
 from .util.mappers import create_mapper
 
 BUFFER_DURATION = 2.5  # in seconds
@@ -15,7 +13,7 @@ BUFFER_DURATION = 2.5  # in seconds
 STOP_DECODING_SEEK_TIMEPOINT = math.nan
 
 
-class JerboaDecoder:
+class TimelineDecoder:
     def __init__(
         self,
         skipping_decoder: SkippingDecoder,
@@ -31,7 +29,7 @@ class JerboaDecoder:
 
         self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
 
-        self._seek_timepoint: None | float = skipping_decoder.start_timepoint
+        self._seek_timepoint: None | float = skipping_decoder.stream_info.start_timepoint
         self._is_done = False
 
         self._mutex = Lock()
@@ -43,8 +41,8 @@ class JerboaDecoder:
         self._dec_thread = Thread(
             target=self._decoding,
             name=(
-                f"Decoding #{self._skipping_decoder.stream_index} stream "
-                f"({self._skipping_decoder.media_type})"
+                f"Decoding #{self._skipping_decoder.stream_info.stream_index} stream "
+                f"({self._skipping_decoder.stream_info.media_type})"
             ),
             daemon=True,
         )
@@ -55,12 +53,8 @@ class JerboaDecoder:
             self.seek(STOP_DECODING_SEEK_TIMEPOINT)
 
     @property
-    def media_type(self) -> MediaType:
-        return self._skipping_decoder.media_type
-
-    @property
-    def start_timepoint(self) -> float:
-        return self._skipping_decoder.start_timepoint
+    def stream_info(self) -> AudioStreamInfo | VideoStreamInfo:
+        return self._skipping_decoder.stream_info
 
     @property
     def dst_media_config(self) -> AudioConfig | VideoConfig:
@@ -93,7 +87,8 @@ class JerboaDecoder:
             self._seek_without_lock(seek_timepoint)
 
     def _decoding(self):
-        self._seek_timepoint = self._skipping_decoder.start_timepoint  # start decoding from start
+        # start decoding from start
+        self._seek_timepoint = self._skipping_decoder.stream_info.start_timepoint
         while True:
             seek_timepoint = self._decoding__wait_for_seek()
             if seek_timepoint == STOP_DECODING_SEEK_TIMEPOINT:
@@ -154,7 +149,7 @@ class JerboaDecoder:
         self, skipping_frame: SkippingFrame, mapping_blueprint: RangeMappingResult
     ) -> bool:
         mapped_frame = self._mapper.map(skipping_frame.av_frame, mapping_blueprint)
-        if mapped_frame.duration > 0:
+        if mapped_frame.is_valid():
             with self._mutex:
                 self._buffer_not_full_or_seeking.wait_for(
                     lambda: not self._buffer.is_full() or self._seek_timepoint is not None
@@ -181,7 +176,7 @@ class JerboaDecoder:
         mapped_frame = self._mapper.map(None, None)
         with self._mutex:
             if self._seek_timepoint is None:
-                if mapped_frame.duration > 0:
+                if mapped_frame.is_valid():
                     self._buffer_not_full_or_seeking.wait_for(
                         lambda: not self._buffer.is_full() or self._seek_timepoint is not None
                     )
@@ -192,15 +187,18 @@ class JerboaDecoder:
     def is_done(self) -> bool:
         return self._is_done
 
-    def pop(self, *args) -> np.ndarray | None:
+    def pop(self, *args, timeout: float | None = None) -> JbAudioFrame | JbVideoFrame | None:
         frame = None
         with self._mutex:
-            self._buffer_not_empty_or_done.wait_for(
-                lambda: not self._buffer.is_empty() or self.is_done()
-            )
-            if not self._buffer.is_empty():
-                frame = self._buffer.pop(*args)
-                self._buffer_not_full_or_seeking.notify()
+            if self._buffer_not_empty_or_done.wait_for(
+                lambda: not self._buffer.is_empty() or self.is_done(),
+                timeout=timeout,
+            ):
+                if not self._buffer.is_empty():
+                    frame = self._buffer.pop(*args)
+                    self._buffer_not_full_or_seeking.notify()
+            else:
+                raise TimeoutError()
         return frame
 
     def get_next_timepoint(self) -> float | None:

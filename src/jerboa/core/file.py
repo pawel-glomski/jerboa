@@ -3,7 +3,7 @@ import os
 from pathlib import Path
 from dataclasses import dataclass
 
-from PyQt5.QtCore import QUrl
+from PySide6.QtCore import QUrl
 
 CACHE_DIR_ENV_VAR_NAME = "SPLE_HOME"
 DEFAULT_CACHE_DIR_PATH = Path.home() / ".jerboa/"

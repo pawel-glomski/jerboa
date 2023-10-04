@@ -7,7 +7,7 @@ from fractions import Fraction
 from pylibrb import DType, SAMPLES_AXIS, CHANNELS_AXIS, create_audio_array
 from scipy.special import expit
 
-from jerboa.media import MediaType
+from jerboa.media.core import MediaType
 
 FORMAT = av.AudioFormat("flt").planar
 assert DType == np.float32 and DType == np.dtype(av.audio.frame.format_dtypes[FORMAT.name])

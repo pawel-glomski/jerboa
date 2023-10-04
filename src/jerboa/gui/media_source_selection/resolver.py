@@ -1,5 +1,5 @@
-import PyQt5.QtWidgets as QtW
-from PyQt5.QtCore import Qt
+import PySide6.QtWidgets as QtW
+from PySide6.QtCore import Qt
 
 
 from jerboa.media.source import MediaSource, MediaStreamSource
@@ -77,10 +77,10 @@ class MediaSourceResolver(QtW.QWidget):
 
     def get_resolved_media_source(self) -> MediaSource | None:
         if self._media_source is not None:
-            self._media_source.audio.features_selected = (
+            self._media_source.audio.selected_features_index = (
                 self._audio_variant_selector.get_current_variant_index()
             )
-            self._media_source.video.features_selected = (
+            self._media_source.video.selected_features_index = (
                 self._video_variant_selector.get_current_variant_index()
             )
         return self._media_source

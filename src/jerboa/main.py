@@ -8,6 +8,11 @@ from jerboa.core.signal import Signal
 from jerboa.core.file import JbPath, PathProcessor
 from jerboa.media.source import MediaSource
 from jerboa.media.recognizer import MediaSourceRecognizer
+from jerboa.media.player.audio_player import AudioPlayer
+from jerboa.media.player.video_player import VideoPlayer, JbVideoFrame
+from jerboa.media.player.media_player import MediaPlayer
+
+from jerboa.core.multithreading import PyThreadPool, PyThreadSpawner
 
 
 class Container(containers.DeclarativeContainer):
@@ -25,23 +30,45 @@ class Container(containers.DeclarativeContainer):
     #                                     Core                                     #
     # ---------------------------------------------------------------------------- #
 
-    thread_pool = providers.Singleton(gui.core.GUIThreadPool)
-
-    # audio_player = providers.Singleton(MediaPlayer)
-    # video_player = providers.Singleton(MediaPlayer)
-    # media_player = providers.Singleton(
-    #     MediaPlayer,
-    #     audio_player=audio_player,
-    #     video_player=video_player,
-    # )
-
-    # ---------------------------------------------------------------------------- #
-    #                                    signals                                   #
-    # ---------------------------------------------------------------------------- #
+    # ---------------------------------- signals --------------------------------- #
 
     media_source_selected_signal = providers.Singleton(
         gui.core.GUISignal,
         MediaSource,
+    )
+
+    media_player_start_signal = providers.Singleton(gui.core.GUISignal)
+    media_player_resume_signal = providers.Singleton(gui.core.GUISignal)
+    media_player_pause_signal = providers.Singleton(gui.core.GUISignal)
+
+    # ------------------------------ Multithreading ------------------------------ #
+
+    thread_spawner = providers.Singleton(PyThreadSpawner)  # gui.core.GUIThreadSpawner)
+    thread_pool = providers.Singleton(
+        PyThreadPool,  # gui.core.GUIThreadPool
+        workers=8,
+    )
+
+    # ------------------------------- media player ------------------------------- #
+
+    media_player = providers.Singleton(
+        MediaPlayer,
+        audio_player=providers.Singleton(
+            AudioPlayer,
+        ),
+        video_player=providers.Singleton(
+            VideoPlayer,
+            video_frame_update_signal=providers.Factory(
+                gui.core.GUISignal,
+                JbVideoFrame,
+            ),
+            thread_spawner=thread_spawner,
+        ),
+        thread_pool=thread_pool,
+        ready_to_play_signal=providers.Factory(
+            Signal,
+        ),
+        media_source_selected_signal=media_source_selected_signal,
     )
 
     # ---------------------------------------------------------------------------- #
@@ -63,8 +90,6 @@ class Container(containers.DeclarativeContainer):
     )
 
     # ----------------------- media source selection dialog ---------------------- #
-
-    # ------------------------------- details panel ------------------------------ #
 
     gui_media_source_selection_dialog = providers.Singleton(
         gui.media_source_selection.dialog.MediaSourceSelectionDialog,
@@ -152,13 +177,10 @@ class Container(containers.DeclarativeContainer):
         ),
     )
 
-    # ----------------------------- main view stack ---------------------------- #
-
     # -------------------------------- player view ------------------------------- #
 
     gui_player_view_canvas = providers.Singleton(
         gui.player_view.Canvas,
-        # frame_changed_signal=gui_video_player.frame_changed,
     )
     gui_player_view_timeline = providers.Singleton(
         gui.player_view.Timeline,
@@ -169,7 +191,11 @@ class Container(containers.DeclarativeContainer):
         gui.player_view.PlayerView,
         canvas=gui_player_view_canvas,
         timeline=gui_player_view_timeline,
+        media_source_selected_signal=media_source_selected_signal,
+        video_frame_update_signal=media_player.provided.video_frame_update_signal,
     )
+
+    # ----------------------------- main view stack ---------------------------- #
 
     gui_main_widget = providers.Singleton(
         gui.main_view_stack.MainViewStack,

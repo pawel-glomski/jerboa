@@ -1,6 +1,6 @@
-import PyQt5.QtWidgets as QtW
-from PyQt5 import QtGui
-from PyQt5.QtCore import Qt
+import PySide6.QtWidgets as QtW
+from PySide6 import QtGui
+from PySide6.QtCore import Qt
 
 
 from jerboa.core.signal import Signal
@@ -24,7 +24,7 @@ class MediaSourceSelectionDialog(QtW.QDialog):
         recognizer: MediaSourceRecognizer,
         media_source_selected_signal: Signal,
         parent: QtW.QWidget | None = None,
-        flags: Qt.WindowFlags | Qt.WindowType = Qt.WindowType.Dialog,
+        flags: Qt.WindowType = Qt.WindowType.Dialog,
     ) -> None:
         super().__init__(parent, flags)
         self.setMinimumSize(*min_size)
@@ -88,6 +88,8 @@ class MediaSourceSelectionDialog(QtW.QDialog):
         self._button_box.reset()
 
     def accept(self) -> None:
+        super().accept()
+
         media_source = self._media_source
         if not self._media_source.is_resolved:
             media_source = self._panel_media_source_resolver.get_resolved_media_source()
@@ -95,8 +97,6 @@ class MediaSourceSelectionDialog(QtW.QDialog):
             assert media_source.is_resolved
 
         self._media_source_selected_signal.emit(media_source)
-
-        super().accept()
 
     def _on_media_source_path_selected(self, media_source_path: JbPath) -> None:
         self._button_box.reset()

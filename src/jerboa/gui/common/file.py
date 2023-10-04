@@ -1,7 +1,7 @@
 from functools import partial
 
-import PyQt5.QtWidgets as QtW
-from PyQt5.QtCore import QTimer
+import PySide6.QtWidgets as QtW
+from PySide6.QtCore import QTimer
 
 from jerboa.core.signal import Signal
 from jerboa.core.file import PathProcessor
@@ -42,7 +42,7 @@ class PathSelector(QtW.QWidget):
         self._path_input.textChanged.connect(lambda _: path_modified_signal.emit())
 
         separator = QtW.QFrame()
-        separator.setFrameShape(QtW.QFrame.VLine)
+        separator.setFrameShape(QtW.QFrame.Shape.VLine)
 
         layout = QtW.QHBoxLayout()
         layout.addWidget(self._select_local_file_button)

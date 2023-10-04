@@ -3,17 +3,44 @@ from collections import deque
 from dataclasses import dataclass
 
 from jerboa.core.circular_buffer import CircularBuffer
-from jerboa.media import MediaType, standardized_audio as std_audio
-from jerboa.media.config import AudioConfig, VideoConfig
+from jerboa.media import standardized_audio as std_audio
+from jerboa.media.core import MediaType, AudioConfig, VideoConfig
 
 AUDIO_BUFFER_SIZE_MODIFIER = 1.2
 
 
 @dataclass
-class NpFrame:
-    timepoint: float
-    duration: float
-    data: np.ndarray
+class JbFrame:
+    timepoint: float | None = None
+    duration: float | None = None
+
+    def is_valid(self) -> bool:
+        return (self.timepoint is not None and self.timepoint >= 0) and (
+            self.duration is not None and self.duration > 0
+        )
+
+
+@dataclass
+class JbAudioFrame(JbFrame):
+    signal: np.ndarray | None = None
+
+    def is_valid(self) -> bool:
+        return super().is_valid() and self.signal is not None and self.signal.size > 0
+
+
+@dataclass
+class JbVideoFrame(JbFrame):
+    width: int | None = None
+    height: int | None = None
+    planes: list[bytes] | None = None
+
+    def is_valid(self) -> bool:
+        return (
+            super().is_valid()
+            and all(attr is not None and attr > 0 for attr in [self.width, self.height])
+            and self.planes is not None
+            and len(self.planes) > 0
+        )
 
 
 class AudioBuffer:
@@ -38,18 +65,17 @@ class AudioBuffer:
         # self._audio_last_sample[:] = 0
         self._timepoint = None
 
-    def put(self, mapped_audio_frame: NpFrame) -> None:
-        assert mapped_audio_frame.duration > 0
-        assert mapped_audio_frame.data.size > 0
+    def put(self, audio_frame: JbAudioFrame) -> None:
+        assert audio_frame.is_valid()
         assert not self.is_full()
 
         if self._timepoint is None:
-            self._timepoint = mapped_audio_frame.timepoint
+            self._timepoint = audio_frame.timepoint
 
-        self._audio.put(mapped_audio_frame.data)
+        self._audio.put(audio_frame.signal)
         # self._audio_last_sample[:] = self._audio[-1]
 
-    def pop(self, samples_num: int) -> np.ndarray:
+    def pop(self, samples_num: int) -> JbAudioFrame:
         assert not self.is_empty()
 
         all_samples_num = len(self._audio)
@@ -58,8 +84,14 @@ class AudioBuffer:
         audio = self._audio.pop(pop_samples_num)
         audio_duration = pop_samples_num / self._audio_config.sample_rate
 
+        frame = JbAudioFrame(
+            timepoint=self._timepoint,
+            duration=audio_duration,
+            signal=audio,
+        )
+
         self._timepoint += audio_duration
-        return audio
+        return frame
 
     def get_next_timepoint(self) -> float | None:
         return self._timepoint
@@ -76,7 +108,7 @@ class VideoBuffer:
         self._max_duration = max_duration
         self._duration = 0.0
 
-        self._frames = deque[NpFrame]()
+        self._frames = deque[JbVideoFrame]()
 
     def __len__(self) -> int:
         return len(self._frames)
@@ -89,22 +121,24 @@ class VideoBuffer:
         self._frames.clear()
         self._duration = 0.0
 
-    def put(self, mapped_video_frame: NpFrame) -> None:
+    def put(self, video_frame: JbVideoFrame) -> None:
+        assert video_frame.is_valid()
         assert not self.is_full()
-        assert mapped_video_frame.duration > 0
 
-        self._frames.append(mapped_video_frame)
-        self._duration += mapped_video_frame.duration
+        self._frames.append(video_frame)
+        self._duration += video_frame.duration
 
-    def pop(self) -> np.ndarray:
+    def pop(self) -> JbVideoFrame:
         assert not self.is_empty()
 
         frame = self._frames.popleft()
         self._duration -= frame.duration
         self._duration *= not self.is_empty()  # ensure `_duration == 0` when `is_empty() == true`
-        return frame.data
+        return frame
 
     def get_next_timepoint(self) -> float:
+        assert not self.is_empty()
+
         return self._frames[0].timepoint
 
     def is_empty(self) -> bool:

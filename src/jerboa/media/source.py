@@ -3,7 +3,7 @@ from typing import Optional
 from bisect import bisect_right
 from dataclasses import dataclass
 
-from jerboa.media import MediaType
+from jerboa.media.core import MediaType
 
 DEFAULT_SAMPLE_RATE = 44100
 DEFAULT_RESOLUTION = 720
@@ -226,7 +226,7 @@ class MediaStreamSource:
             self._default_features_index = None
 
         # there is nothing to choose from if there is only 1 variant, so the source is resolved
-        self.features_selected = 0 if len(self._features_list) == 1 else None
+        self.selected_features_index = 0 if len(self._features_list) == 1 else None
 
     @property
     def media_type(self) -> MediaType:
@@ -234,11 +234,11 @@ class MediaStreamSource:
 
     @property
     def is_available(self) -> bool:
-        return self.features_selected is not None or len(self._features_list) > 0
+        return self.selected_features_index is not None or len(self._features_list) > 0
 
     @property
     def is_resolved(self) -> bool:
-        return self.features_selected is not None or len(self._features_list) == 0
+        return self.selected_features_index is not None or len(self._features_list) == 0
 
     @property
     def features_list(self) -> list[AudioFeatures] | list[VideoFeatures]:
@@ -250,8 +250,8 @@ class MediaStreamSource:
 
     @property
     def selected_variant_group(self) -> list[AudioSourceVariant] | list[VideoSourceVariant] | None:
-        if self.features_selected is not None:
-            return self._variants_by_features[self._features_list[self.features_selected]]
+        if self.selected_features_index is not None:
+            return self._variants_by_features[self._features_list[self.selected_features_index]]
         return None
 
     @staticmethod

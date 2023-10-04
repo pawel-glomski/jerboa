@@ -1,4 +1,4 @@
-import PyQt5.QtWidgets as QtW
+import PySide6.QtWidgets as QtW
 
 from .player_view import PlayerView
 
