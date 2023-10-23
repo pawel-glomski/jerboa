@@ -1,20 +1,20 @@
 from concurrent.futures import ThreadPoolExecutor
 
+from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadPool
 from jerboa.core.timeline import FragmentedTimeline, TMSection
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig
 from jerboa.media.source import MediaSource
 from jerboa.media.player.decoding.timeline_decoder import TimelineDecoder
-from jerboa.media.player.decoding.skipping_decoder import SkippingDecoder, SimpleDecoder
 from .audio_player import AudioPlayer
 from .video_player import VideoPlayer
 
 # as long as all componenets are known at "compile-time", it can be a constant global
 # (this is not the case with the audio config, which is platform/audio device dependent)
-VIDEO_CONFIG = VideoConfig(
-    format=VideoConfig.PixelFormat.RGBA8888,
-)
+# VIDEO_CONFIG = VideoConfig(
+#     format=VideoConfig.PixelFormat.RGBA8888,
+# )
 
 # TODO: remove me when the analysis module is integrated
 DBG_TIMELINE = FragmentedTimeline(
@@ -40,7 +40,7 @@ class MediaPlayer:
         self._current_media_source: MediaSource | None = None
 
         media_source_selected_signal.connect(self._on_media_source_selected)
-        video_player.player_stalled_signal.connect()
+        video_player.player_stalled_signal.connect(self._on_player_stalled)
 
     @property
     def ready_to_play_signal(self) -> Signal:
@@ -53,7 +53,9 @@ class MediaPlayer:
     def _on_media_source_selected(self, media_source: MediaSource):
         assert media_source.is_resolved
 
-        # self._audio_player.stop()
+        logger.info(f'MediaPlayer: Preparing to play "{media_source.title}"')
+
+        self._audio_player.stop()
         self._video_player.stop()
 
         def prepare_players():
@@ -105,3 +107,6 @@ class MediaPlayer:
             dst_media_config=VIDEO_CONFIG,
             init_timeline=DBG_TIMELINE,
         )
+
+    def _on_player_stalled(self) -> None:
+        ...

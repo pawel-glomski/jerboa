@@ -1,31 +1,134 @@
+from collections.abc import Generator
+
 import copy
 import math
 from threading import Thread, Lock, Condition
+from dataclasses import dataclass
 
 from jerboa.core.timeline import FragmentedTimeline, RangeMappingResult
-from jerboa.media.core import AudioConfig, VideoConfig, AudioStreamInfo, VideoStreamInfo
-from .skipping_decoder import SkippingDecoder, SkippingFrame
-from .util.buffers import JbAudioFrame, JbVideoFrame, create_buffer
-from .util.mappers import create_mapper
+from jerboa.media.core import (
+    MediaType,
+    AudioConfig,
+    VideoConfig,
+    AudioConstraints,
+)
+from jerboa.media import standardized_audio as std_audio
+from .decoder import TimedFrame
+
+from .buffer import JbAudioFrame, JbVideoFrame, create_buffer
+from .reformatter import AudioReformatter, VideoReformatter
+from .mapper import create_mapper
+
+SEEK_THRESHOLD = 0.25  # in seconds
 
 BUFFER_DURATION = 2.5  # in seconds
 
 STOP_DECODING_SEEK_TIMEPOINT = math.nan
 
 
+@dataclass
+class SkippingFrame(TimedFrame):
+    skip_aware_beg_timepoint: float
+
+
+class SkippingDecoder:
+    def __init__(self, simple_decoder):
+        self._simple_decoder = simple_decoder
+        self._reformatter: AudioReformatter | VideoReformatter | None = None
+
+        if self.stream_info.media_type == MediaType.AUDIO:
+            self.decode = self._decode_audio
+        else:
+            self.decode = self._decode_video
+
+    @property
+    def seek_threshold(self) -> float:
+        return max(SEEK_THRESHOLD, self._simple_decoder.get_mean_keyframe_interval())
+
+    def _decode_audio(
+        self,
+        seek_timepoint: float,
+        media_config: AudioConfig,
+    ) -> Generator[SkippingFrame, float, None]:
+        self._init_reformatter(media_config)
+        reformatter: AudioReformatter = self._reformatter
+
+        skip_timepoint = seek_timepoint
+        for timed_frame in self._simple_decoder.decode(seek_timepoint):
+            if timed_frame is None:
+                reformatted_frames_src = reformatter.flush()
+            elif timed_frame.end_timepoint > skip_timepoint:
+                reformatted_frames_src = reformatter.reformat(timed_frame.av_frame)
+            else:
+                reformatter.reset()
+                reformatted_frames_src = []
+
+            for reformatted_frame in reformatted_frames_src:
+                skipping_frame = SkippingFrame(
+                    reformatted_frame,
+                    beg_timepoint=reformatted_frame.time,
+                    end_timepoint=(
+                        reformatted_frame.time
+                        + reformatted_frame.samples / reformatted_frame.sample_rate
+                    ),
+                    skip_aware_beg_timepoint=max(skip_timepoint, reformatted_frame.time),
+                )
+                skip_timepoint = yield skipping_frame
+                yield  # wait for the `next()` call of the for loop
+
+    def _init_reformatter(
+        self,
+        media_config: AudioConfig | VideoConfig,
+    ) -> Generator[SkippingFrame, float, None]:
+        assert media_config.media_type == self.stream_info.media_type
+
+        if self._reformatter is None or self._reformatter.config != media_config:
+            self._reformatter = create_reformatter(media_config, self.stream_info)
+        else:
+            self._reformatter.reset()
+
+    def _decode_video(
+        self,
+        seek_timepoint: float,
+        media_config: VideoConfig,
+    ) -> Generator[SkippingFrame, float, None]:
+        self._init_reformatter(media_config)
+        reformatter: VideoReformatter = self._reformatter
+
+        skip_timepoint = seek_timepoint
+        for timed_frame in self._simple_decoder.decode(seek_timepoint):
+            if timed_frame is not None and timed_frame.end_timepoint > skip_timepoint:
+                reformatted_av_frame = reformatter.reformat(timed_frame.av_frame)
+                timed_frame = SkippingFrame(
+                    reformatted_av_frame,
+                    beg_timepoint=timed_frame.beg_timepoint,
+                    end_timepoint=timed_frame.end_timepoint,
+                    skip_aware_beg_timepoint=max(skip_timepoint, timed_frame.beg_timepoint),
+                )
+                skip_timepoint = yield timed_frame
+                yield  # yield again to wait for the `next()` call of the for loop
+
+
 class TimelineDecoder:
     def __init__(
         self,
         skipping_decoder: SkippingDecoder,
-        dst_media_config: AudioConfig | VideoConfig,
+        output_constraints: AudioConstraints,
         init_timeline: FragmentedTimeline = None,
     ):
         self._skipping_decoder = skipping_decoder
-        self._dst_media_config = dst_media_config
+        self._output_constraints = output_constraints
 
-        self._mapper = create_mapper(dst_media_config)
-        self._buffer = create_buffer(dst_media_config, BUFFER_DURATION)
-        self._intermediate_media_config = self._mapper.internal_media_config
+        self._output_media_config = create_output_media_config(
+            skipping_decoder.stream_info,
+            output_constraints,
+        )
+        self._intermediate_media_config = create_intermediate_media_config(
+            self._output_media_config
+        )
+
+        self._mapper = create_mapper(self._intermediate_media_config)
+        self._buffer = create_buffer(self._output_media_config, BUFFER_DURATION)
 
         self._timeline = FragmentedTimeline() if init_timeline is None else init_timeline
 
@@ -53,12 +156,8 @@ class TimelineDecoder:
             self.seek(STOP_DECODING_SEEK_TIMEPOINT)
 
     @property
-    def stream_info(self) -> AudioStreamInfo | VideoStreamInfo:
-        return self._skipping_decoder.stream_info
-
-    @property
     def dst_media_config(self) -> AudioConfig | VideoConfig:
-        return self._dst_media_config
+        return self._output_media_config
 
     def update_timeline(self, updated_timeline: FragmentedTimeline):
         assert updated_timeline.time_scope > self._timeline.time_scope
@@ -85,6 +184,20 @@ class TimelineDecoder:
     def seek(self, seek_timepoint: float):
         with self._mutex:
             self._seek_without_lock(seek_timepoint)
+
+    def apply_new_output_media_constraints(
+        self,
+        constraints: AudioConstraints,
+        start_timepoint: float,
+    ):
+        with self._mutex:
+            output_media_config = create_output_media_config(
+                self._skipping_decoder.stream_info,
+                constraints,
+            )
+            if self._output_media_config != output_media_config:
+                self._output_media_config = output_media_config
+                self._seek_without_lock(start_timepoint)
 
     def _decoding(self):
         # start decoding from start
@@ -146,9 +259,9 @@ class TimelineDecoder:
         )
 
     def _decoding__try_to_map_and_put_frame(
-        self, skipping_frame: SkippingFrame, mapping_blueprint: RangeMappingResult
+        self, skipping_frame: SkippingFrame, mapping_scheme: RangeMappingResult
     ) -> bool:
-        mapped_frame = self._mapper.map(skipping_frame.av_frame, mapping_blueprint)
+        mapped_frame = self._mapper.map(skipping_frame.av_frame, mapping_scheme)
         if mapped_frame.is_valid():
             with self._mutex:
                 self._buffer_not_full_or_seeking.wait_for(

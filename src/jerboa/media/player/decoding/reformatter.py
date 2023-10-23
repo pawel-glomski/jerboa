@@ -4,56 +4,38 @@ import av
 import errno
 from fractions import Fraction
 
-from jerboa.media.core import MediaType, AudioConfig, VideoConfig, AudioStreamInfo, VideoStreamInfo
-
-
-def jb_to_av_pixel_format(jb_format: VideoConfig.PixelFormat) -> str:
-    match jb_format:
-        case VideoConfig.PixelFormat.RGBA8888:
-            return "rgba"
-        case _:
-            raise NotImplementedError()
+from jerboa.media.core import AudioConfig, VideoConfig
+from jerboa.media import jb_to_av
 
 
 class AudioReformatter:
-    def __init__(self, config: AudioConfig, _: AudioStreamInfo):
+    def __init__(self, config: AudioConfig):
         self._config = config
         if config.frame_duration:
-            self._frame_size = round(config.frame_duration * self._config.sample_rate)
+            self._frame_size = round(config.frame_duration * config.sample_rate)
         else:
             self._frame_size = None
-        self._resampler = av.AudioResampler(
-            format=self._config.format,
-            layout=self._config.layout,
-            rate=self._config.sample_rate,
-            frame_size=self._frame_size,
-        )
-        self._has_samples = False
+
+        self._has_samples = True  # set to True, to trigger resampler creation at `reset()``
         self.reset()
 
     def reset(self) -> None:
         if self._has_samples:
             self._resampler = av.AudioResampler(
-                format=self._config.format,
-                layout=self._config.layout,
+                format=jb_to_av.audio_sample_format(self._config.sample_format),
+                layout=jb_to_av.audio_channel_layout(self._config.channel_layout),
                 rate=self._config.sample_rate,
                 frame_size=self._frame_size,
             )
             self._has_samples = False
 
-    @property
-    def config(self) -> AudioConfig:
-        return self._config
-
-    def reformat(self, frame: av.AudioFrame | None) -> Iterable[av.AudioFrame]:
+    def reformat(self, frame: av.AudioFrame | None) -> list[av.AudioFrame]:
         if frame is not None:
             # remove this assert when av.AudioResampler if fixed
             assert frame.time_base == Fraction(1, frame.sample_rate)
             self._has_samples = True
 
-        for reformatted_frame in self._resampler.resample(frame):
-            if reformatted_frame is not None:
-                yield reformatted_frame
+        return self._resampler.resample(frame)
 
     def flush(self) -> Iterable[av.AudioFrame]:
         if self._has_samples:
@@ -64,9 +46,8 @@ class AudioReformatter:
 
 
 class VideoReformatter:
-    def __init__(self, config: VideoConfig, stream_info: VideoStreamInfo):
+    def __init__(self, config: VideoConfig):
         self._config = config
-        self._stream_info = stream_info
         self._reformatter: Callable[[av.VideoFrame], av.VideoFrame] | None = None
 
     @property
@@ -139,14 +120,3 @@ class VideoReformatter:
                     raise
                 break
         return None
-
-
-def create_reformatter(
-    media_config: AudioConfig | VideoConfig,
-    stream_info: AudioStreamInfo | VideoStreamInfo,
-) -> AudioReformatter | VideoReformatter:
-    assert media_config.media_type == stream_info.media_type
-
-    if media_config.media_type == MediaType.AUDIO:
-        return AudioReformatter(media_config, stream_info)
-    return VideoReformatter(media_config, stream_info)

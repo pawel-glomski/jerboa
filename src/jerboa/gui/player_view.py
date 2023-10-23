@@ -9,15 +9,37 @@ from jerboa.media.player.video_player import JbVideoFrame
 
 
 class Canvas(QtW.QLabel):
-    def __init__(self):
+    def __init__(
+        self,
+        video_frame_update_signal: Signal,
+    ):
         super().__init__()
+
+        self._current_pixmap: QtGui.QPixmap | None = None
 
         self.setMinimumHeight(50)
         self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.setFrameShape(QtW.QFrame.Shape.StyledPanel)
 
-        self._current_pixmap: QtGui.QPixmap | None = None
+        video_frame_update_signal.connect(self._on_frame_update)
+
+    def _on_frame_update(self, frame: JbVideoFrame, image_format: VideoConfig.PixelFormat) -> None:
+        image = QtGui.QImage(
+            frame.data.tobytes(),
+            frame.data.shape[1],
+            frame.data.shape[0],
+            jb_to_qt_image_format[image_format],
+        )
+        self._current_pixmap = QtGui.QPixmap.fromImage(image)
+        self.setPixmap(
+            self._current_pixmap.scaled(
+                self.size(),
+                aspectMode=Qt.AspectRatioMode.KeepAspectRatio,
+                mode=Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+        print("displayed")
 
     def resizeEvent(self, event: QtGui.QResizeEvent):
         super().resizeEvent(event)
@@ -46,8 +68,6 @@ class PlayerView(QtW.QWidget):
         self,
         canvas: Canvas,
         timeline: Timeline,
-        media_source_selected_signal: Signal,
-        video_frame_update_signal: Signal,
     ):
         super().__init__()
 
@@ -73,28 +93,8 @@ class PlayerView(QtW.QWidget):
         layout.setContentsMargins(QtCore.QMargins())
         self.setLayout(layout)
 
-        video_frame_update_signal.connect(self._on_frame_update)
-        media_source_selected_signal.connect()
-
     def _add_widget_to_splitter(self, widget: QtW.QWidget, stretch_factor: int, collapsible: bool):
         idx = self._splitter.count()
         self._splitter.addWidget(widget)
         self._splitter.setStretchFactor(idx, stretch_factor)
         self._splitter.setCollapsible(idx, collapsible)
-
-    def _on_frame_update(self, frame: JbVideoFrame, image_format: VideoConfig.PixelFormat) -> None:
-        image = QtGui.QImage(
-            frame.data.tobytes(),
-            frame.data.shape[1],
-            frame.data.shape[0],
-            jb_to_qt_image_format[image_format],
-        )
-        self._current_pixmap = QtGui.QPixmap.fromImage(image)
-        self.setPixmap(
-            self._current_pixmap.scaled(
-                self.size(),
-                aspectMode=Qt.AspectRatioMode.KeepAspectRatio,
-                mode=Qt.TransformationMode.SmoothTransformation,
-            )
-        )
-        print("displayed")

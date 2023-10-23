@@ -33,9 +33,9 @@ class MediaSourceRecognizer:
         self._accepting_jobs = True
 
     def stop_jobs(self) -> None:
-        # this would have to be lock protected if it was to support multi-threaded usage, _context_id
-        # would also have to be client-specific, so only jobs of a certain client would be stopped,
-        # but currently multi-threaded usage is not needed
+        # this would have to be lock protected if it was to support multi-threaded usage,
+        # _context_id would also have to be client-specific, so only jobs of a certain client would
+        # be stopped, but currently multi-threaded usage is not needed
         self._accepting_jobs = False
         self._context_id += 1
 

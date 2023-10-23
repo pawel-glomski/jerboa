@@ -3,7 +3,7 @@ from collections import deque
 from dataclasses import dataclass
 
 from jerboa.core.circular_buffer import CircularBuffer
-from jerboa.media import standardized_audio as std_audio
+from jerboa.media import jb_to_av, standardized_audio as std_audio
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig
 
 AUDIO_BUFFER_SIZE_MODIFIER = 1.2
@@ -165,13 +165,13 @@ def create_audio_circular_buffer(
     if max_duration is None:
         max_duration = audio_config.frame_duration
 
-    buffer_dtype = std_audio.get_format_dtype(audio_config.format)
+    buffer_dtype = jb_to_av.audio_sample_format_dtype(audio_config.sample_format)
     buffer_length = int(max_duration * audio_config.sample_rate * AUDIO_BUFFER_SIZE_MODIFIER)
-    if audio_config.format.is_planar:
-        buffer_shape = [audio_config.channels_num, buffer_length]
+    if audio_config.sample_format.is_planar:
+        buffer_shape = [audio_config.channel_layout.channels_num, buffer_length]
         axis = 1
     else:
-        buffer_shape = [buffer_length, audio_config.channels_num]
+        buffer_shape = [buffer_length, audio_config.channel_layout.channels_num]
         axis = 0
 
     return CircularBuffer(buffer_shape, axis, buffer_dtype)

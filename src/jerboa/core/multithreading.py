@@ -4,6 +4,8 @@ from abc import ABC, abstractmethod
 from threading import Thread, Lock
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as TimeoutErrorTPE, wait
 
+from jerboa.core.logger import logger
+
 
 class ThreadPool(ABC):
     @abstractmethod
@@ -32,7 +34,15 @@ class PyThreadPool(ThreadPool):
 
     def start(self, job: Callable, *args, **kwargs):
         try:
-            wait([self._thread_pool.submit(job, *args, **kwargs)], timeout=0)
+
+            def worker():
+                try:
+                    job(*args, **kwargs)
+                except Exception as e:
+                    logger.exception(e)
+                    raise
+
+            wait([self._thread_pool.submit(worker)], timeout=0)
         except TimeoutErrorTPE:
             pass
 

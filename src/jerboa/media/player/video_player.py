@@ -37,19 +37,19 @@ class PlayerState(Enum):
     PLAYING = auto()
 
 
-class StopPlayer(Exception):
+class StopPlayerTask(Exception):
     ...
 
 
-class SuspendPlaying(Exception):
+class SuspendPlayerTask(Exception):
     ...
 
 
-class ResumePlaying(Exception):
+class ResumePlayerTask(Exception):
     ...
 
 
-class SeekToTimepoint(Exception):
+class TimepointSeekTask(Exception):
     def __init__(self, timepoint: float):
         super().__init__()
         self._timepoint = timepoint
@@ -97,11 +97,11 @@ class VideoPlayer:
     # def has_media(self) -> bool:
     #     return self._state in [PlayerState.PLAYING, PlayerState.SUSPENDED]
 
-    def stop(self, wait: bool) -> None:
+    def stop(self, wait: bool = False) -> None:
         with self._mutex:
             self._tasks.clear()
             if self._state != PlayerState.STOPPED:
-                self._tasks.append(StopPlayer())
+                self._tasks.append(StopPlayerTask())
                 self._new_tasks_added.notify()
                 assert not wait or self._state_changed.wait_for(
                     lambda: self._state == PlayerState.STOPPED, timeout=2 * TIMEOUT_TIME
@@ -119,14 +119,14 @@ class VideoPlayer:
             with self._mutex:
                 self._state = PlayerState.STOPPED
                 self._state_changed.notify_all()
-            if not isinstance(e, StopPlayer):
+            if not isinstance(e, StopPlayerTask):
                 raise
 
     def _playback_seek_loop(self, decoder: TimelineDecoder) -> None:
         while True:
             try:
                 self._playback_loop(decoder)
-            except SeekToTimepoint as seek:
+            except TimepointSeekTask as seek:
                 decoder.seek(seek_timepoint=seek.timepoint)
 
     def _playback_loop(self, decoder: TimelineDecoder):
@@ -159,9 +159,9 @@ class VideoPlayer:
                 task = self._tasks.pop()
                 try:
                     raise task
-                except ResumePlaying:
+                except ResumePlayerTask:
                     self._state = PlayerState.PLAYING
-                except SuspendPlaying:
+                except SuspendPlayerTask:
                     self._state = PlayerState.SUSPENDED
 
     def _sync_to_frame(self, frame: JbVideoFrame) -> bool:
@@ -176,10 +176,10 @@ class VideoPlayer:
         return False
 
     def suspend(self) -> None:
-        self._put_task_with_lock(SuspendPlaying())
+        self._put_task_with_lock(SuspendPlayerTask())
 
     def resume(self) -> None:
-        self._put_task_with_lock(ResumePlaying())
+        self._put_task_with_lock(ResumePlayerTask())
 
     def toggle_suspend_resume(self) -> None:
         if self._state == PlayerState.PLAYING:
@@ -188,7 +188,7 @@ class VideoPlayer:
             self.resume()
 
     def seek(self, timepoint: float):
-        self._put_task_with_lock(SeekToTimepoint(timepoint))
+        self._put_task_with_lock(TimepointSeekTask(timepoint))
 
     def _put_task_with_lock(self, task: Exception):
         with self._mutex:
