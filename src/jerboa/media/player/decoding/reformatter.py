@@ -46,7 +46,9 @@ class VideoReformatter:
         self._reformatter: Callable[[av.VideoFrame], av.VideoFrame] | None = None
 
     def reset(self) -> None:
-        ...
+        # just like in the case of the AudioReformatter, filter graph does not accept frames after
+        # the flushing frame (None), thus we must recreate it each time.
+        self._reformatter = None
 
     def reformat(self, frame: av.VideoFrame | None) -> av.VideoFrame:
         if self._reformatter is None:
