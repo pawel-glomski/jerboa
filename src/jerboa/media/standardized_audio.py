@@ -12,7 +12,6 @@ from pylibrb import (  # pylint: disable=unused-import
 )
 
 from jerboa.media.core import AudioConstraints
-from jerboa.media import jb_to_av
 
 
 SAMPLE_FORMAT_JB = AudioConstraints.SampleFormat.F32
@@ -61,13 +60,13 @@ def get_from_frame(frame: av.AudioFrame) -> np.ndarray:
     return frame.to_ndarray()
 
 
-def to_real_audio(audio: np.ndarray, sample_format_jb: AudioConstraints.SampleFormat) -> np.ndarray:
-    if sample_format_jb.is_packed:
+def reformat(audio: np.ndarray, wanted_dtype: np.dtype, packed: bool = False) -> np.ndarray:
+    if packed:
         audio = audio.T.reshape((-2, 2))
 
-    wanted_dtype = jb_to_av.audio_sample_format_dtype(sample_format_jb)
     if wanted_dtype != DType:
         assert np.issubdtype(DType, np.floating)
+
         wanted_dtype_info = np.iinfo(wanted_dtype)
         if wanted_dtype_info.min >= 0:
             audio += 1.0

@@ -6,7 +6,7 @@ from jerboa.core.multithreading import ThreadPool
 from jerboa.core.timeline import FragmentedTimeline, TMSection
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig
 from jerboa.media.source import MediaSource
-from jerboa.media.player.decoding.timeline_decoder import TimelineDecoder
+from jerboa.media.player.decoding.decoder import TimelineDecoder
 from .audio_player import AudioPlayer
 from .video_player import VideoPlayer
 
@@ -17,11 +17,11 @@ from .video_player import VideoPlayer
 # )
 
 # TODO: remove me when the analysis module is integrated
-DBG_TIMELINE = FragmentedTimeline(
-    TMSection(0, 5, modifier=0.5),
-    TMSection(5, 15, modifier=0.0),
-    TMSection(15, float("inf"), modifier=1.5),
-)
+# DBG_TIMELINE = FragmentedTimeline(
+#     TMSection(0, 5, modifier=0.5),
+#     TMSection(5, 15, modifier=0.0),
+#     TMSection(15, float("inf"), modifier=1.5),
+# )
 
 
 class MediaPlayer:

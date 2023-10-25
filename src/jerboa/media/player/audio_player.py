@@ -6,7 +6,7 @@ import PySide6.QtCore as QtC
 
 from jerboa.core.signal import Signal
 from jerboa.media.core import MediaType, AudioConfig, AudioConstraints
-from .decoding.timeline_decoder import TimelineDecoder
+from .decoding.decoder import TimelineDecoder
 
 # from jerboa.core.timeline import FragmentedTimeline
 

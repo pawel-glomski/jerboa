@@ -10,7 +10,9 @@ from jerboa.media import jb_to_av
 
 class AudioReformatter:
     def __init__(self, config: AudioConfig):
-        self._config = config
+        self._sample_rate = config.sample_rate
+        self._av_format = jb_to_av.audio_sample_format(config.sample_format)
+        self._av_channel_layout = jb_to_av.audio_channel_layout(config.channel_layout)
         if config.frame_duration:
             self._frame_size = round(config.frame_duration * config.sample_rate)
         else:
@@ -21,13 +23,13 @@ class AudioReformatter:
 
     def reset(self) -> None:
         if self._has_samples:
+            self._has_samples = False
             self._resampler = av.AudioResampler(
-                format=jb_to_av.audio_sample_format(self._config.sample_format),
-                layout=jb_to_av.audio_channel_layout(self._config.channel_layout),
-                rate=self._config.sample_rate,
+                format=self._av_format,
+                layout=self._av_channel_layout,
+                rate=self._sample_rate,
                 frame_size=self._frame_size,
             )
-            self._has_samples = False
 
     def reformat(self, frame: av.AudioFrame | None) -> list[av.AudioFrame]:
         if frame is not None:
@@ -37,25 +39,14 @@ class AudioReformatter:
 
         return self._resampler.resample(frame)
 
-    def flush(self) -> Iterable[av.AudioFrame]:
-        if self._has_samples:
-            reformatted_frames = list(self.reformat(None))
-            self.reset()
-            for reformatted_frame in reformatted_frames:
-                yield reformatted_frame
-
 
 class VideoReformatter:
     def __init__(self, config: VideoConfig):
         self._config = config
         self._reformatter: Callable[[av.VideoFrame], av.VideoFrame] | None = None
 
-    @property
-    def config(self) -> VideoConfig:
-        return self._config
-
     def reset(self) -> None:
-        pass  # VideoReformatter is stateless
+        ...
 
     def reformat(self, frame: av.VideoFrame | None) -> av.VideoFrame:
         if self._reformatter is None:
@@ -63,9 +54,9 @@ class VideoReformatter:
         return self._reformatter(frame)
 
     def _create_reformatter(self, frame_template: av.VideoFrame) -> av.filter.Graph:
-        out_pixel_format_av = jb_to_av_pixel_format(self.config.format)
+        out_pixel_format_av = jb_to_av.video_pixel_format(self._config.pixel_format)
 
-        if frame_template.format.name == out_pixel_format_av:
+        if frame_template.format.name == out_pixel_format_av.name:
             return lambda frame: frame
 
         graph = self._create_filter_graph(frame_template, out_pixel_format_av)
@@ -84,7 +75,7 @@ class VideoReformatter:
         graph = av.filter.Graph()
 
         time_base = frame_template.time_base
-        sample_aspect_ratio = self._stream_info.sample_aspect_ratio or Fraction(1, 1)
+        sample_aspect_ratio = self._config.sample_aspect_ratio
 
         buffer = graph.add(
             "buffer",
@@ -97,7 +88,7 @@ class VideoReformatter:
 
         format_filter = graph.add(
             "format",
-            pix_fmts=out_pixel_format_av,
+            pix_fmts=out_pixel_format_av.name,
         )
 
         buffersink = graph.add("buffersink")

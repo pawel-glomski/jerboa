@@ -1,53 +1,19 @@
-import numpy as np
 from collections import deque
-from dataclasses import dataclass
 
 from jerboa.core.circular_buffer import CircularBuffer
-from jerboa.media import jb_to_av, standardized_audio as std_audio
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig
+from jerboa.media import jb_to_av
+from .frame import JbAudioFrame, JbVideoFrame
+
 
 AUDIO_BUFFER_SIZE_MODIFIER = 1.2
-
-
-@dataclass
-class JbFrame:
-    timepoint: float | None = None
-    duration: float | None = None
-
-    def is_valid(self) -> bool:
-        return (self.timepoint is not None and self.timepoint >= 0) and (
-            self.duration is not None and self.duration > 0
-        )
-
-
-@dataclass
-class JbAudioFrame(JbFrame):
-    signal: np.ndarray | None = None
-
-    def is_valid(self) -> bool:
-        return super().is_valid() and self.signal is not None and self.signal.size > 0
-
-
-@dataclass
-class JbVideoFrame(JbFrame):
-    width: int | None = None
-    height: int | None = None
-    planes: list[bytes] | None = None
-
-    def is_valid(self) -> bool:
-        return (
-            super().is_valid()
-            and all(attr is not None and attr > 0 for attr in [self.width, self.height])
-            and self.planes is not None
-            and len(self.planes) > 0
-        )
 
 
 class AudioBuffer:
     def __init__(self, audio_config: AudioConfig, max_duration: float) -> None:
         self._audio_config = audio_config
 
-        self._audio = create_audio_circular_buffer(audio_config, max_duration)
+        self._audio = create_circular_audio_buffer(audio_config, max_duration)
         # self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
         self._timepoint = None
 
@@ -81,16 +47,17 @@ class AudioBuffer:
         all_samples_num = len(self._audio)
         pop_samples_num = min(all_samples_num, samples_num)
 
-        audio = self._audio.pop(pop_samples_num)
+        audio_signal = self._audio.pop(pop_samples_num)
         audio_duration = pop_samples_num / self._audio_config.sample_rate
 
         frame = JbAudioFrame(
-            timepoint=self._timepoint,
-            duration=audio_duration,
-            signal=audio,
+            beg_timepoint=self._timepoint,
+            end_timepoint=self._timepoint + audio_duration,
+            audio_signal=audio_signal,
         )
 
-        self._timepoint += audio_duration
+        self._timepoint = frame.end_timepoint
+
         return frame
 
     def get_next_timepoint(self) -> float | None:
@@ -156,7 +123,7 @@ def create_buffer(
     return VideoBuffer(max_duration=buffer_duration)
 
 
-def create_audio_circular_buffer(
+def create_circular_audio_buffer(
     audio_config: AudioConfig, max_duration: float = None
 ) -> CircularBuffer:
     if max_duration is None and audio_config.frame_duration is None:

@@ -5,7 +5,7 @@ from threading import Condition, Lock
 
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadSpawner
-from jerboa.media.player.decoding.timeline_decoder import TimelineDecoder, JbVideoFrame
+from jerboa.media.player.decoding.decoder import TimelineDecoder, JbVideoFrame
 
 
 TIMEOUT_TIME = 0.1

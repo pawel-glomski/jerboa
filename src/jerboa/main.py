@@ -1,7 +1,6 @@
 import sys
 
 from dependency_injector import containers, providers
-from dependency_injector.wiring import Provide, inject
 
 from PySide6 import QtWidgets as QtW
 
@@ -96,4 +95,4 @@ if __name__ == "__main__":
     _dependencies_container.wire()
     _dependencies_container.gui_container().wire()
 
-    exit(gui.container.run())
+    sys.exit(gui.container.run())

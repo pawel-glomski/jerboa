@@ -1,6 +1,6 @@
-import av
 import enum
 from dataclasses import dataclass
+from fractions import Fraction
 
 USING_PLANAR_AUDIO_ONLY = True
 
@@ -114,17 +114,11 @@ class AudioConfig:
     sample_format: AudioConstraints.SampleFormat
     channel_layout: AudioConstraints.ChannelLayout
     sample_rate: int
-    frame_duration: float | None = None
+    frame_duration: float | None
 
     @property
     def media_type(self) -> MediaType:
         return MediaType.AUDIO
-
-    @staticmethod
-    def from_stream(stream: av.audio.AudioStream) -> "AudioConfig":
-        if MediaType(stream.type) != MediaType.AUDIO:
-            raise ValueError(f"Wrong stream type: {stream.type}")
-        return AudioConfig(stream.format, stream.layout, stream.sample_rate)
 
 
 @dataclass
@@ -133,6 +127,7 @@ class VideoConfig:
         RGBA8888 = enum.auto()
 
     pixel_format: PixelFormat
+    sample_aspect_ratio: Fraction
 
     @property
     def media_type(self) -> MediaType:
