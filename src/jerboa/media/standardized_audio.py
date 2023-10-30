@@ -3,7 +3,7 @@ from typing import Callable
 import av
 import math
 import numpy as np
-from fractions import Fraction
+from gmpy2 import mpq as FastFraction
 from pylibrb import (  # pylint: disable=unused-import
     DType,
     SAMPLES_AXIS,
@@ -26,38 +26,11 @@ FRAME_DURATION = 1.0  # in seconds
 
 TRANSITION_DURATION = 8.0 / 16000  # in seconds, 8 steps when sample_rate == 16000
 
-COMPENSATION_MAX_DURATION_CHANGE = 0.1  # up to 10% at once
-
-
-def get_frame_time_base_standardizer(
-    audio_stream: av.audio.AudioStream,
-) -> Callable[[av.AudioFrame], None]:
-    std_time_base = Fraction(1, audio_stream.sample_rate)
-
-    def time_base_standardizer(frame: av.AudioFrame):
-        frame.pts = int(frame.pts * frame.time_base / std_time_base)
-        frame.time_base = std_time_base
-
-    if audio_stream.time_base == std_time_base:
-        return lambda _: None  # do nothing
-    return time_base_standardizer
-
-
-def get_frame_end_pts_generator(
-    audio_stream: av.audio.AudioStream,
-) -> Callable[[av.AudioFrame], None]:
-    std_time_base = Fraction(1, audio_stream.sample_rate)
-
-    def end_pts_with_std_time_base(frame: av.AudioFrame):
-        assert frame.time_base == std_time_base
-        return frame.pts + frame.samples
-
-    return end_pts_with_std_time_base
-
 
 def get_from_frame(frame: av.AudioFrame) -> np.ndarray:
-    assert frame.format.name == SAMPLE_FORMAT_AV.name
-    return frame.to_ndarray()
+    assert frame.format.name == SAMPLE_FORMAT_AV.name and SAMPLE_FORMAT_AV.planar
+    # this is faster than frame.to_ndarray
+    return np.vstack([np.frombuffer(x, dtype=DType, count=frame.samples) for x in frame.planes])
 
 
 def reformat(audio: np.ndarray, wanted_dtype: np.dtype, packed: bool = False) -> np.ndarray:

@@ -38,4 +38,4 @@ JbAudioFrame = MappedAudioFrame
 class JbVideoFrame(TimedFrame):
     width: int
     height: int
-    planes: list[bytes]
+    planes: list[np.ndarray[np.ubyte]]

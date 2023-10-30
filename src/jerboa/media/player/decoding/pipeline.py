@@ -6,17 +6,12 @@ from collections.abc import Iterable
 from typing import Any, Callable, Optional
 from abc import ABC, abstractmethod
 from threading import Lock, Condition
-from fractions import Fraction
+from gmpy2 import mpq as FastFraction
 
 from jerboa.core.timeline import FragmentedTimeline, TMSection
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig, AudioConstraints
 from jerboa.media import standardized_audio as std_audio
 from jerboa.media import av_to_jb, jb_to_av
-
-# from .reformatter import AudioReformatter, VideoReformatter
-# from .mapper import TimedAVFrame, PreMappedFrame, AudioMapper, VideoMapper
-# from .buffer import JbAudioFrame, JbVideoFrame, AudioBuffer, VideoBuffer
-
 from jerboa.media.player.decoding.reformatter import AudioReformatter, VideoReformatter
 from jerboa.media.player.decoding.mapper import AudioMapper, VideoMapper
 from jerboa.media.player.decoding.frame import (
@@ -24,16 +19,12 @@ from jerboa.media.player.decoding.frame import (
     PreMappedFrame,
     MappedAudioFrame,
     MappedVideoFrame,
+    JbAudioFrame,
+    JbVideoFrame,
 )
-from jerboa.media.player.decoding.buffer import JbAudioFrame, JbVideoFrame
 
-DEFAULT_MEAN_KEYFRAME_INTERVAL_SAMPLE_SIZE = 8
 DEFAULT_MEAN_KEYFRAME_INTERVAL = 0.25
-
-
-@dataclass
-class SeekTask(Exception):
-    timepoint: float
+DEFAULT_MEAN_KEYFRAME_INTERVAL_SAMPLE_SIZE = 8
 
 
 @dataclass(frozen=True)
@@ -43,6 +34,37 @@ class MediaContext:
 
     intermediate_config: AudioConfig | VideoConfig
     presentation_config: AudioConfig | VideoConfig
+
+    @property
+    def start_timepoint(self) -> float:
+        return max(0, self.av_stream.start_time * self.av_stream.time_base)
+
+    @staticmethod
+    def open(
+        filepath: str, media_type: MediaType, stream_idx: int, media_constraints: AudioConstraints
+    ) -> "MediaContext":
+        assert media_type in [MediaType.AUDIO, MediaType.VIDEO]
+
+        container = av.open(filepath)
+
+        if media_type == MediaType.AUDIO:
+            stream = container.streams.audio[stream_idx]
+        else:
+            stream = container.streams.video[stream_idx]
+        stream.thread_type = "AUTO"
+
+        presentation_config = create_presentation_media_config(
+            stream=stream,
+            constraints=media_constraints,
+        )
+        intermediate_config = create_intermediate_media_config(presentation_config)
+
+        return MediaContext(
+            av_container=container,
+            av_stream=stream,
+            intermediate_config=intermediate_config,
+            presentation_config=presentation_config,
+        )
 
 
 @dataclass
@@ -78,6 +100,11 @@ class DecodingContext:
     def raise_task_unsafe(self) -> None:
         assert self.mutex.locked()
         raise self._tasks.popleft()
+
+
+@dataclass
+class SeekTask(Exception):
+    timepoint: float
 
 
 class Node(ABC):
@@ -218,7 +245,7 @@ class KeyframeIntervalWatcherNode(Node):
         packet: av.Packet = self.parent.pull(context)
 
         if packet is not None and packet.is_keyframe:
-            keyframe_timepoint = packet.pts * packet.time_base
+            keyframe_timepoint = packet.pts * float(packet.time_base)
             if self._last_keyframe_timepoint is not None:
                 new_interval = keyframe_timepoint - self._last_keyframe_timepoint
                 intervals_sum = (context.mean_keyframe_interval * self._sample_size) + new_interval
@@ -267,17 +294,24 @@ class AudioFrameTimingCorrectionNode(Node):
         )
         self._last_frame_end_pts: int | None = None
         self._frame_time_base_standardizer: Callable[[av.AudioFrame], None] | None = None
-        self._frame_end_pts_generator: Callable[[av.AudioFrame], float] | None = None
 
     def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
         self._last_frame_end_pts = None
         if hard:
-            self._frame_time_base_standardizer = std_audio.get_frame_time_base_standardizer(
-                context.media.av_stream
+            self._frame_time_base_standardizer = lambda _: None  # do nothing by default
+
+            std_time_base = FastFraction(1, context.media.av_stream.sample_rate)
+            frame_time_base_to_std_time_base = (
+                FastFraction(context.media.av_stream.time_base) / std_time_base
             )
-            self._frame_end_pts_generator = std_audio.get_frame_end_pts_generator(
-                context.media.av_stream
-            )
+            if frame_time_base_to_std_time_base != 1:
+
+                def time_base_standardizer(frame: av.AudioFrame):
+                    frame.pts = int(frame.pts * frame_time_base_to_std_time_base)
+                    frame.time_base = std_time_base
+
+                self._frame_time_base_standardizer = time_base_standardizer
+
         super().reset(context, hard, recursive)
 
     def pull(self, context: DecodingContext) -> av.AudioFrame | None:
@@ -288,7 +322,7 @@ class AudioFrameTimingCorrectionNode(Node):
             if self._last_frame_end_pts is not None:
                 frame.pts = self._last_frame_end_pts
 
-            self._last_frame_end_pts = self._frame_end_pts_generator(frame)
+            self._last_frame_end_pts = frame.pts + frame.samples
             return frame
 
         return None
@@ -312,11 +346,10 @@ class TimedAudioFrameCreationNode(Node):
 
     @staticmethod
     def timed_frame_from_av_frame(frame: av.AudioFrame) -> TimedAVFrame:
-        assert frame.time_base == Fraction(1, frame.sample_rate)
         return TimedAVFrame(
             av_frame=frame,
             beg_timepoint=frame.time,
-            end_timepoint=frame.time + (frame.samples * frame.time_base),
+            end_timepoint=frame.time + (frame.samples / frame.sample_rate),
         )
 
 
@@ -325,15 +358,13 @@ class TimedVideoFrameCreationNode(Node):
         super().__init__(
             input_types={av.VideoFrame},
             output_types={TimedAVFrame},
-            breaks_on_discontinuity=False,
+            breaks_on_discontinuity=True,
             parent=parent,
         )
         self._frame: av.VideoFrame | None = None
-        self._last_frame_duration: float | None = None
 
     def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
         self._frame = None
-        self._last_frame_duration = None
         super().reset(context, hard, recursive)
 
     def pull(self, context: DecodingContext) -> TimedAVFrame | None:
@@ -349,7 +380,7 @@ class TimedVideoFrameCreationNode(Node):
             return TimedAVFrame(
                 av_frame=frame,
                 beg_timepoint=frame.time,
-                end_timepoint=next_frame.time if next_frame is not None else float("inf"),
+                end_timepoint=next_frame.time if next_frame is not None else frame.time + 1 / 24,
             )
         return None
 
@@ -439,7 +470,8 @@ class FrameMappingPreparationNode(Node):
         # i.e.: timeline.on_changed_signal.connect(self._on_timeline_change)
         # TODO: remove any initial sections, this should be an empty timeline
         self._timeline: FragmentedTimeline = FragmentedTimeline(
-            TMSection(0, 0.5), TMSection(1.5, float("inf"), 0.25)
+            # TMSection(0, float("inf"), 0.5)
+            *[TMSection(i * 0.2, i * 0.2 + 0.1, 0.5) for i in range(10000)]
         )
         self._timeline_or_task_updated: Condition | None = None
         self._returned_frame = False
@@ -510,7 +542,11 @@ class FrameMappingNode(Node):
         return super().reset(context, hard, recursive)
 
     def pull(self, context: DecodingContext) -> MappedAudioFrame | MappedVideoFrame | None:
-        return self._mapper.map(self.parent.pull(context))
+        while True:
+            pre_mapped_frame = self.parent.pull(context)
+            mapped_frame = self._mapper.map(pre_mapped_frame)
+            if mapped_frame is not None or pre_mapped_frame is None:
+                return mapped_frame
 
 
 class AudioPresentationReformattingNode(Node):
@@ -563,13 +599,12 @@ class VideoPresentationReformattingNode(Node):
     def pull(self, context: DecodingContext) -> JbVideoFrame | None:
         frame: MappedVideoFrame = self.parent.pull(context)
         if frame is not None:
-            reformatted_av_frame = self._reformatter.reformat(frame.av_frame)
             return JbVideoFrame(
                 beg_timepoint=frame.beg_timepoint,
                 end_timepoint=frame.end_timepoint,
-                width=reformatted_av_frame.width,
-                height=reformatted_av_frame.height,
-                planes=[bytes(plane) for plane in reformatted_av_frame.planes],
+                width=frame.av_frame.width,
+                height=frame.av_frame.height,
+                planes=self._reformatter.reformat(frame.av_frame),
             )
         return None
 
@@ -585,11 +620,19 @@ class Pipeline:
 
         self._context: DecodingContext | None = None
 
-    def init(
-        self,
-        media: MediaContext,
-        start_timepoint: float,
-    ) -> None:
+    @property
+    def media_type(self) -> MediaType:
+        return self._media_type
+
+    @property
+    def context(self) -> DecodingContext:
+        return self._context
+
+    @property
+    def initialized(self) -> bool:
+        return self._context is not None
+
+    def init(self, media: MediaContext, start_timepoint: float) -> None:
         assert media.av_container == media.av_stream.container
         assert MediaType(media.av_stream.type) == self._media_type
         assert start_timepoint >= 0
@@ -608,7 +651,7 @@ class Pipeline:
         self._context.min_timepoint = timepoint
         self._root_node.reset(self._context, hard=False, recursive=True)
 
-    def pull(self) -> JbAudioFrame | JbVideoFrame:
+    def pull(self) -> Any | None:
         assert self._context is not None, "Cannot run uninitialized pipeline"
         while True:
             try:
@@ -663,7 +706,7 @@ def create_presentation_media_config(
         )
     return VideoConfig(
         pixel_format=VideoConfig.PixelFormat.RGBA8888,
-        sample_aspect_ratio=stream.sample_aspect_ratio or Fraction(1, 1),
+        sample_aspect_ratio=stream.sample_aspect_ratio or FastFraction(1, 1),
     )
 
 
@@ -703,56 +746,49 @@ def test_case():
             ),
         ),
     )
-    decoder = Pipeline(
-        media_type=MediaType.VIDEO,
-        output_node=VideoPresentationReformattingNode(
-            parent=FrameMappingNode(
-                parent=FrameMappingPreparationNode(
-                    parent=TimedVideoFrameCreationNode(
-                        parent=DecodingNode(
-                            parent=KeyframeIntervalWatcherNode(
-                                parent=DemuxingNode(),
-                            ),
-                        ),
-                    ),
-                ),
-            ),
-        ),
-    )
-
-    container = av.open("colors_test.mp4")
-    stream = container.streams.video[0]
-    presentation_media_config = create_presentation_media_config(
-        stream=stream,
-        constraints=AudioConstraints(
-            sample_formats=AudioConstraints.SampleFormat.S16,
-            channel_layouts=AudioConstraints.ChannelLayout.LAYOUT_SURROUND_7_1,
-            channels_num_min=1,
-            channels_num_max=3,
-            sample_rate_min=1,
-            sample_rate_max=1e5,
-        ),
-    )
-    intermediate_media_config = create_intermediate_media_config(presentation_media_config)
+    # decoder = Pipeline(
+    #     media_type=MediaType.VIDEO,
+    #     output_node=VideoPresentationReformattingNode(
+    #         parent=FrameMappingNode(
+    #             parent=FrameMappingPreparationNode(
+    #                 parent=TimedVideoFrameCreationNode(
+    #                     parent=DecodingNode(
+    #                         parent=KeyframeIntervalWatcherNode(
+    #                             parent=DemuxingNode(),
+    #                         ),
+    #                     ),
+    #                 ),
+    #             ),
+    #         ),
+    #     ),
+    # )
 
     decoder.init(
-        media=MediaContext(
-            av_container=container,
-            av_stream=stream,
-            intermediate_config=intermediate_media_config,
-            presentation_config=presentation_media_config,
+        media=MediaContext.open(
+            "tests/test_recordings/sintel.mp4",
+            decoder.media_type,
+            stream_idx=0,
+            media_constraints=AudioConstraints(
+                sample_formats=AudioConstraints.SampleFormat.S16,
+                channel_layouts=AudioConstraints.ChannelLayout.LAYOUT_SURROUND_7_1,
+                channels_num_min=1,
+                channels_num_max=3,
+                sample_rate_min=1,
+                sample_rate_max=1e5,
+            ),
         ),
         start_timepoint=0,
     )
     import time
 
     last_time = time.time_ns()
+    latency = footage_duration = 0
     while True:
         out = decoder.pull()
         if out is not None:
-            latency = (time.time_ns() - last_time) / 1e9
-            footage_duration = out.end_timepoint - out.beg_timepoint
-            print(f"{latency=}, {footage_duration=}, {footage_duration/latency=}")
+            latency += (time.time_ns() - last_time) / 1e9
+            footage_duration += out.end_timepoint - out.beg_timepoint
+            print(f"{footage_duration/latency=:.3}")
             last_time = time.time_ns()
 
         if out is not None:
@@ -760,6 +796,7 @@ def test_case():
             # print(f"{out.beg_timepoint}, {out.end_timepoint}")
         else:
             decoder._seek(0)
+            latency = footage_duration = 0
 
 
 if __name__ == "__main__":

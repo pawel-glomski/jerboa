@@ -1,8 +1,8 @@
-from typing import Iterable, Callable
+from typing import Callable
 
 import av
 import errno
-from fractions import Fraction
+import numpy as np
 
 from jerboa.media.core import AudioConfig, VideoConfig
 from jerboa.media import jb_to_av
@@ -34,7 +34,7 @@ class AudioReformatter:
     def reformat(self, frame: av.AudioFrame | None) -> list[av.AudioFrame]:
         if frame is not None:
             # remove this assert when av.AudioResampler if fixed
-            assert frame.time_base == Fraction(1, frame.sample_rate)
+            assert frame.time_base.numerator == 1
             self._has_samples = True
 
         return self._resampler.resample(frame)
@@ -45,27 +45,44 @@ class VideoReformatter:
         self._config = config
         self._reformatter: Callable[[av.VideoFrame], av.VideoFrame] | None = None
 
+        # filter graph is quite slow and lot of time is spent waiting for the output frame.
+        # Thus we could delegate the waiting task to another thread and return a future instead.
+        # This speeds up the pipeline by ~25% on a test video, on my machine, on a single-threaded
+        # test.
+
+        # from concurrent.futures import ThreadPoolExecutor
+        # self._thread_pool = ThreadPoolExecutor(1)
+
     def reset(self) -> None:
         # just like in the case of the AudioReformatter, filter graph does not accept frames after
-        # the flushing frame (None), thus we must recreate it each time.
-        self._reformatter = None
+        # the flushing frame (None), thus we would have to re-create it each time.
+        # But since video reformatting is stateless, we can just omit flushing and reuse the filter
+        # graph.
+        pass  # self._reformatter = None
 
-    def reformat(self, frame: av.VideoFrame | None) -> av.VideoFrame:
+    def reformat(self, frame: av.VideoFrame) -> av.VideoFrame:
+        assert frame is not None, "VideoReformatter cannot be flushed"
+
         if self._reformatter is None:
             self._reformatter = self._create_reformatter(frame)
         return self._reformatter(frame)
+        # return self._thread_pool.submit(self._reformatter, frame)
 
     def _create_reformatter(self, frame_template: av.VideoFrame) -> av.filter.Graph:
+        def get_planes(frame: av.VideoFrame):
+            return [np.frombuffer(plane, dtype=np.ubyte) for plane in frame.planes]
+
         out_pixel_format_av = jb_to_av.video_pixel_format(self._config.pixel_format)
 
         if frame_template.format.name == out_pixel_format_av.name:
-            return lambda frame: frame
+            return get_planes
 
         graph = self._create_filter_graph(frame_template, out_pixel_format_av)
 
-        def filter_graph_reformatter(frame: av.VideoFrame):
-            graph.push(frame)
-            return VideoReformatter._pull_from_filter_graph(graph)
+        def filter_graph_reformatter(frame_in: av.VideoFrame):
+            graph.push(frame_in)
+            frame_out = get_planes(VideoReformatter._pull_from_filter_graph(graph))
+            return frame_out
 
         return filter_graph_reformatter
 
@@ -73,7 +90,7 @@ class VideoReformatter:
         self,
         frame_template: av.VideoFrame,
         out_pixel_format_av: str,
-    ) -> av.filter.Graph:
+    ) -> tuple[av.filter.context.FilterContext, av.filter.context.FilterContext]:
         graph = av.filter.Graph()
 
         time_base = frame_template.time_base

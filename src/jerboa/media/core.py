@@ -127,7 +127,7 @@ class VideoConfig:
         RGBA8888 = enum.auto()
 
     pixel_format: PixelFormat
-    sample_aspect_ratio: Fraction
+    sample_aspect_ratio: Fraction = Fraction(1, 1)
 
     @property
     def media_type(self) -> MediaType:

@@ -6,6 +6,9 @@ from .frame import PreMappedFrame, MappedAudioFrame, MappedVideoFrame
 from .buffer import create_circular_audio_buffer
 
 
+from concurrent import futures
+
+
 class AudioMapper:
     def __init__(
         self,
@@ -20,12 +23,15 @@ class AudioMapper:
         self._stretcher = RubberBandStretcher(
             config.sample_rate,
             config.channel_layout.channels_num,
-            Option.PROCESS_REALTIME | Option.ENGINE_FINER | Option.WINDOW_SHORT,
+            Option.PROCESS_REALTIME | Option.ENGINE_FASTER | Option.WINDOW_LONG,
         )
         self._stretcher.set_max_process_size(self._audio.max_size)
         self._next_frame_beg_timepoint = None
         self._flushed = False
         self.reset()
+
+        self._thread_pool = futures.ThreadPoolExecutor(1)
+        self._future: futures.Future = self._thread_pool.submit(lambda: None)
 
     def reset(self) -> None:
         self._audio.clear()
@@ -36,6 +42,8 @@ class AudioMapper:
     def map(self, frame: PreMappedFrame | None) -> MappedAudioFrame | None:
         if self._flushed:
             return None  # needs a reset
+
+        futures.wait([self._future])
 
         flush = frame is None
         if flush:
@@ -48,15 +56,20 @@ class AudioMapper:
                 self._audio.put(self._stretcher.retrieve_available())
                 self._flushed = True
         else:
-            for audio_segment, modifier in self._cut_according_to_mapping_scheme(frame):
-                self._stretcher.time_ratio = modifier
-                self._stretcher.process(audio_segment)
-                self._audio.put(self._stretcher.retrieve_available())
 
-            if self._next_frame_beg_timepoint is None and len(self._audio) > 0:
-                self._next_frame_beg_timepoint = frame.mapping_scheme.beg
+            def map_frame():
+                for audio_segment, modifier in self._cut_according_to_mapping_scheme(frame):
+                    self._stretcher.time_ratio = modifier
+                    self._stretcher.process(audio_segment)
+                    self._audio.put(self._stretcher.retrieve_available())
 
-        if len(self._audio) > 0:
+                if self._next_frame_beg_timepoint is None and len(self._audio) > 0:
+                    self._next_frame_beg_timepoint = frame.mapping_scheme.beg
+
+            self._future = self._thread_pool.submit(map_frame)
+            # map_frame()
+
+        if len(self._audio):
             assert self._next_frame_beg_timepoint is not None
 
             audio = self._audio.pop(len(self._audio))
@@ -70,6 +83,9 @@ class AudioMapper:
                 audio_signal=audio,
             )
         return None
+
+    def _create_mapped_frame(self) -> MappedAudioFrame:
+        ...
 
     def _cut_according_to_mapping_scheme(self, frame: PreMappedFrame):
         frame_audio = std_audio.get_from_frame(frame.av_frame)
