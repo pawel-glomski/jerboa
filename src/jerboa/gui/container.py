@@ -30,6 +30,7 @@ class Container(containers.DeclarativeContainer):
     qt_app = providers.Dependency(QtW.QApplication)
     thread_pool = providers.Dependency(ThreadPool)
     media_source_selected_signal = providers.Dependency(Signal)
+    ready_to_play_signal = providers.Dependency(Signal)
     video_frame_update_signal = providers.Dependency(Signal)
 
     # ---------------------------------- Palette --------------------------------- #
@@ -179,15 +180,19 @@ class Container(containers.DeclarativeContainer):
 
 
 @inject
-def run(
-    qt_app: QtW.QApplication = Provide[Container.qt_app],
-    jb_main_window: MainWindow = Provide[Container.jb_main_window],
+def connect_signals(
     menu_bar_file_open: menu_bar.MenuAction = Provide[Container.menu_bar_file_open],
     media_source_selection_dialog: media_source_selection.dialog.Dialog = Provide[
         Container.media_source_selection_dialog
     ],
-) -> int:
+) -> None:
     menu_bar_file_open.signal.connect(media_source_selection_dialog.open_clean)
-    jb_main_window.show()
 
+
+@inject
+def run(
+    qt_app: QtW.QApplication = Provide[Container.qt_app],
+    jb_main_window: MainWindow = Provide[Container.jb_main_window],
+) -> int:
+    jb_main_window.show()
     return qt_app.exec()

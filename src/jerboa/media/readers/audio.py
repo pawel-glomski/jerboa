@@ -4,8 +4,9 @@ import numpy as np
 from typing import Generator
 from pathlib import Path
 
-from jerboa.media import AudioConfig, std_audio
-from jerboa.media.reformatters import AudioReformatter
+from jerboa.media import standardized_audio as std_audio
+from jerboa.media.core import AudioConfig
+from jerboa.media.player.decoding.pipeline.reformatter import AudioReformatter
 
 
 class AudioReader:
@@ -18,6 +19,8 @@ class AudioReader:
               same format as it is in the recording.
         """
         self._config = config
+        if self._config.frame_duration is None:
+            self._config.frame_duration = std_audio.FRAME_DURATION
 
     def read_stream(
         self, file_path: Path, stream_idx: int = 0
@@ -46,19 +49,7 @@ class AudioReader:
                     f"Bad audio stream index: {stream_idx=}, {len(container.streams.audio)=}"
                 )
 
-            audio_stream = container.streams.audio[stream_idx]
-            if self._config is None:
-                config = AudioConfig(
-                    audio_stream.format, audio_stream.layout, audio_stream.sample_rate
-                )
-            else:
-                config = self._config
-
-            if config.frame_duration is None:
-                config.frame_duration = std_audio.FRAME_DURATION
-
-            reformatter = AudioReformatter(config)
-
-            for raw_frame in container.decode(audio_stream):
+            reformatter = AudioReformatter(self._config)
+            for raw_frame in container.decode(container.streams.audio[stream_idx]):
                 for reformatted_frame in reformatter.reformat(raw_frame):
                     yield reformatted_frame.to_ndarray()

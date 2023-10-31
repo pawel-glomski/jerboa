@@ -74,7 +74,7 @@ class AudioSourceVariant(MediaStreamVariant):
         if "url" in info:
             return AudioSourceVariant(
                 path=info.get("url"),
-                single_stream=not VideoSourceVariant.is_video(info),
+                single_stream=not VideoSourceVariant.has_video(info),
                 protocol_or_container=f"{info.get('protocol')}|{info.get('container')}",
                 bit_rate=info.get("tbr"),
                 sample_rate=info.get("asr"),
@@ -105,7 +105,7 @@ class AudioSourceVariant(MediaStreamVariant):
         return None
 
     @staticmethod
-    def is_audio(fmt: dict) -> bool:
+    def has_audio(fmt: dict) -> bool:
         return (
             fmt.get("resolution") == "audio only"
             or fmt.get("acodec") not in [None, "none"]
@@ -115,7 +115,7 @@ class AudioSourceVariant(MediaStreamVariant):
         )
 
     @staticmethod
-    def is_audio_strict(fmt: dict) -> bool:
+    def has_audio_strict(fmt: dict) -> bool:
         try:
             int(fmt.get("asr"))
         except (ValueError, TypeError):
@@ -138,7 +138,7 @@ class VideoSourceVariant(MediaStreamVariant):
         if "url" in info:
             return VideoSourceVariant(
                 path=info.get("url"),
-                single_stream=not AudioSourceVariant.is_audio(info),
+                single_stream=not AudioSourceVariant.has_audio(info),
                 protocol_or_container=f"{info.get('protocol')}|{info.get('container')}",
                 bit_rate=info.get("tbr"),
                 fps=info.get("fps"),
@@ -173,7 +173,7 @@ class VideoSourceVariant(MediaStreamVariant):
         return None
 
     @staticmethod
-    def is_video(fmt: dict) -> bool:
+    def has_video(fmt: dict) -> bool:
         return (
             fmt.get("vcodec", "none") != "none"
             or fmt.get("resolution", "audio only") != "audio only"
@@ -182,7 +182,7 @@ class VideoSourceVariant(MediaStreamVariant):
         )
 
     @staticmethod
-    def is_video_strict(fmt: dict) -> bool:
+    def has_video_strict(fmt: dict) -> bool:
         try:
             int(fmt.get("width"))
             int(fmt.get("height"))
@@ -272,15 +272,15 @@ class MediaStreamSource:
 
     @staticmethod
     def _get_audio_formats(formats: list[dict]) -> list[dict]:
-        audio_all = [fmt for fmt in formats if AudioSourceVariant.is_audio(fmt)]
-        audio_strict = [fmt for fmt in audio_all if AudioSourceVariant.is_audio_strict(fmt)]
+        audio_all = [fmt for fmt in formats if AudioSourceVariant.has_audio(fmt)]
+        audio_strict = [fmt for fmt in audio_all if AudioSourceVariant.has_audio_strict(fmt)]
 
         return audio_strict or audio_all
 
     @staticmethod
     def _get_video_formats(formats: list[dict]) -> list[dict]:
-        video_all = [fmt for fmt in formats if VideoSourceVariant.is_video(fmt)]
-        video_strict = [fmt for fmt in video_all if VideoSourceVariant.is_video_strict(fmt)]
+        video_all = [fmt for fmt in formats if VideoSourceVariant.has_video(fmt)]
+        video_strict = [fmt for fmt in video_all if VideoSourceVariant.has_video_strict(fmt)]
         video_stricter = [fmt for fmt in video_strict if not VideoSourceVariant.is_storyboard(fmt)]
 
         return video_stricter or video_strict or video_all

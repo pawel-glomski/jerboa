@@ -5,8 +5,10 @@ import PySide6.QtMultimedia as QtM
 import PySide6.QtCore as QtC
 
 from jerboa.core.signal import Signal
+from jerboa.media.source import AudioSourceVariant
 from jerboa.media.core import MediaType, AudioConfig, AudioConstraints
-from .decoding.decoder import TimelineDecoder
+from .decoding.decoder import JbDecoder, pipeline
+from .state import PlayerState
 
 # from jerboa.core.timeline import FragmentedTimeline
 
@@ -75,13 +77,13 @@ class AudioManager:
     def _get_supported_channel_layouts(self) -> AudioConstraints.ChannelLayout:
         match self._current_device.channelConfiguration():
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigSurround7Dot1:
-                return AudioConstraints.ChannelLayout.SURROUND_7_1
+                return AudioConstraints.ChannelLayout.LAYOUT_SURROUND_7_1
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigSurround7Dot0:
-                return AudioConstraints.ChannelLayout.SURROUND_7_0
+                return AudioConstraints.ChannelLayout.LAYOUT_SURROUND_7_0
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigSurround5Dot1:
-                return AudioConstraints.ChannelLayout.SURROUND_5_1
+                return AudioConstraints.ChannelLayout.LAYOUT_SURROUND_5_1
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigSurround5Dot0:
-                return AudioConstraints.ChannelLayout.SURROUND_5_0
+                return AudioConstraints.ChannelLayout.LAYOUT_SURROUND_5_0
             case QtM.QAudioFormat.ChannelConfig.ChannelConfig3Dot1:
                 return AudioConstraints.ChannelLayout.LAYOUT_3_1
             case QtM.QAudioFormat.ChannelConfig.ChannelConfig3Dot0:
@@ -89,13 +91,13 @@ class AudioManager:
             case QtM.QAudioFormat.ChannelConfig.ChannelConfig2Dot1:
                 return AudioConstraints.ChannelLayout.LAYOUT_2_1
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigStereo:
-                return AudioConstraints.ChannelLayout.STEREO
+                return AudioConstraints.ChannelLayout.LAYOUT_STEREO
             case _:
-                return AudioConstraints.ChannelLayout.MONO
+                return AudioConstraints.ChannelLayout.LAYOUT_MONO
 
 
 class QtAudioSourceDevice(QtC.QIODevice):
-    def __init__(self, decoder: TimelineDecoder):
+    def __init__(self, decoder: JbDecoder):
         assert decoder.stream_info.media_type == MediaType.AUDIO
 
         QtC.QIODevice.__init__(self)
@@ -121,11 +123,11 @@ class QtAudioSourceDevice(QtC.QIODevice):
 
 
 class AudioPlayer:
-    def __init__(self, audio_manager: AudioManager):
+    def __init__(self, audio_manager: AudioManager, decoder: JbDecoder):
         self._mutex = Lock()
 
         self._audio_sink: QtM.QAudioSink | None = None
-        self._decoder: TimelineDecoder | None = None
+        self._decoder: JbDecoder | None = None
 
         self._audio_manager = audio_manager
         self._audio_manager.current_output_device_changed_signal.connect(
@@ -135,7 +137,7 @@ class AudioPlayer:
     def __del__(self):
         self.stop()
 
-    def _on_output_device_changed(self):
+    def _on_output_device_changed(self) -> None:
         with self._mutex:
             if self._audio_sink:
                 self._audio_sink.reset()
@@ -144,11 +146,22 @@ class AudioPlayer:
                     start_timepoint=0,
                 )
 
-    def stop(self):
+    def wait_for_state(self, state: PlayerState, timeout: float) -> None:
+        pass
+        # with self._mutex:
+        #     if not self._state_changed.wait_for(lambda: self._state == state, timeout=timeout):
+        #         raise TimeoutError(f"Waiting for state ({state=}) timed out ({timeout=})")
+
+    def stop(self) -> None:
         with self._mutex:
-            if self._audio_sink:
-                self._audio_sink.stop()
-            self._audio_sink = None
+            self._stop_unsafe()
+
+    def _stop_unsafe(self) -> None:
+        assert self._mutex.locked()
+
+        if self._audio_sink:
+            self._audio_sink.stop()
+        self._audio_sink = None
 
     def suspend(self) -> None:
         with self._mutex:
@@ -160,13 +173,17 @@ class AudioPlayer:
             if self._audio_sink:
                 self._audio_sink.resume()
 
-    def start(self, decoder: TimelineDecoder):
-        self.stop()
+    def start(self, source: AudioSourceVariant):
+        assert source.media_type == MediaType.AUDIO
 
         with self._mutex:
-            decoder.apply_new_media_constraints(
-                self._audio_manager.get_current_output_device_constraints(),
-                start_timepoint=0,
+            self._stop_unsafe()
+
+            media_context = pipeline.MediaContext.open(
+                source.path,
+                MediaType.AUDIO,
+                stream_idx=0,
+                media_constraints=self._audio_manager.get_current_output_device_constraints(),
             )
 
             jb_audio_cofnig = decoder.dst_media_config

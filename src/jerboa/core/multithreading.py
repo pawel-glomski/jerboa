@@ -2,7 +2,7 @@ from typing import Callable
 from abc import ABC, abstractmethod
 
 from threading import Thread, Lock
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as TimeoutErrorTPE, wait
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as TimeoutErrorTPE
 
 from jerboa.core.logger import logger
 
@@ -32,17 +32,11 @@ class PyThreadPool(ThreadPool):
         super().__init__()
         self._thread_pool = ThreadPoolExecutor(workers)
 
-    def start(self, job: Callable, *args, **kwargs):
+    def start(self, job: Callable, /, *args, **kwargs):
         try:
-
-            def worker():
-                try:
-                    job(*args, **kwargs)
-                except Exception as e:
-                    logger.exception(e)
-                    raise
-
-            wait([self._thread_pool.submit(worker)], timeout=0)
+            self._thread_pool.submit(do_job_with_exception_logging, job, args, kwargs).result(
+                timeout=0
+            )
         except TimeoutErrorTPE:
             pass
 
@@ -56,8 +50,8 @@ class PyThreadSpawner(ThreadSpawner):
         self._threads = set[Thread]()
         self._mutex = Lock()
 
-    def start(self, job: Callable, *args, **kwargs):
-        thread = Thread(target=job, args=args, kwargs=kwargs)
+    def start(self, job: Callable, /, *args, **kwargs):
+        thread = Thread(target=do_job_with_exception_logging, args=[job, args, kwargs])
         thread.start()
         with self._mutex:
             self._threads.add(thread)
@@ -73,3 +67,11 @@ class PyThreadSpawner(ThreadSpawner):
         with self._mutex:
             self._threads = {thread for thread in self._threads if thread.is_alive()}
         return result
+
+
+def do_job_with_exception_logging(job: Callable, args: list, kwargs: dict) -> None:
+    try:
+        job(*args, **kwargs)
+    except Exception as e:
+        logger.exception(e)
+        raise

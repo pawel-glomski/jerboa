@@ -1,40 +1,17 @@
-import time
 from collections import deque
-from enum import Enum, auto
 from threading import Condition, Lock
 
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadSpawner
-from jerboa.media.player.decoding.decoder import TimelineDecoder, JbVideoFrame
+from jerboa.media.core import MediaType
+from jerboa.media.source import VideoSourceVariant
+from .decoding.decoder import pipeline, JbDecoder
+from .decoding.pipeline.frame import JbVideoFrame
+from .state import PlayerState
+from .clock import SynchronizationClock
 
 
 TIMEOUT_TIME = 0.1
-
-
-class SynchronizationClock:
-    def __init__(self) -> None:
-        self._cumulative_time_ns = 0
-        self._last_time_ns: int | None = None
-        self._time_now_ns = time.perf_counter_ns
-
-    def start(self) -> None:
-        self._last_time_ns = self._time_now_ns()
-
-    def stop(self) -> None:
-        self._cumulative_time_ns += self._time_now_ns() - self._last_time_ns
-        self._last_time_ns = None
-
-    def time(self) -> float:
-        result = self._cumulative_time_ns
-        if self._last_time_ns is not None:
-            result += self._time_now_ns() - self._last_time_ns
-        return result / 1e9
-
-
-class PlayerState(Enum):
-    STOPPED = auto()
-    SUSPENDED = auto()
-    PLAYING = auto()
 
 
 class StopPlayerTask(Exception):
@@ -65,18 +42,21 @@ class VideoPlayer:
         thread_spawner: ThreadSpawner,
         player_stalled_signal: Signal,
         video_frame_update_signal: Signal,
+        decoder: JbDecoder,
     ):
+        self._decoder = decoder
         self._thread_spawner = thread_spawner
         self._player_stalled_signal = player_stalled_signal
         self._video_frame_update_signal = video_frame_update_signal
-        self._sync_clock = SynchronizationClock()
+
+        self._mutex = Lock()
+        self._tasks = deque[Exception]()
+        self._new_tasks_added = Condition(self._mutex)
 
         self._state = PlayerState.STOPPED
-
-        self._tasks = deque[Exception]()
-        self._mutex = Lock()
         self._state_changed = Condition(self._mutex)
-        self._new_tasks_added = Condition(self._mutex)
+
+        self._sync_clock: SynchronizationClock | None = None
 
     @property
     def player_stalled_signal(self) -> Signal:
@@ -85,6 +65,10 @@ class VideoPlayer:
     @property
     def video_frame_update_signal(self) -> Signal:
         return self._video_frame_update_signal
+
+    @property
+    def state(self) -> PlayerState:
+        return self._state
 
     def __del__(self):
         self.stop(wait=True)
@@ -97,79 +81,110 @@ class VideoPlayer:
     # def has_media(self) -> bool:
     #     return self._state in [PlayerState.PLAYING, PlayerState.SUSPENDED]
 
+    def wait_for_state(self, states: list[PlayerState], timeout: float) -> None:
+        with self._mutex:
+            self._wait_for_state__unsafe(states, timeout)
+
+    def _wait_for_state__unsafe(self, states: list[PlayerState], timeout: float | None) -> None:
+        if not self._state_changed.wait_for(lambda: self._state in states, timeout=timeout):
+            raise TimeoutError(f"Waiting for state ({states=}) timed out ({timeout=})")
+
     def stop(self, wait: bool = False) -> None:
         with self._mutex:
-            self._tasks.clear()
-            if self._state != PlayerState.STOPPED:
+            # self._tasks.clear()
+            if self.state not in [PlayerState.STOPPED, PlayerState.STOPPED_ON_ERROR]:
+                # self._decoder.stop()
                 self._tasks.append(StopPlayerTask())
                 self._new_tasks_added.notify()
-                assert not wait or self._state_changed.wait_for(
-                    lambda: self._state == PlayerState.STOPPED, timeout=2 * TIMEOUT_TIME
-                )
+                if wait:
+                    self._wait_for_state__unsafe(
+                        [PlayerState.STOPPED, PlayerState.STOPPED_ON_ERROR],
+                        timeout=2 * TIMEOUT_TIME,
+                    )
 
-    def start(self, decoder: TimelineDecoder):
-        self._thread_spawner.start(self._player_job, decoder)
+    def start(self, source: VideoSourceVariant, sync_clock: SynchronizationClock):
+        self._thread_spawner.start(self._player_job, source, sync_clock)
 
-    def _player_job(self, decoder: TimelineDecoder) -> None:
+    def _set_state_with_notify(self, state: PlayerState) -> None:
+        with self._mutex:
+            self._set_state_with_notify__unsafe(state)
+
+    def _set_state_with_notify__unsafe(self, state: PlayerState) -> None:
+        assert self._mutex.locked()
+
+        self._state = state
+        self._state_changed.notify_all()
+
+    def _player_job(self, source: VideoSourceVariant, sync_clock: SynchronizationClock) -> None:
         self.stop(wait=True)
-        self._state = PlayerState.SUSPENDED
-        try:
-            self._playback_seek_loop(decoder)
-        except Exception as e:
-            with self._mutex:
-                self._state = PlayerState.STOPPED
-                self._state_changed.notify_all()
-            if not isinstance(e, StopPlayerTask):
-                raise
 
-    def _playback_seek_loop(self, decoder: TimelineDecoder) -> None:
+        try:
+            self._sync_clock = sync_clock
+            self._decoder.start(
+                pipeline.MediaContext.open(
+                    source.path,
+                    MediaType.VIDEO,
+                    stream_idx=0,
+                    media_constraints=None,
+                )
+            )
+            self._set_state_with_notify(PlayerState.SUSPENDED)
+            self._playback_seek_loop()
+        except StopPlayerTask:
+            self._set_state_with_notify(PlayerState.STOPPED)
+        except Exception:
+            self._set_state_with_notify(PlayerState.STOPPED_ON_ERROR)
+            raise
+
+    def _playback_seek_loop(self) -> None:
         while True:
             try:
-                self._playback_loop(decoder)
+                self._playback_loop()
             except TimepointSeekTask as seek:
-                decoder.seek(seek_timepoint=seek.timepoint)
+                self._decoder.seek(seek_timepoint=seek.timepoint)
 
-    def _playback_loop(self, decoder: TimelineDecoder):
+    def _playback_loop(self):
         frame: JbVideoFrame | None = None
         while True:
             self._do_tasks()
-            if self._state == PlayerState.SUSPENDED:
+
+            if self.state == PlayerState.SUSPENDED:
                 with self._mutex:
                     self._new_tasks_added.wait_for(lambda: len(self._tasks) > 0)
                 continue
 
-            assert self._state == PlayerState.PLAYING
-
             if frame is None:
                 try:
-                    frame = decoder.pop(timeout=TIMEOUT_TIME)
+                    frame = self._decoder.pop(timeout=TIMEOUT_TIME)
                     if frame is None:
-                        self._state = PlayerState.SUSPENDED
+                        self._set_state_with_notify(PlayerState.SUSPENDED)
+                        continue
                 except TimeoutError:
-                    self._state = PlayerState.SUSPENDED
+                    self._set_state_with_notify(PlayerState.SUSPENDED)
                     self._player_stalled_signal.emit()
+                    continue
+            assert self.state == PlayerState.PLAYING
 
-            if frame is not None and self._sync_to_frame(frame):
+            if frame is not None and self._sync_with_clock(frame):
                 self._video_frame_update_signal.emit(frame)
                 frame = None
 
     def _do_tasks(self) -> None:
         with self._mutex:
             while self._tasks:
-                task = self._tasks.pop()
                 try:
-                    raise task
+                    raise self._tasks.popleft()
                 except ResumePlayerTask:
-                    self._state = PlayerState.PLAYING
+                    self._set_state_with_notify__unsafe(PlayerState.PLAYING)
                 except SuspendPlayerTask:
-                    self._state = PlayerState.SUSPENDED
+                    self._set_state_with_notify__unsafe(PlayerState.SUSPENDED)
 
-    def _sync_to_frame(self, frame: JbVideoFrame) -> bool:
+    def _sync_with_clock(self, frame: JbVideoFrame) -> bool:
         sleep_threshold = min(0.004, frame.duration / 3)
         with self._mutex:
-            sleep_time = frame.timepoint - self._sync_clock.time()
+            sleep_time = frame.beg_timepoint - self._sync_clock.time()
             if sleep_time > sleep_threshold and not self._new_tasks_added.wait(sleep_time):
-                sleep_time = frame.timepoint - self._sync_clock.time()
+                sleep_time = frame.beg_timepoint - self._sync_clock.time()
 
         if sleep_time <= sleep_threshold:
             return True
@@ -182,9 +197,9 @@ class VideoPlayer:
         self._put_task_with_lock(ResumePlayerTask())
 
     def toggle_suspend_resume(self) -> None:
-        if self._state == PlayerState.PLAYING:
+        if self.state == PlayerState.PLAYING:
             self.suspend()
-        elif self._state == PlayerState.SUSPENDED:
+        elif self.state == PlayerState.SUSPENDED:
             self.resume()
 
     def seek(self, timepoint: float):

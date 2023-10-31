@@ -11,9 +11,9 @@ class TMSection:
         """Initializes a `TMSection` instance.
 
         Args:
-          beg (float): The beginning time of the section.
-          end (float): The end time of the section.
-          modifier (float): The duration modifier of the section (default 1.0).
+            beg: The beginning time of the section.
+            end: The end time of the section.
+            modifier: The duration modifier of the section (default 1.0).
         """
         assert not math.isnan(end - beg), f"Invalid range values: ({beg}, {end}))."
         assert not math.isnan(modifier), f"Invalid modifier value: {modifier})."
@@ -23,31 +23,31 @@ class TMSection:
         self._beg = beg
         self._end = end
         self._modifier = modifier
-        self._duration = self.modifier * (self.end - self.beg) if modifier else 0.0
+        self._duration = self.modifier * (self.end - self.beg)
 
     @property
     def beg(self) -> float:
-        """float: The beginning time of the section."""
+        """The beginning time of the section."""
         return self._beg
 
     @property
     def end(self) -> float:
-        """float: The end time of the section."""
+        """The end time of the section."""
         return self._end
 
     @property
     def modifier(self) -> float:
-        """float: The duration modifier of the section."""
+        """The duration modifier of the section."""
         return self._modifier
 
     @property
     def duration(self) -> float:
-        """float: The duration of the section, taking into account the duration modifier."""
+        """The duration of the section, taking into account the duration modifier."""
         return self._duration
 
-    def __repr__(self) -> str:
-        """Returns a string representation of the section."""
-        return f"TMSection({self.beg=}, {self.end=}, {self.modifier=})"
+    # def __repr__(self) -> str:
+    #     """Returns a string representation of the section."""
+    #     return f"TMSection({self.beg=}, {self.end=}, {self.modifier=})"
 
     def __eq__(self, other: object) -> bool:
         """Checks if two sections are equal."""
@@ -64,10 +64,10 @@ class TMSection:
         other's `end` time, and both sections have the same duration modifier.
 
         Args:
-          other (TMSection): The section to extend to.
+            other: The section to extend to.
 
         Returns:
-          bool: True if the section was extended, False otherwise.
+            True if the section was extended, False otherwise.
         """
         if self.end == other.beg and self.modifier == other.modifier:
             self._end = other.end
@@ -75,19 +75,19 @@ class TMSection:
             return True
         return False
 
-    def overlap(self, beg, end) -> "TMSection":
+    def overlap(self, beg: float, end: float) -> "TMSection":
         """Returns a new `TMSection` instance representing the overlap between the current section
         and the given time range.
 
         The new section will have the same modifier as the original section.
 
         Args:
-          beg (float): The beginning time of the range.
-          end (float): The end time of the range.
+            beg: The beginning time of the range.
+            end: The end time of the range.
 
         Returns:
-          TMSection: The new `TMSection` instance representing the overlap, `beg` == `end` when there is
-          no overlap.
+            A new `TMSection` instance representing the overlap. `beg` == `end` when there is
+            no overlap.
         """
         beg = max(self.beg, beg)
         end = max(beg, min(self.end, end))  # end == beg when the section does not overlap the range
@@ -106,14 +106,14 @@ class FragmentedTimeline:
     duration modifier (different playback speed).
 
     Note:
-      The timeline sections must be added in ascending order by their beginning time.
+        The timeline sections must be added in ascending order by their beginning time.
     """
 
     def __init__(self, *init_sections: tuple[TMSection]) -> None:
         """Initialize a new FragmentedTimeline instance.
 
         Args:
-          *init_sections (tuple[TMSection]): Optional initial sections to add to the timeline.
+            *init_sections: Optional initial sections to add to the timeline.
         """
         self._sections: list[TMSection] = []
         self._resulting_timepoints: list[float] = []
@@ -134,11 +134,11 @@ class FragmentedTimeline:
 
     @property
     def time_scope(self) -> float:
-        """Getter for the time scope of the timeline, which represents the maximum timepoint for which
-        the mapping is defined for the timeline.
+        """Getter for the time scope of the timeline, which represents the maximum timepoint for
+        which the mapping is defined in the timeline.
 
         Returns:
-          float: the time scope of the timeline
+            float: the time scope of the timeline
         """
 
         return self._time_scope
@@ -148,10 +148,10 @@ class FragmentedTimeline:
         """Setter for the timeline's scope in seconds. This operation must always extend the scope.
 
         Args:
-          new_value (float): The new time scope to set.
+            new_value: The new time scope to set.
 
         Raises:
-          AssertionError: If `new_value` does not extend the current scope.
+            AssertionError: If `new_value` does not extend the current scope.
         """
         if new_value < self._time_scope:
             raise ValueError(f"Scope cannot decrease: {self._time_scope=}, {new_value=}")
@@ -162,11 +162,11 @@ class FragmentedTimeline:
         Appends a new section to the timeline.
 
         Args:
-          section (TMSection): The section to be appended. Must follow the existing sections.
+            section: The section to be appended. Must follow the existing sections.
 
         Raises:
-          AssertionError: If the new section precedes existing sections or it overlaps the current
-          time scope (which it should always extend).
+            AssertionError: If the new section precedes existing sections or it overlaps the current
+            time scope (which it should always extend).
         """
         if self._sections and section.beg < self._sections[-1].end:
             raise ValueError(
@@ -195,10 +195,10 @@ class FragmentedTimeline:
         """Unmaps a timepoint from the resulting timeline to its source timeline counterpart.
 
         Args:
-          mapped_timepoint (float): The timepoint to be unmapped.
+            mapped_timepoint: The timepoint to be unmapped.
 
         Returns:
-          float | None: The unmapped timepoint if the timepoint was valid; None otherwise.
+           float | None: The unmapped timepoint if the timepoint was valid; None otherwise.
         """
         if self._resulting_timepoints:
             mapped_timepoint = max(0, mapped_timepoint)
@@ -219,18 +219,18 @@ class FragmentedTimeline:
         timeline to the corresponding range in the resulting timeline.
 
         Args:
-          beg (float): The beginning of the time range to be mapped.
-          end (float): The ending of the time range to be mapped.
+            beg: The beginning of the time range to be mapped.
+            end: The ending of the time range to be mapped.
 
         Returns:
-          tuple[RangeMappingResult, float]: A tuple of 2 values:\n
-            0: (RangeMappingResult) Results of the mapping.\n
-            1: (float) The next closest timepoint that can be mapped after the range ends. If such a
-            timepoint does not exist in the current time scope, it returns the scope itself.
+            A tuple of 2 values:\n
+                0: (RangeMappingResult) Results of the mapping.\n
+                1: (float) The next closest timepoint that can be mapped after the range ends. If such a
+                timepoint does not exist in the current time scope, it returns the scope itself.
 
         Raises:
-          AssertionError: If the beginning timepoint is greater than the ending timepoint, or if the
-          end of the range is beyond the timeline's scope.
+            AssertionError: If the beginning timepoint is greater than the ending timepoint, or if the
+            end of the range is beyond the timeline's scope.
         """
         beg = max(0, beg)
         if beg > end:

@@ -132,3 +132,6 @@ class VideoConfig:
     @property
     def media_type(self) -> MediaType:
         return MediaType.VIDEO
+
+
+VIDEO_FRAME_PIXEL_FORMAT = VideoConfig.PixelFormat.RGBA8888

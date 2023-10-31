@@ -215,3 +215,30 @@ class CircularBuffer:
     def clear(self) -> None:
         """Discards all the elements."""
         self._head = self._tail = self._size = 0
+
+
+from jerboa.media import jb_to_av
+from jerboa.media.core import AudioConfig
+
+AUDIO_BUFFER_SIZE_MODIFIER = 1.2
+
+
+def create_circular_audio_buffer(
+    audio_config: AudioConfig, max_duration: float = None
+) -> CircularBuffer:
+    if max_duration is None and audio_config.frame_duration is None:
+        raise ValueError("`max_duration` or `audio_config.frame_duration` must be provided")
+
+    if max_duration is None:
+        max_duration = audio_config.frame_duration
+
+    buffer_dtype = jb_to_av.audio_sample_format_dtype(audio_config.sample_format)
+    buffer_length = int(max_duration * audio_config.sample_rate * AUDIO_BUFFER_SIZE_MODIFIER)
+    if audio_config.sample_format.is_planar:
+        buffer_shape = [audio_config.channel_layout.channels_num, buffer_length]
+        axis = 1
+    else:
+        buffer_shape = [buffer_length, audio_config.channel_layout.channels_num]
+        axis = 0
+
+    return CircularBuffer(buffer_shape, axis, buffer_dtype)

@@ -1,56 +1,93 @@
-import PySide6.QtWidgets as QtW
-from PySide6 import QtCore, QtGui
-
+from PySide6 import (
+    QtWidgets as QtW,
+    QtCore as QtC,
+    QtGui as QtG,
+    QtMultimedia as QtM,
+    QtMultimediaWidgets as QtMW,
+)
 from PySide6.QtCore import Qt
 
 from jerboa.core.signal import Signal
-from jerboa.media.core import VideoConfig
+from jerboa.media.core import VideoConfig, VIDEO_FRAME_PIXEL_FORMAT
 from jerboa.media.player.video_player import JbVideoFrame
 
 
-class Canvas(QtW.QLabel):
+def jb_to_qt_video_frame_pixel_format(
+    pixel_format_jb: VideoConfig.PixelFormat,
+) -> QtM.QVideoFrameFormat.PixelFormat:
+    match pixel_format_jb:
+        case VideoConfig.PixelFormat.RGBA8888:
+            return QtM.QVideoFrameFormat.PixelFormat.Format_RGBA8888
+        case _:
+            raise ValueError(f"Unrecognized pixel format: {pixel_format_jb}")
+
+
+class FrameMappingContext:
+    def __init__(self, frame: QtM.QVideoFrame, mode: QtM.QVideoFrame.MapMode) -> None:
+        self._frame = frame
+        self._mode = mode
+
+    def __enter__(self) -> "FrameMappingContext":
+        self._frame.map(self._mode)
+        return self
+
+    def __exit__(self, exc_type, exc_val, exc_tb) -> None:
+        self._frame.unmap()
+
+
+class Canvas(QtMW.QVideoWidget):
     def __init__(
         self,
         video_frame_update_signal: Signal,
     ):
         super().__init__()
 
-        self._current_pixmap: QtGui.QPixmap | None = None
-
         self.setMinimumHeight(50)
         self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
-        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.setFrameShape(QtW.QFrame.Shape.StyledPanel)
+        # self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # self.setFrameShape(QtW.QFrame.Shape.StyledPanel)
+
+        # self._canvas = QtMW.QVideoWidget()
+        self._frame_format = QtM.QVideoFrameFormat(
+            QtC.QSize(0, 0),
+            jb_to_qt_video_frame_pixel_format(VIDEO_FRAME_PIXEL_FORMAT),
+        )
 
         video_frame_update_signal.connect(self._on_frame_update)
 
-    def _on_frame_update(self, frame: JbVideoFrame, image_format: VideoConfig.PixelFormat) -> None:
-        image = QtGui.QImage(
-            frame.data.tobytes(),
-            frame.data.shape[1],
-            frame.data.shape[0],
-            jb_to_qt_image_format[image_format],
-        )
-        self._current_pixmap = QtGui.QPixmap.fromImage(image)
-        self.setPixmap(
-            self._current_pixmap.scaled(
-                self.size(),
-                aspectMode=Qt.AspectRatioMode.KeepAspectRatio,
-                mode=Qt.TransformationMode.SmoothTransformation,
-            )
-        )
-        print("displayed")
+    def _assure_correct_frame_size(self, width: int, height: int) -> None:
+        if width != self._frame_format.frameWidth() or height != self._frame_format.frameHeight():
+            self._frame_format.setFrameSize(QtC.QSize(width, height))
+            self._frames = [
+                QtM.QVideoFrame(self._frame_format),
+                QtM.QVideoFrame(self._frame_format),
+            ]
+            self._frame_idx = 0
 
-    def resizeEvent(self, event: QtGui.QResizeEvent):
+    def _new_frame(self) -> QtM.QVideoFrame:
+        self._frame_idx = (self._frame_idx + 1) % 2
+        return self._frames[self._frame_idx]
+
+    def _on_frame_update(self, frame_jb: JbVideoFrame) -> None:
+        self._assure_correct_frame_size(frame_jb.width, frame_jb.height)
+
+        frame_qt = self._new_frame()
+        with FrameMappingContext(frame_qt, QtM.QVideoFrame.MapMode.ReadWrite):
+            for plane_idx in range(frame_qt.planeCount()):
+                frame_qt.bits(plane_idx)[:] = frame_jb.planes[plane_idx]
+        self.videoSink().setVideoFrame(frame_qt)
+
+    def resizeEvent(self, event: QtG.QResizeEvent):
         super().resizeEvent(event)
-        if self._current_pixmap is not None:
-            self.setPixmap(
-                self._current_pixmap.scaled(
-                    self.size(),
-                    aspectMode=Qt.AspectRatioMode.KeepAspectRatio,
-                    mode=Qt.TransformationMode.SmoothTransformation,
-                )
-            )
+        ...
+        # if self._current_pixmap is not None:
+        #     self.setPixmap(
+        #         self._current_pixmap.scaled(
+        #             self.size(),
+        #             aspectMode=Qt.AspectRatioMode.KeepAspectRatio,
+        #             mode=Qt.TransformationMode.SmoothTransformation,
+        #         )
+        #     )
 
 
 class Timeline(QtW.QLabel):
@@ -90,7 +127,7 @@ class PlayerView(QtW.QWidget):
 
         layout = QtW.QVBoxLayout()
         layout.addWidget(self._splitter)
-        layout.setContentsMargins(QtCore.QMargins())
+        layout.setContentsMargins(QtC.QMargins())
         self.setLayout(layout)
 
     def _add_widget_to_splitter(self, widget: QtW.QWidget, stretch_factor: int, collapsible: bool):
