@@ -412,7 +412,7 @@ class FrameMappingPreparationNode(Node):
                         lambda: self._timeline.time_scope >= frame.end_timepoint
                         or not context.tasks.is_empty()
                     )
-                    context.tasks.run_all__already_locked()
+                    context.tasks.run_all__without_lock()
 
                 if frame.end_timepoint >= context.min_timepoint:
                     # note that the value of `beg` is `max(beg_timepoint, min_timepoint)`

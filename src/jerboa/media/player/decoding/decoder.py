@@ -86,7 +86,7 @@ class JbDecoder:
     def stop(self) -> None:
         with self._mutex:
             if self._decoding_pipeline.initialized:
-                self._tasks.add_task__already_locked(JbDecoder.StopTask())
+                self._tasks.add_task__without_lock(JbDecoder.StopTask())
                 self._decoding_pipeline.add_task(JbDecoder.StopTask())
                 self._is_not_running_condition.wait_for(lambda: not self.is_running)
 

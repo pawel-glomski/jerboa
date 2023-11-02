@@ -31,9 +31,9 @@ class TaskQueue:
     def run_all(self) -> None:
         if not self.is_empty():
             with self.mutex:
-                self.run_all__already_locked()
+                self.run_all__without_lock()
 
-    def run_all__already_locked(self) -> None:
+    def run_all__without_lock(self) -> None:
         assert self.mutex.locked()
         while not self.is_empty():
             self._tasks.popleft().run()  # this should usually raise a task exception
@@ -41,13 +41,13 @@ class TaskQueue:
     def wait_for_and_run_task(self) -> None:
         with self.mutex:
             self._task_added.wait_for(lambda: not self.is_empty())
-            self.run_all__already_locked()
+            self.run_all__without_lock()
 
     def add_task(self, task: Task) -> None:
         with self.mutex:
-            self.add_task__already_locked(task)
+            self.add_task__without_lock(task)
 
-    def add_task__already_locked(self, task: Task) -> None:
+    def add_task__without_lock(self, task: Task) -> None:
         assert self.mutex.locked()
         self._tasks.append(task)
         for callback in self._task_added_callbacks:
