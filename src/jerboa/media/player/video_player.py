@@ -1,6 +1,7 @@
 from collections import deque
 from threading import Condition, Lock
 
+from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadSpawner
 from jerboa.media.core import MediaType
@@ -39,10 +40,10 @@ class TimepointSeekTask(Exception):
 class VideoPlayer:
     def __init__(
         self,
+        decoder: JbDecoder,
         thread_spawner: ThreadSpawner,
         player_stalled_signal: Signal,
         video_frame_update_signal: Signal,
-        decoder: JbDecoder,
     ):
         self._decoder = decoder
         self._thread_spawner = thread_spawner
@@ -81,45 +82,30 @@ class VideoPlayer:
     # def has_media(self) -> bool:
     #     return self._state in [PlayerState.PLAYING, PlayerState.SUSPENDED]
 
-    def wait_for_state(self, states: list[PlayerState], timeout: float) -> None:
-        with self._mutex:
-            self._wait_for_state__unsafe(states, timeout)
-
-    def _wait_for_state__unsafe(self, states: list[PlayerState], timeout: float | None) -> None:
-        if not self._state_changed.wait_for(lambda: self._state in states, timeout=timeout):
-            raise TimeoutError(f"Waiting for state ({states=}) timed out ({timeout=})")
-
     def stop(self, wait: bool = False) -> None:
         with self._mutex:
-            # self._tasks.clear()
-            if self.state not in [PlayerState.STOPPED, PlayerState.STOPPED_ON_ERROR]:
-                # self._decoder.stop()
-                self._tasks.append(StopPlayerTask())
-                self._new_tasks_added.notify()
-                if wait:
-                    self._wait_for_state__unsafe(
-                        [PlayerState.STOPPED, PlayerState.STOPPED_ON_ERROR],
-                        timeout=2 * TIMEOUT_TIME,
-                    )
+            self._stop__without_lock(wait=wait)
 
-    def start(self, source: VideoSourceVariant, sync_clock: SynchronizationClock):
-        self._thread_spawner.start(self._player_job, source, sync_clock)
+    def _stop__without_lock(self, wait: bool) -> None:
+        if self.state != PlayerState.STOPPED:
+            self._tasks.clear()
+            self._put_task__without_lock(StopPlayerTask())
+            if wait:
+                self._wait_for_state__without_lock(
+                    PlayerState.STOPPED,
+                    timeout=2 * TIMEOUT_TIME,
+                )
 
-    def _set_state_with_notify(self, state: PlayerState) -> None:
+    def _wait_for_state__without_lock(self, state: PlayerState, timeout: float | None) -> None:
+        if not self._state_changed.wait_for(lambda: self._state == state, timeout=timeout):
+            raise TimeoutError(f"Waiting for state ({state=}) timed out ({timeout=})")
+
+    def start(self, source: VideoSourceVariant, sync_clock: SynchronizationClock) -> None:
         with self._mutex:
-            self._set_state_with_notify__unsafe(state)
+            self._stop__without_lock(wait=True)
 
-    def _set_state_with_notify__unsafe(self, state: PlayerState) -> None:
-        assert self._mutex.locked()
-
-        self._state = state
-        self._state_changed.notify_all()
-
-    def _player_job(self, source: VideoSourceVariant, sync_clock: SynchronizationClock) -> None:
-        self.stop(wait=True)
-
-        try:
             self._sync_clock = sync_clock
+            self._tasks.clear()
             self._decoder.start(
                 pipeline.MediaContext.open(
                     source.path,
@@ -128,12 +114,31 @@ class VideoPlayer:
                     media_constraints=None,
                 )
             )
+
+            logger.debug("VideoPlayer: Starting the job")
+            self._thread_spawner.start(self._player_job)
+
+    def _set_state_with_notify(self, state: PlayerState) -> None:
+        with self._mutex:
+            self._set_state_with_notify__without_lock(state)
+
+    def _set_state_with_notify__without_lock(self, state: PlayerState) -> None:
+        assert self._mutex.locked()
+
+        self._state = state
+        self._state_changed.notify_all()
+
+    def _player_job(self) -> None:
+        try:
             self._set_state_with_notify(PlayerState.SUSPENDED)
             self._playback_seek_loop()
         except StopPlayerTask:
+            logger.debug("VideoPlayer: Stopping the job by a task")
+            self._decoder.stop()
             self._set_state_with_notify(PlayerState.STOPPED)
         except Exception:
-            self._set_state_with_notify(PlayerState.STOPPED_ON_ERROR)
+            logger.debug("VideoPlayer: Stopping the job by an error")
+            self._set_state_with_notify(PlayerState.STOPPED)
             raise
 
     def _playback_seek_loop(self) -> None:
@@ -175,9 +180,9 @@ class VideoPlayer:
                 try:
                     raise self._tasks.popleft()
                 except ResumePlayerTask:
-                    self._set_state_with_notify__unsafe(PlayerState.PLAYING)
+                    self._set_state_with_notify__without_lock(PlayerState.PLAYING)
                 except SuspendPlayerTask:
-                    self._set_state_with_notify__unsafe(PlayerState.SUSPENDED)
+                    self._set_state_with_notify__without_lock(PlayerState.SUSPENDED)
 
     def _sync_with_clock(self, frame: JbVideoFrame) -> bool:
         sleep_threshold = min(0.004, frame.duration / 3)
@@ -191,10 +196,10 @@ class VideoPlayer:
         return False
 
     def suspend(self) -> None:
-        self._put_task_with_lock(SuspendPlayerTask())
+        self._put_task__with_lock(SuspendPlayerTask())
 
     def resume(self) -> None:
-        self._put_task_with_lock(ResumePlayerTask())
+        self._put_task__with_lock(ResumePlayerTask())
 
     def toggle_suspend_resume(self) -> None:
         if self.state == PlayerState.PLAYING:
@@ -203,9 +208,12 @@ class VideoPlayer:
             self.resume()
 
     def seek(self, timepoint: float):
-        self._put_task_with_lock(TimepointSeekTask(timepoint))
+        self._put_task__with_lock(TimepointSeekTask(timepoint))
 
-    def _put_task_with_lock(self, task: Exception):
+    def _put_task__with_lock(self, task: Exception):
         with self._mutex:
-            self._tasks.append(task)
-            self._new_tasks_added.notify()
+            self._put_task__without_lock(task)
+
+    def _put_task__without_lock(self, task: Exception):
+        self._tasks.append(task)
+        self._new_tasks_added.notify()

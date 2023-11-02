@@ -72,11 +72,6 @@ class Container(containers.DeclarativeContainer):
 
     video_player = providers.Singleton(
         media.player.video_player.VideoPlayer,
-        player_stalled_signal=providers.Factory(
-            gui.core.QtSignal,
-        ),
-        video_frame_update_signal=video_frame_update_signal,
-        thread_spawner=thread_spawner,
         decoder=providers.Factory(
             media.player.video_player.JbDecoder,
             decoding_pipeline=media.player.decoding.decoder.create_decoding_pipeline(
@@ -84,6 +79,11 @@ class Container(containers.DeclarativeContainer):
             ),
             thread_spawner=thread_spawner,
         ),
+        thread_spawner=thread_spawner,
+        player_stalled_signal=providers.Factory(
+            gui.core.QtSignal,
+        ),
+        video_frame_update_signal=video_frame_update_signal,
     )
 
     media_player = providers.Singleton(

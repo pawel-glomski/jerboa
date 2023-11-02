@@ -1,4 +1,5 @@
 from threading import Lock
+from concurrent.futures import ThreadPoolExecutor, Future
 
 from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
@@ -6,7 +7,6 @@ from jerboa.core.multithreading import ThreadPool
 from jerboa.media.source import MediaSource
 from .audio_player import AudioPlayer
 from .video_player import VideoPlayer
-from .state import PlayerState
 from .clock import SynchronizationClock
 
 
@@ -42,9 +42,10 @@ class MediaPlayer:
         return self._video_player.video_frame_update_signal
 
     def start(self, media_source: MediaSource):
+        assert media_source.audio.is_available or media_source.video.is_available
         assert media_source.is_resolved
 
-        logger.info(f'MediaPlayer: Preparing to play "{media_source.title}"')
+        logger.info(f"MediaPlayer: Preparing to play '{media_source.title}'")
 
         self._audio_player.stop()
         self._video_player.stop()
@@ -59,34 +60,55 @@ class MediaPlayer:
                     "We must wait before proceeding."
                 )
 
-            players = list[AudioPlayer | VideoPlayer]()
-            with self._mutex:
-                if media_source.audio.is_available:
-                    pass
-                    # self._audio_player.start(media_source.audio.selected_variant_group[0])
-                    # players.append(self._audio_player)
+            with self._mutex, ThreadPoolExecutor(max_workers=2) as executor:
+                players_future = list[tuple[AudioPlayer | VideoPlayer, Future]]()
+                # if media_source.audio.is_available:
+                #     players_future.append(
+                #         (
+                #             self._audio_player,
+                #             executor.submit(
+                #                 self._audio_player.start,
+                #                 source=media_source.audio.selected_variant_group[0],
+                #             ),
+                #         )
+                #     )
                 if media_source.video.is_available:
                     sync_clock = self._sync_clock
                     # if media_source.audio.is_available:
                     #     sync_clock = self._audio_player
-                    self._video_player.start(
-                        media_source.video.selected_variant_group[0], sync_clock
+                    players_future.append(
+                        (
+                            self._video_player,
+                            executor.submit(
+                                self._video_player.start,
+                                source=media_source.video.selected_variant_group[0],
+                                sync_clock=sync_clock,
+                            ),
+                        )
                     )
-                    players.append(self._video_player)
 
-            for player in players:
-                player.wait_for_state(
-                    states=[PlayerState.SUSPENDED, PlayerState.STOPPED_ON_ERROR],
-                    timeout=PLAYER_PREP_TIMEOUT,
-                )
-                if player.state == PlayerState.STOPPED_ON_ERROR:
-                    logger.error(f"MediaPlayer: Failed to play '{media_source.title}'")
-                    break
-            else:
-                self._sync_clock.start()
+                for player, future in players_future:
+                    try:
+                        exception = future.exception(timeout=PLAYER_PREP_TIMEOUT)
+                    except TimeoutError as exc:
+                        exception = exc
+
+                    if exception is not None:
+                        logger.error(
+                            f"MediaPlayer: Failed to start {type(player)} "
+                            f"to play '{media_source.title}'"
+                        )
+                        # in case any of the players succeeded
+                        # this is not really necessary, but it can save some memory and CPU usage
+                        self._video_player.stop()
+                        self._audio_player.stop()
+                        raise exception
+
+                # initialization succeeded
+                self._sync_clock.resume()
                 self._video_player.resume()
 
-                logger.info(f'MediaPlayer: Ready to play "{media_source.title}"')
+                logger.info(f"MediaPlayer: Ready to play '{media_source.title}'")
                 self._ready_to_play_signal.emit()
 
         self._thread_pool.start(prepare_players)

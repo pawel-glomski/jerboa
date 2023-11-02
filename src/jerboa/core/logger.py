@@ -13,7 +13,7 @@ handler.setFormatter(formatter)
 
 logger = logging.getLogger("jerboa")
 logger.addHandler(handler)
-logger.setLevel(logging.INFO)
+logger.setLevel(logging.DEBUG)
 
 
 @lru_cache(5)

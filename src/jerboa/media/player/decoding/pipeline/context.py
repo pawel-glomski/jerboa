@@ -1,0 +1,142 @@
+import av
+from dataclasses import dataclass, field
+from threading import Lock
+from gmpy2 import mpq as FastFraction
+
+from jerboa.media import av_to_jb, standardized_audio as std_audio
+from jerboa.media.core import (
+    MediaType,
+    AudioConfig,
+    VideoConfig,
+    AudioConstraints,
+    VIDEO_FRAME_PIXEL_FORMAT,
+)
+from jerboa.media.player.decoding.task_queue import Task, TaskQueue
+
+DEFAULT_MEAN_KEYFRAME_INTERVAL = 0.25
+
+
+@dataclass(frozen=True)
+class MediaContext:
+    av_container: av.container.InputContainer
+    av_stream: av.audio.AudioStream | av.video.VideoStream
+
+    intermediate_config: AudioConfig | VideoConfig
+    presentation_config: AudioConfig | VideoConfig
+
+    @property
+    def start_timepoint(self) -> float:
+        return max(0, self.av_stream.start_time * self.av_stream.time_base)
+
+    @staticmethod
+    def open(
+        filepath: str,
+        media_type: MediaType,
+        stream_idx: int,
+        media_constraints: AudioConstraints | None,
+    ) -> "MediaContext":
+        assert media_type in [MediaType.AUDIO, MediaType.VIDEO]
+
+        container = av.open(filepath)
+
+        if media_type == MediaType.AUDIO:
+            assert media_constraints is not None
+            stream = container.streams.audio[stream_idx]
+        else:
+            stream = container.streams.video[stream_idx]
+        stream.thread_type = "AUTO"
+
+        presentation_config = MediaContext.create_presentation_media_config(
+            stream=stream,
+            constraints=media_constraints,
+        )
+        intermediate_config = MediaContext.create_intermediate_media_config(presentation_config)
+
+        return MediaContext(
+            av_container=container,
+            av_stream=stream,
+            intermediate_config=intermediate_config,
+            presentation_config=presentation_config,
+        )
+
+    @staticmethod
+    def create_intermediate_media_config(
+        presentation_media_config: AudioConfig | VideoConfig,
+    ) -> AudioConfig | VideoConfig:
+        if presentation_media_config.media_type == MediaType.AUDIO:
+            return AudioConfig(
+                sample_format=std_audio.SAMPLE_FORMAT_JB,
+                channel_layout=presentation_media_config.channel_layout,
+                sample_rate=presentation_media_config.sample_rate,
+                frame_duration=presentation_media_config.frame_duration or std_audio.FRAME_DURATION,
+            )
+        return presentation_media_config  # no changes for video config
+
+    @staticmethod
+    def create_presentation_media_config(
+        stream: av.audio.AudioStream | av.video.VideoStream,
+        constraints: AudioConstraints,
+    ) -> AudioConfig | VideoConfig:
+        if MediaType(stream.type) == MediaType.AUDIO:
+            return AudioConfig(
+                sample_format=MediaContext._select_best_audio_presentation_sample_format(
+                    supported_sample_formats=constraints.sample_formats,
+                ),
+                channel_layout=MediaContext._select_best_audio_channel_layout(
+                    av_channel_layout=stream.layout,
+                    supported_channel_layouts=constraints.channel_layouts,
+                ),
+                sample_rate=MediaContext._select_best_sample_rate(
+                    source_sample_rate=stream.sample_rate,
+                    supported_sample_rate_min=constraints.sample_rate_min,
+                    supported_sample_rate_max=constraints.sample_rate_max,
+                ),
+                frame_duration=None,
+            )
+        return VideoConfig(
+            pixel_format=VIDEO_FRAME_PIXEL_FORMAT,
+            sample_aspect_ratio=stream.sample_aspect_ratio or FastFraction(1, 1),
+        )
+
+    @staticmethod
+    def _select_best_audio_presentation_sample_format(
+        supported_sample_formats: AudioConstraints.SampleFormat,
+    ) -> AudioConstraints.SampleFormat:
+        if std_audio.SAMPLE_FORMAT_JB & supported_sample_formats:
+            return std_audio.SAMPLE_FORMAT_JB
+        return supported_sample_formats.best_quality()
+
+    @staticmethod
+    def _select_best_audio_channel_layout(
+        av_channel_layout: av.AudioLayout,
+        supported_channel_layouts: AudioConstraints.ChannelLayout,
+    ) -> AudioConstraints.SampleFormat:
+        jb_channel_layout = av_to_jb.audio_channel_layout(av_channel_layout)
+        return jb_channel_layout.closest_standard_layout(constraint=supported_channel_layouts)
+
+    @staticmethod
+    def _select_best_sample_rate(
+        source_sample_rate: int,
+        supported_sample_rate_min: int,
+        supported_sample_rate_max: int,
+    ) -> int:
+        return min(supported_sample_rate_max, max(supported_sample_rate_min, source_sample_rate))
+
+
+@dataclass
+class DecodingContext:
+    media: MediaContext
+
+    last_seek_timepoint: float | None = None
+    min_timepoint: float = 0
+    mean_keyframe_interval: float = DEFAULT_MEAN_KEYFRAME_INTERVAL
+
+    mutex: Lock = field(default_factory=Lock)
+
+    def __post_init__(self):
+        self.tasks = TaskQueue(mutex=self.mutex)
+
+
+@dataclass
+class SeekTask(Task):
+    timepoint: float
