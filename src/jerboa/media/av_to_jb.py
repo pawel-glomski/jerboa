@@ -27,4 +27,7 @@ def audio_channel_layout(av_layout: av.AudioLayout):
             case _:
                 pass
 
+    if result == AudioConstraints.ChannelLayout.NONE:
+        # at least let's try mono
+        return AudioConstraints.ChannelLayout.LAYOUT_MONO
     return result

@@ -232,13 +232,13 @@ def create_circular_audio_buffer(
     if max_duration is None:
         max_duration = audio_config.frame_duration
 
-    buffer_dtype = jb_to_av.audio_sample_format_dtype(audio_config.sample_format)
+    buffer_dtype = audio_config.sample_format.dtype
     buffer_length = int(max_duration * audio_config.sample_rate * AUDIO_BUFFER_SIZE_MODIFIER)
     if audio_config.sample_format.is_planar:
-        buffer_shape = [audio_config.channel_layout.channels_num, buffer_length]
+        buffer_shape = [audio_config.channels_num, buffer_length]
         axis = 1
     else:
-        buffer_shape = [buffer_length, audio_config.channel_layout.channels_num]
+        buffer_shape = [buffer_length, audio_config.channels_num]
         axis = 0
 
     return CircularBuffer(buffer_shape, axis, buffer_dtype)

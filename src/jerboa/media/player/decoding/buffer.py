@@ -34,9 +34,9 @@ class AudioBuffer:
         assert not self.is_full()
 
         if self._timepoint is None:
-            self._timepoint = audio_frame.timepoint
+            self._timepoint = audio_frame.beg_timepoint
 
-        self._audio.put(audio_frame.signal)
+        self._audio.put(audio_frame.audio_signal)
         # self._audio_last_sample[:] = self._audio[-1]
 
     def pop(self, samples_num: int) -> JbAudioFrame:

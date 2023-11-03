@@ -85,10 +85,11 @@ class PathSelector(QtW.QWidget):
 
         def job():
             try:
-                path = self._path_processor.process(self._path_input.text())
-                self._path_selected_signal.emit(path)
+                self._path_selected_signal.emit(
+                    media_source_path=self._path_processor.process(self._path_input.text())
+                )
             except PathProcessor.InvalidPathError as err:
-                self._path_invalid_signal.emit(str(err))
+                self._path_invalid_signal.emit(error_message=str(err))
 
         # had to add a delay, so when the path is selected with an 'Enter' press, the event won't
         # transfer to the gui elements created by the signal subscribers

@@ -17,46 +17,50 @@ DEFAULT_MEAN_KEYFRAME_INTERVAL = 0.25
 
 
 @dataclass(frozen=True)
-class MediaContext:
-    av_container: av.container.InputContainer
-    av_stream: av.audio.AudioStream | av.video.VideoStream
-
-    intermediate_config: AudioConfig | VideoConfig
-    presentation_config: AudioConfig | VideoConfig
+class AVContext:
+    container: av.container.InputContainer
+    stream: av.audio.AudioStream | av.video.VideoStream
 
     @property
     def start_timepoint(self) -> float:
-        return max(0, self.av_stream.start_time * self.av_stream.time_base)
+        return max(0, self.stream.start_time * self.stream.time_base)
 
     @staticmethod
     def open(
         filepath: str,
         media_type: MediaType,
         stream_idx: int,
-        media_constraints: AudioConstraints | None,
-    ) -> "MediaContext":
+    ) -> "AVContext":
         assert media_type in [MediaType.AUDIO, MediaType.VIDEO]
 
         container = av.open(filepath)
-
         if media_type == MediaType.AUDIO:
-            assert media_constraints is not None
             stream = container.streams.audio[stream_idx]
         else:
             stream = container.streams.video[stream_idx]
         stream.thread_type = "AUTO"
 
-        presentation_config = MediaContext.create_presentation_media_config(
-            stream=stream,
-            constraints=media_constraints,
-        )
-        intermediate_config = MediaContext.create_intermediate_media_config(presentation_config)
+        return AVContext(container, stream)
 
-        return MediaContext(
-            av_container=container,
-            av_stream=stream,
-            intermediate_config=intermediate_config,
-            presentation_config=presentation_config,
+
+@dataclass(frozen=True, init=False)
+class MediaContext:
+    av: AVContext
+    intermediate_config: AudioConfig | VideoConfig
+    presentation_config: AudioConfig | VideoConfig
+
+    def __init__(self, av: AVContext, media_constraints: AudioConstraints | None):
+        super().__setattr__("av", av)
+        super().__setattr__(
+            "presentation_config",
+            MediaContext.create_presentation_media_config(
+                stream=av.stream,
+                constraints=media_constraints,
+            ),
+        )
+        super().__setattr__(
+            "intermediate_config",
+            MediaContext.create_intermediate_media_config(self.presentation_config),
         )
 
     @staticmethod

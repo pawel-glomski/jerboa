@@ -47,8 +47,8 @@ class MediaPlayer:
 
         logger.info(f"MediaPlayer: Preparing to play '{media_source.title}'")
 
-        self._audio_player.stop()
-        self._video_player.stop()
+        self._audio_player.shutdown()
+        self._video_player.shutdown()
         self._sync_clock.stop()
 
         def prepare_players():
@@ -62,16 +62,16 @@ class MediaPlayer:
 
             with self._mutex, ThreadPoolExecutor(max_workers=2) as executor:
                 players_future = list[tuple[AudioPlayer | VideoPlayer, Future]]()
-                # if media_source.audio.is_available:
-                #     players_future.append(
-                #         (
-                #             self._audio_player,
-                #             executor.submit(
-                #                 self._audio_player.start,
-                #                 source=media_source.audio.selected_variant_group[0],
-                #             ),
-                #         )
-                #     )
+                if media_source.audio.is_available:
+                    players_future.append(
+                        (
+                            self._audio_player,
+                            executor.submit(
+                                self._audio_player.startup,
+                                source=media_source.audio.selected_variant_group[0],
+                            ),
+                        )
+                    )
                 if media_source.video.is_available:
                     sync_clock = self._sync_clock
                     # if media_source.audio.is_available:
@@ -80,7 +80,7 @@ class MediaPlayer:
                         (
                             self._video_player,
                             executor.submit(
-                                self._video_player.start,
+                                self._video_player.startup,
                                 source=media_source.video.selected_variant_group[0],
                                 sync_clock=sync_clock,
                             ),
@@ -98,14 +98,15 @@ class MediaPlayer:
                             f"MediaPlayer: Failed to start {type(player)} "
                             f"to play '{media_source.title}'"
                         )
-                        # in case any of the players succeeded
-                        # this is not really necessary, but it can save some memory and CPU usage
-                        self._video_player.stop()
-                        self._audio_player.stop()
+                        # in case any of the players succeeded, shut it down
+                        # (this is not really necessary, but it can save some memory and CPU usage)
+                        self._video_player.shutdown()
+                        self._audio_player.shutdown()
                         raise exception
 
                 # initialization succeeded
                 self._sync_clock.resume()
+                self._audio_player.resume()
                 self._video_player.resume()
 
                 logger.info(f"MediaPlayer: Ready to play '{media_source.title}'")

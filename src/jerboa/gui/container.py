@@ -53,9 +53,7 @@ class Container(containers.DeclarativeContainer):
     menu_bar_file_open = providers.Singleton(
         menu_bar.MenuAction,
         name="Open",
-        signal=providers.Factory(
-            core.QtSignal,
-        ),
+        signal=providers.Factory(core.signal.QtSignal),
     )
     menu_bar_file = providers.Singleton(
         menu_bar.Menu,
@@ -135,17 +133,9 @@ class Container(containers.DeclarativeContainer):
             local_file_extension_filter=(
                 "Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)"
             ),
-            path_invalid_signal=providers.Factory(
-                core.QtSignal,
-                str,
-            ),
-            path_selected_signal=providers.Factory(
-                core.QtSignal,
-                JbPath,
-            ),
-            path_modified_signal=providers.Factory(
-                core.QtSignal,
-            ),
+            path_invalid_signal=providers.Factory(core.signal.QtSignal, "error_message"),
+            path_selected_signal=providers.Factory(core.signal.QtSignal, "media_source_path"),
+            path_modified_signal=providers.Factory(core.signal.QtSignal),
         ),
         media_source_resolver=providers.Factory(
             media_source_selection.resolver.MediaSourceResolver,
@@ -168,10 +158,7 @@ class Container(containers.DeclarativeContainer):
         ),
         recognizer=providers.Factory(
             MediaSourceRecognizer,
-            recognition_finished_signal=providers.Factory(
-                core.QtSignal,
-                object,  # accepts a callable
-            ),
+            recognition_finished_signal=providers.Factory(core.signal.QtSignal, "callback"),
             thread_pool=thread_pool,
         ),
         media_source_selected_signal=media_source_selected_signal,

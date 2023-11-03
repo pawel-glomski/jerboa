@@ -1,4 +1,5 @@
 import enum
+import numpy as np
 from dataclasses import dataclass
 from fractions import Fraction
 
@@ -28,6 +29,20 @@ class AudioConstraints:
         def is_planar(self) -> bool:
             assert USING_PLANAR_AUDIO_ONLY
             return True
+
+        @property
+        def dtype(self) -> np.dtype:
+            match self:
+                case AudioConstraints.SampleFormat.U8:
+                    return np.dtype(np.uint8)
+                case AudioConstraints.SampleFormat.S16:
+                    return np.dtype(np.int16)
+                case AudioConstraints.SampleFormat.S32:
+                    return np.dtype(np.int32)
+                case AudioConstraints.SampleFormat.F32:
+                    return np.dtype(np.float32)
+                case _:
+                    raise ValueError(f"Unrecognized sample format: {self}")
 
         def best_quality(self) -> "AudioConstraints.SampleFormat":
             for sf in reversed(AudioConstraints.SampleFormat):
@@ -75,11 +90,11 @@ class AudioConstraints:
                 return wanted_layout
 
             # find a standard layout in the wanted layout
-            for std_layout in reversed():
+            for std_layout in reversed(standard_layouts):
                 if (std_layout & wanted_layout) == std_layout:
                     return std_layout
 
-            # just use mono if the wanted layout is not recognized
+            # use mono if the wanted layout is not recognized
             return AudioConstraints.ChannelLayout.LAYOUT_MONO
 
         @staticmethod
@@ -119,6 +134,14 @@ class AudioConfig:
     @property
     def media_type(self) -> MediaType:
         return MediaType.AUDIO
+
+    @property
+    def channels_num(self) -> int:
+        return self.channel_layout.channels_num
+
+    @property
+    def bytes_per_sample(self) -> int:
+        return self.channels_num * self.sample_format.dtype.itemsize
 
 
 @dataclass

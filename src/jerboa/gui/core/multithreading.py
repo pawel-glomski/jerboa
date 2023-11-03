@@ -1,16 +1,15 @@
 from typing import Callable
 
-from PySide6 import QtCore
+from PySide6 import QtCore as QtC
 
 from jerboa.core.logger import logger
-from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadPool, ThreadSpawner
 
 
 class QtThreadPool(ThreadPool):
     def __init__(self, workers: int | None = None):
         super().__init__()
-        self._thread_pool = QtCore.QThreadPool()
+        self._thread_pool = QtC.QThreadPool()
         if workers:
             self._thread_pool.setMaxThreadCount(workers)
 
@@ -29,8 +28,8 @@ class QtThreadPool(ThreadPool):
 
 
 class QtThreadSpawner(ThreadSpawner):
-    class Worker(QtCore.QObject):
-        finished = QtCore.Signal()
+    class Worker(QtC.QObject):
+        finished = QtC.Signal()
 
         def __init__(
             self,
@@ -53,10 +52,10 @@ class QtThreadSpawner(ThreadSpawner):
                 raise
 
     def __init__(self):
-        self._threads = dict[QtCore.QThread, QtThreadSpawner.Worker]()
+        self._threads = dict[QtC.QThread, QtThreadSpawner.Worker]()
 
     def start(self, job: Callable, *args, **kwargs):
-        thread = QtCore.QThread()
+        thread = QtC.QThread()
 
         def on_finished():
             thread.quit()
@@ -74,28 +73,3 @@ class QtThreadSpawner(ThreadSpawner):
     def wait(self, timeout: int | None = None) -> bool:
         for thread in self._threads:
             thread.wait(-1 if timeout is None else timeout)
-
-
-class QtSignal(Signal):
-    def __init__(  # pylint: disable=dangerous-default-value
-        self,
-        *arg_types: type,
-        max_subscribers: float = float("inf"),
-    ):
-        super().__init__(max_subscribers=max_subscribers)
-        self._arg_types = arg_types
-        self._signal_wrapper = QtSignal._dynamic_qt_signal(*arg_types)
-
-    def connect(self, subscriber: Callable) -> None:
-        super().connect(subscriber)
-        self._signal_wrapper.signal.connect(subscriber)
-
-    def emit(self, *args) -> None:
-        self._signal_wrapper.signal.emit(*args)
-
-    @staticmethod
-    def _dynamic_qt_signal(*arg_types: type):
-        class SignalWrapper(QtCore.QObject):
-            signal = QtCore.Signal(*arg_types)
-
-        return SignalWrapper()

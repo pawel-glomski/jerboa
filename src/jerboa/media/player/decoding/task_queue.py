@@ -8,6 +8,16 @@ class Task(Exception):
         raise self
 
 
+class FnTask(Task):
+    def __init__(self, fn: Callable, /, *args, **kwargs) -> None:
+        self._fn = fn
+        self._args = args
+        self._kwargs = kwargs
+
+    def run(self) -> None:
+        self._fn(*self._args, *self._kwargs)
+
+
 class TaskQueue:
     def __init__(self, mutex: Lock = Lock()) -> None:
         self._mutex = mutex

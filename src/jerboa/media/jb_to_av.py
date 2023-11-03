@@ -5,35 +5,21 @@ from .core import AudioConstraints, VideoConfig
 
 
 def audio_sample_format(sample_format_jb: AudioConstraints.SampleFormat) -> av.AudioFormat:
-    assert sample_format_jb.is_planar
-
     match sample_format_jb:
         case AudioConstraints.SampleFormat.U8:
-            av_name = "u8p"
+            av_name = "u8"
         case AudioConstraints.SampleFormat.S16:
-            av_name = "s16p"
+            av_name = "s16"
         case AudioConstraints.SampleFormat.S32:
-            av_name = "s32p"
+            av_name = "s32"
         case AudioConstraints.SampleFormat.F32:
-            av_name = "fltp"
+            av_name = "flt"
         case _:
             raise ValueError(f"Unrecognized sample format: {sample_format_jb}")
+
+    av_name += "p" if sample_format_jb.is_planar else ""
 
     return av.AudioFormat(av_name)
-
-
-def audio_sample_format_dtype(sample_format_jb: AudioConstraints.SampleFormat) -> np.dtype:
-    match sample_format_jb:
-        case AudioConstraints.SampleFormat.U8:
-            return np.uint8
-        case AudioConstraints.SampleFormat.S16:
-            return np.int16
-        case AudioConstraints.SampleFormat.S32:
-            return np.int32
-        case AudioConstraints.SampleFormat.F32:
-            return np.float32
-        case _:
-            raise ValueError(f"Unrecognized sample format: {sample_format_jb}")
 
 
 def audio_channel_layout(channel_layout_jb: AudioConstraints.ChannelLayout) -> av.AudioLayout:

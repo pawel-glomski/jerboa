@@ -1,7 +1,7 @@
 from threading import Lock, Condition
 
 from jerboa.core.multithreading import ThreadSpawner
-from jerboa.media.core import MediaType
+from jerboa.media.core import MediaType, AudioConfig, VideoConfig
 from .buffer import AudioBuffer, VideoBuffer, create_buffer
 from .task_queue import Task, TaskQueue
 from . import pipeline
@@ -76,6 +76,14 @@ class JbDecoder:
         self._tasks.add_on_task_added_callback(self._buffer_not_full_or_task_added.notify)
 
     @property
+    def media_type(self) -> MediaType:
+        return self._decoding_pipeline.media_type
+
+    @property
+    def presentation_media_config(self) -> AudioConfig | VideoConfig:
+        return self._decoding_pipeline.presentation_media_config
+
+    @property
     def is_running(self) -> bool:
         return self._decoding_pipeline.initialized
 
@@ -90,27 +98,26 @@ class JbDecoder:
                 self._decoding_pipeline.add_task(JbDecoder.StopTask())
                 self._is_not_running_condition.wait_for(lambda: not self.is_running)
 
-    def start(self, media: pipeline.MediaContext, start_timepoint: float | None = None) -> None:
+    def start(
+        self,
+        media: pipeline.context.MediaContext,
+        start_timepoint: float | None = None,
+    ) -> None:
         self.stop()
 
         with self._mutex:
+            assert not self.is_running
+
+            self._buffer = create_buffer(media.presentation_config, BUFFER_DURATION)
+            self._decoding_pipeline.init(media=media, start_timepoint=start_timepoint)
             self._is_done = False
-            self._thread_spawner.start(
-                self.__decoding,
-                media,
-                start_timepoint,
-            )
+
+            self._thread_spawner.start(self.__decoding)
 
     def __decoding(
         self,
-        media: pipeline.MediaContext,
-        start_timepoint: float | None = None,
     ) -> None:
-        assert not self.is_running
-
-        self._buffer = create_buffer(media.presentation_config, BUFFER_DURATION)
-        self._decoding_pipeline.init(media=media, start_timepoint=start_timepoint)
-
+        assert self.is_running
         while True:
             try:
                 self._tasks.run_all()  # this must be before the `pull()` call
@@ -151,7 +158,10 @@ class JbDecoder:
             # else a task has been added, which will be handled in the main loop
 
     def pop(
-        self, *args, timeout: float | None = None
+        self,
+        /,
+        *args,
+        timeout: float | None = None,
     ) -> pipeline.frame.JbAudioFrame | pipeline.frame.JbVideoFrame | None:
         frame = None
         with self._mutex:
@@ -159,9 +169,9 @@ class JbDecoder:
                 lambda: self._buffer is not None and not self._buffer.is_empty() or self.is_done,
                 timeout=timeout,
             ):
-                if not self.is_done:
+                if self._buffer is not None and not self._buffer.is_empty():
                     frame = self._buffer.pop(*args)
-                    self._buffer_not_empty_or_done_decoding.notify()
+                    self._buffer_not_full_or_task_added.notify()
                     return frame
             else:
                 raise TimeoutError()

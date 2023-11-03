@@ -15,7 +15,7 @@ class MediaSourceRecognizer:
         thread_pool: ThreadPool,
     ) -> None:
         self._recognition_finished_signal = recognition_finished_signal
-        self._recognition_finished_signal.connect(lambda fn: fn())
+        self._recognition_finished_signal.connect(lambda callback: callback())
 
         self._thread_pool = thread_pool
 
@@ -97,6 +97,6 @@ class MediaSourceRecognizer:
                     else:
                         on_failure(recognition_error_message)
 
-            self._recognition_finished_signal.emit(callback_call)
+            self._recognition_finished_signal.emit(callback=callback_call)
 
         self._thread_pool.start(job)

@@ -68,13 +68,14 @@ class Canvas(QtMW.QVideoWidget):
         self._frame_idx = (self._frame_idx + 1) % 2
         return self._frames[self._frame_idx]
 
-    def _on_frame_update(self, frame_jb: JbVideoFrame) -> None:
-        self._assure_correct_frame_size(frame_jb.width, frame_jb.height)
+    def _on_frame_update(self, frame: JbVideoFrame) -> None:
+        self._assure_correct_frame_size(frame.width, frame.height)
 
         frame_qt = self._new_frame()
         with FrameMappingContext(frame_qt, QtM.QVideoFrame.MapMode.ReadWrite):
             for plane_idx in range(frame_qt.planeCount()):
-                frame_qt.bits(plane_idx)[:] = frame_jb.planes[plane_idx]
+                frame_qt.bits(plane_idx)[:] = frame.planes[plane_idx]
+
         self.videoSink().setVideoFrame(frame_qt)
 
     def resizeEvent(self, event: QtG.QResizeEvent):

@@ -16,9 +16,12 @@ from jerboa.media.core import AudioConstraints
 
 SAMPLE_FORMAT_JB = AudioConstraints.SampleFormat.F32
 SAMPLE_FORMAT_AV = av.AudioFormat("flt").planar
-assert DType == np.float32 and DType == np.dtype(
-    av.audio.frame.format_dtypes[SAMPLE_FORMAT_AV.name]
+assert (
+    DType == np.float32
+    and DType == np.dtype(av.audio.frame.format_dtypes[SAMPLE_FORMAT_AV.name])
+    and DType == SAMPLE_FORMAT_JB.dtype
 )
+assert SAMPLE_FORMAT_AV.is_planar == SAMPLE_FORMAT_JB.is_planar
 
 # bigger frames are faster - less conversions to numpy and less iterations on the python side
 # usually 1 second gives good results, bigger than that may actually slow things down
@@ -28,7 +31,7 @@ TRANSITION_DURATION = 8.0 / 16000  # in seconds, 8 steps when sample_rate == 160
 
 
 def get_from_frame(frame: av.AudioFrame) -> np.ndarray:
-    assert frame.format.name == SAMPLE_FORMAT_AV.name and SAMPLE_FORMAT_AV.planar
+    assert frame.format.name == SAMPLE_FORMAT_AV.name
     # this is faster than frame.to_ndarray
     return np.vstack([np.frombuffer(x, dtype=DType, count=frame.samples) for x in frame.planes])
 
@@ -36,7 +39,6 @@ def get_from_frame(frame: av.AudioFrame) -> np.ndarray:
 def reformat(audio: np.ndarray, wanted_dtype: np.dtype, packed: bool = False) -> np.ndarray:
     if packed:
         audio = audio.T.reshape((-2, 2))
-
     if wanted_dtype != DType:
         assert np.issubdtype(DType, np.floating)
 

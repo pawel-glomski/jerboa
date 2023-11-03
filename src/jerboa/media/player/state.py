@@ -2,6 +2,6 @@ from enum import Enum, auto
 
 
 class PlayerState(Enum):
-    STOPPED = auto()
+    SHUT_DOWN = auto()
     SUSPENDED = auto()
     PLAYING = auto()

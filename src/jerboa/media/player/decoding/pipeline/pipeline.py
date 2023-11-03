@@ -1,6 +1,6 @@
 from typing import Any
 
-from jerboa.media.core import MediaType
+from jerboa.media.core import MediaType, AudioConfig, VideoConfig
 from .node import Node
 from .context import MediaContext, DecodingContext, SeekTask
 
@@ -21,6 +21,12 @@ class Pipeline:
         return self._media_type
 
     @property
+    def presentation_media_config(self) -> AudioConfig | VideoConfig | None:
+        if self.initialized:
+            return self._context.media.presentation_config
+        return None
+
+    @property
     def context(self) -> DecodingContext:
         return self._context
 
@@ -32,20 +38,20 @@ class Pipeline:
         self._context = None
 
     def init(self, media: MediaContext, start_timepoint: float | None = None) -> None:
-        assert media.av_container == media.av_stream.container
-        assert MediaType(media.av_stream.type) == self._media_type
+        assert media.av.container == media.av.stream.container
+        assert MediaType(media.av.stream.type) == self._media_type
 
         self._context = DecodingContext(media=media)
         self._root_node.reset(self._context, hard=True, recursive=True)
 
-        self._seek(start_timepoint or media.start_timepoint or 0)
+        self._seek(start_timepoint or media.av.start_timepoint or 0)
 
     def _seek(self, timepoint: float) -> None:
         assert timepoint >= 0
 
-        self._context.media.av_container.seek(
-            round(timepoint / self._context.media.av_stream.time_base),
-            stream=self._context.media.av_stream,
+        self._context.media.av.container.seek(
+            round(timepoint / self._context.media.av.stream.time_base),
+            stream=self._context.media.av.stream,
         )
         self._context.last_seek_timepoint = timepoint
         self._context.min_timepoint = timepoint

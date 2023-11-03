@@ -113,7 +113,7 @@ class Dialog(QtW.QDialog):
             assert self._media_source.title == media_source.title
             assert media_source.is_resolved
 
-        self._media_source_selected_signal.emit(media_source)
+        self._media_source_selected_signal.emit(media_source=media_source)
 
     def _on_media_source_path_selected(self, media_source_path: JbPath) -> None:
         self._button_box.reset()

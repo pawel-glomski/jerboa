@@ -22,7 +22,7 @@ class AudioMapper:
 
         self._stretcher = RubberBandStretcher(
             config.sample_rate,
-            config.channel_layout.channels_num,
+            config.channels_num,
             Option.PROCESS_REALTIME | Option.ENGINE_FASTER | Option.WINDOW_LONG,
         )
         self._stretcher.set_max_process_size(self._audio.max_size)
@@ -49,7 +49,7 @@ class AudioMapper:
         if flush:
             if self._next_frame_beg_timepoint is not None:
                 flushing_packet = std_audio.create_audio_array(
-                    self._config.channel_layout.channels_num,
+                    self._config.channels_num,
                     self._stretcher.get_samples_required(),
                 )
                 self._stretcher.process(flushing_packet, final=True)

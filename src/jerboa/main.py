@@ -20,32 +20,26 @@ class Container(containers.DeclarativeContainer):
 
     # ---------------------------------- Signals --------------------------------- #
 
-    media_source_selected_signal = providers.Singleton(
-        gui.core.QtSignal,
-        media.source.MediaSource,
-    )
-    ready_to_play_signal = providers.Singleton(
-        gui.core.QtSignal,
-    )
-    video_frame_update_signal = providers.Singleton(
-        gui.core.QtSignal,
-        media.player.video_player.JbVideoFrame,
-    )
+    media_source_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "media_source")
+    ready_to_play_signal = providers.Singleton(gui.core.signal.QtSignal, "media_source")
+    video_frame_update_signal = providers.Singleton(gui.core.signal.QtSignal, "frame")
 
-    media_player_start_signal = providers.Singleton(gui.core.QtSignal)
-    media_player_resume_signal = providers.Singleton(gui.core.QtSignal)
-    media_player_pause_signal = providers.Singleton(gui.core.QtSignal)
+    # media_player_start_signal = providers.Singleton(gui.core.signal.QtSignal)
+    # media_player_resume_signal = providers.Singleton(gui.core.signal.QtSignal)
+    # media_player_pause_signal = providers.Singleton(gui.core.signal.QtSignal)
 
-    audio_output_devices_changed_signal = providers.Singleton(gui.core.QtSignal)
-    current_audio_output_device_changed_signal = providers.Singleton(gui.core.QtSignal)
+    audio_output_devices_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
+    current_audio_output_device_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
 
     # ------------------------------ Multithreading ------------------------------ #
 
     thread_spawner = providers.Singleton(
+        # gui.core.multithreading.QtThreadSpawner
         core.multithreading.PyThreadSpawner
-    )  # gui.core.QtThreadSpawner)
+    )
     thread_pool = providers.Singleton(
-        core.multithreading.PyThreadPool,  # gui.core.QtThreadPool
+        # gui.core.multithreading.QtThreadPool,
+        core.multithreading.PyThreadPool,
         workers=8,
     )
 
@@ -62,12 +56,16 @@ class Container(containers.DeclarativeContainer):
         media.player.audio_player.AudioPlayer,
         audio_manager=audio_manager,
         decoder=providers.Factory(
-            media.player.video_player.JbDecoder,
+            media.player.audio_player.JbDecoder,
             decoding_pipeline=media.player.decoding.decoder.create_decoding_pipeline(
                 media.core.MediaType.AUDIO
             ),
             thread_spawner=thread_spawner,
         ),
+        shutdown_signal=providers.Factory(gui.core.signal.QtSignal, "lock"),
+        suspend_signal=providers.Factory(gui.core.signal.QtSignal),
+        resume_signal=providers.Factory(gui.core.signal.QtSignal),
+        seek_signal=providers.Factory(gui.core.signal.QtSignal, "timepoint"),
     )
 
     video_player = providers.Singleton(
@@ -80,9 +78,7 @@ class Container(containers.DeclarativeContainer):
             thread_spawner=thread_spawner,
         ),
         thread_spawner=thread_spawner,
-        player_stalled_signal=providers.Factory(
-            gui.core.QtSignal,
-        ),
+        player_stalled_signal=providers.Factory(gui.core.signal.QtSignal),
         video_frame_update_signal=video_frame_update_signal,
     )
 

@@ -127,7 +127,7 @@ class DemuxingNode(Node):
         self._demuxer: Iterable[av.Packet] = None
 
     def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
-        self._demuxer = context.media.av_container.demux(context.media.av_stream)
+        self._demuxer = context.media.av.container.demux(context.media.av.stream)
         super().reset(context, hard, recursive)
 
     def pull(self, _) -> av.Packet | None:
@@ -218,9 +218,9 @@ class AudioFrameTimingCorrectionNode(Node):
         if hard:
             self._frame_time_base_standardizer = lambda _: None  # do nothing by default
 
-            std_time_base = FastFraction(1, context.media.av_stream.sample_rate)
+            std_time_base = FastFraction(1, context.media.av.stream.sample_rate)
             frame_time_base_to_std_time_base = (
-                FastFraction(context.media.av_stream.time_base) / std_time_base
+                FastFraction(context.media.av.stream.time_base) / std_time_base
             )
             if frame_time_base_to_std_time_base != 1:
 
@@ -388,8 +388,8 @@ class FrameMappingPreparationNode(Node):
         # i.e.: timeline.on_changed_signal.connect(self._on_timeline_change)
         # TODO: remove any initial sections, this should be an empty timeline
         self._timeline: FragmentedTimeline = FragmentedTimeline(
-            # TMSection(0, float("inf"), 0.5)
-            *[TMSection(i * 0.2, i * 0.2 + 0.1, 0.5) for i in range(10000)]
+            TMSection(0, float("inf"), 0.5)
+            # *[TMSection(i * 0.2, i * 0.2 + 0.1, 0.5) for i in range(10000)]
         )
         self._timeline_updated_or_task_added: Condition | None = None
         self._returned_frame = False
@@ -478,9 +478,8 @@ class AudioPresentationReformattingNode(Node):
 
     def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
         assert context.media.intermediate_config.sample_format == std_audio.SAMPLE_FORMAT_JB
-        self._wanted_dtype = jb_to_av.audio_sample_format_dtype(
-            context.media.presentation_config.sample_format
-        )
+        self._wanted_dtype = context.media.presentation_config.sample_format.dtype
+
         return super().reset(context, hard, recursive)
 
     def pull(self, context: DecodingContext) -> JbAudioFrame | None:
