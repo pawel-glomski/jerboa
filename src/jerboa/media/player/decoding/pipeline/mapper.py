@@ -8,6 +8,9 @@ from .frame import PreMappedFrame, MappedAudioFrame, MappedVideoFrame
 
 from concurrent import futures
 
+MAX_DRIFT_FIX = 0.1  # 10%
+DRIFT_FIX_THRESHOLD = 0.05  # in seconds
+
 
 class AudioMapper:
     def __init__(
@@ -15,29 +18,37 @@ class AudioMapper:
         config: AudioConfig,
     ) -> None:
         assert config.sample_format == std_audio.SAMPLE_FORMAT_JB
+        assert config.frame_duration is not None and config.frame_duration > 0
 
         self._config = config
-        self._audio = create_circular_audio_buffer(config)
+        self._audio = create_circular_audio_buffer(
+            dtype=config.sample_format.dtype,
+            is_planar=config.sample_format.is_planar,
+            channels_num=config.channels_num,
+            sample_rate=config.sample_rate,
+            max_duration=config.frame_duration,
+        )
         # self._transition_steps = std_audio.get_transition_steps(audio_config.sample_rate)
 
         self._stretcher = RubberBandStretcher(
             config.sample_rate,
             config.channels_num,
-            Option.PROCESS_REALTIME | Option.ENGINE_FASTER | Option.WINDOW_LONG,
+            Option.PROCESS_REALTIME | Option.ENGINE_FASTER | Option.WINDOW_STANDARD,
         )
         self._stretcher.set_max_process_size(self._audio.max_size)
-        self._next_frame_beg_timepoint = None
-        self._flushed = False
-        self.reset()
 
         self._thread_pool = futures.ThreadPoolExecutor(1)
-        self._future: futures.Future = self._thread_pool.submit(lambda: None)
+
+        self.reset()
 
     def reset(self) -> None:
         self._audio.clear()
         self._stretcher.reset()
-        self._next_frame_beg_timepoint = None
+        self._next_frame_beg_timepoint: float | None = None
         self._flushed = False
+        self._drift = 0
+
+        self._future = self._thread_pool.submit(lambda: None)
 
     def map(self, frame: PreMappedFrame | None) -> MappedAudioFrame | None:
         if self._flushed:
@@ -47,6 +58,7 @@ class AudioMapper:
 
         flush = frame is None
         if flush:
+            self._flushed = True
             if self._next_frame_beg_timepoint is not None:
                 flushing_packet = std_audio.create_audio_array(
                     self._config.channels_num,
@@ -54,17 +66,30 @@ class AudioMapper:
                 )
                 self._stretcher.process(flushing_packet, final=True)
                 self._audio.put(self._stretcher.retrieve_available())
-                self._flushed = True
         else:
 
             def map_frame():
-                for audio_segment, modifier in self._cut_according_to_mapping_scheme(frame):
-                    self._stretcher.time_ratio = modifier
-                    self._stretcher.process(audio_segment)
+                if abs(self._drift) > DRIFT_FIX_THRESHOLD:
+                    frame_duration = frame.mapping_scheme.end - frame.mapping_scheme.beg
+                    fixed_duration = frame_duration + self._drift
+                    fixed_duration = min(fixed_duration, frame_duration * (1 + MAX_DRIFT_FIX))
+                    fixed_duration = max(fixed_duration, frame_duration * (1 - MAX_DRIFT_FIX))
+                    drift_fix_modifier = fixed_duration / frame_duration
+                else:
+                    drift_fix_modifier = 1.0
+
+                for audio_section, section_modifier in self._cut_according_to_mapping_scheme(frame):
+                    self._stretcher.time_ratio = section_modifier * drift_fix_modifier
+                    self._stretcher.process(audio_section)
                     self._audio.put(self._stretcher.retrieve_available())
 
                 if self._next_frame_beg_timepoint is None and len(self._audio) > 0:
                     self._next_frame_beg_timepoint = frame.mapping_scheme.beg
+
+                self._drift = frame.mapping_scheme.end - (
+                    self._next_frame_beg_timepoint + len(self._audio) / self._config.sample_rate
+                )
+                print(f"drift={self._drift:.4f}")
 
             self._future = self._thread_pool.submit(map_frame)
             # map_frame()

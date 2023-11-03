@@ -65,7 +65,7 @@ class MediaSourceRecognizer:
                 av.error.ConnectionRefusedError,
             ) as err:
                 recognition_error_message = str(err)
-            except av.error.InvalidDataError:  # not a media file
+            except (av.error.InvalidDataError, av.error.EOFError):  # not a media file
                 if media_source_path.is_local:
                     recognition_error_message = (
                         'Format of the file "{path}" is not supported'.format(

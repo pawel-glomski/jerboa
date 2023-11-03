@@ -7,10 +7,10 @@ from jerboa.core.multithreading import ThreadPool
 from jerboa.media.source import MediaSource
 from .audio_player import AudioPlayer
 from .video_player import VideoPlayer
-from .clock import SynchronizationClock
+from .timer import ClockPlaybackTimer
 
 
-PLAYER_PREP_TIMEOUT = 5  # in seconds
+PLAYER_PREP_TIMEOUT = 10  # in seconds
 
 
 class MediaPlayer:
@@ -27,7 +27,7 @@ class MediaPlayer:
         self._ready_to_play_signal = ready_to_play_signal
         self._current_media_source: MediaSource | None = None
 
-        self._sync_clock = SynchronizationClock()
+        self._clock_timer = ClockPlaybackTimer()
 
         video_player.player_stalled_signal.connect(self._on_player_stalled)
 
@@ -49,7 +49,7 @@ class MediaPlayer:
 
         self._audio_player.shutdown()
         self._video_player.shutdown()
-        self._sync_clock.stop()
+        self._clock_timer.reset()
 
         def prepare_players():
             # we need a mutex here, to make sure only one thread interacts with media players at a
@@ -60,6 +60,7 @@ class MediaPlayer:
                     "We must wait before proceeding."
                 )
 
+            # TODO: this should also use the global ThreadPool
             with self._mutex, ThreadPoolExecutor(max_workers=2) as executor:
                 players_future = list[tuple[AudioPlayer | VideoPlayer, Future]]()
                 if media_source.audio.is_available:
@@ -73,16 +74,16 @@ class MediaPlayer:
                         )
                     )
                 if media_source.video.is_available:
-                    sync_clock = self._sync_clock
-                    # if media_source.audio.is_available:
-                    #     sync_clock = self._audio_player
+                    video_timer = self._clock_timer
+                    if media_source.audio.is_available:
+                        video_timer = self._audio_player
                     players_future.append(
                         (
                             self._video_player,
                             executor.submit(
                                 self._video_player.startup,
                                 source=media_source.video.selected_variant_group[0],
-                                sync_clock=sync_clock,
+                                timer=video_timer,
                             ),
                         )
                     )
@@ -95,7 +96,7 @@ class MediaPlayer:
 
                     if exception is not None:
                         logger.error(
-                            f"MediaPlayer: Failed to start {type(player)} "
+                            f"MediaPlayer: Failed to start {type(player).__name__} "
                             f"to play '{media_source.title}'"
                         )
                         # in case any of the players succeeded, shut it down
@@ -104,8 +105,8 @@ class MediaPlayer:
                         self._audio_player.shutdown()
                         raise exception
 
-                # initialization succeeded
-                self._sync_clock.resume()
+                # startup succeeded
+                self._clock_timer.resume()
                 self._audio_player.resume()
                 self._video_player.resume()
 

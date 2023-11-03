@@ -12,7 +12,13 @@ class AudioBuffer:
     def __init__(self, audio_config: AudioConfig, max_duration: float) -> None:
         self._audio_config = audio_config
 
-        self._audio = create_circular_audio_buffer(audio_config, max_duration)
+        self._audio = create_circular_audio_buffer(
+            dtype=audio_config.sample_format.dtype,
+            is_planar=audio_config.sample_format.is_planar,
+            channels_num=audio_config.channels_num,
+            sample_rate=audio_config.sample_rate,
+            max_duration=max_duration,
+        )
         # self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
         self._timepoint: float | None = None
 

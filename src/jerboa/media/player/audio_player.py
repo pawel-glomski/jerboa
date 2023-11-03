@@ -5,11 +5,11 @@ import PySide6.QtMultimedia as QtM
 import PySide6.QtCore as QtC
 
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import ThreadSpawner
 from jerboa.media.source import AudioSourceVariant
-from jerboa.media.core import MediaType, AudioConfig, AudioConstraints, USING_PLANAR_AUDIO_ONLY
+from jerboa.media.core import MediaType, AudioConstraints, USING_PLANAR_AUDIO_ONLY
 from .decoding.decoder import JbDecoder, pipeline
 from .state import PlayerState
+from .timer import PlaybackTimer
 
 # TODO: enable specifing
 assert USING_PLANAR_AUDIO_ONLY, "This player assumes audio is planar"
@@ -153,7 +153,7 @@ class QtAudioSourceDevice(QtC.QIODevice):
         return 0
 
 
-class AudioPlayer:
+class AudioPlayer(PlaybackTimer):
     def __init__(
         self,
         audio_manager: AudioManager,
@@ -272,3 +272,8 @@ class AudioPlayer:
     def _seek(self, timepoint: float) -> None:
         with self._mutex:
             ...
+
+    def playback_timepoint(self) -> float:
+        if self._audio_sink is not None:
+            return self._audio_sink.processedUSecs() / 1e6
+        return 0

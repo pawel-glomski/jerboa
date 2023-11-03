@@ -11,10 +11,10 @@ from .decoding.task_queue import Task, FnTask
 from .decoding.decoder import pipeline, JbDecoder
 from .decoding.pipeline.frame import JbVideoFrame
 from .state import PlayerState
-from .clock import SynchronizationClock
+from .timer import PlaybackTimer
 
 
-TIMEOUT_TIME = 0.1
+TIMEOUT_TIME = 0.1 * 50
 
 
 class ShutdownTask(Task):
@@ -46,7 +46,7 @@ class VideoPlayer:
         self._state = PlayerState.SHUT_DOWN
         self._state_changed = Condition(self._mutex)
 
-        self._sync_clock: SynchronizationClock | None = None
+        self._timer: PlaybackTimer | None = None
 
     @property
     def player_stalled_signal(self) -> Signal:
@@ -93,13 +93,13 @@ class VideoPlayer:
         if not self._state_changed.wait_for(lambda: self._state == state, timeout=timeout):
             raise TimeoutError(f"Waiting for state ({state=}) timed out ({timeout=})")
 
-    def startup(self, source: VideoSourceVariant, sync_clock: SynchronizationClock) -> None:
+    def startup(self, source: VideoSourceVariant, timer: PlaybackTimer) -> None:
         assert source.media_type == MediaType.VIDEO
 
         with self._mutex:
             self._shutdown__without_lock(wait=True)
 
-            self._sync_clock = sync_clock
+            self._timer = timer
             self._tasks.clear()
 
             self._decoder.start(
@@ -171,7 +171,7 @@ class VideoPlayer:
                     continue
             assert self.state == PlayerState.PLAYING
 
-            if frame is not None and self._sync_with_clock(frame):
+            if frame is not None and self._sync_with_timer(frame):
                 self._video_frame_update_signal.emit(frame=frame)
                 frame = None
 
@@ -180,12 +180,12 @@ class VideoPlayer:
             while self._tasks:
                 self._tasks.popleft().run()
 
-    def _sync_with_clock(self, frame: JbVideoFrame) -> bool:
+    def _sync_with_timer(self, frame: JbVideoFrame) -> bool:
         sleep_threshold = min(0.004, frame.duration / 3)
         with self._mutex:
-            sleep_time = frame.beg_timepoint - self._sync_clock.time()
+            sleep_time = frame.beg_timepoint - self._timer.playback_timepoint()
             if sleep_time > sleep_threshold and not self._new_tasks_added.wait(sleep_time):
-                sleep_time = frame.beg_timepoint - self._sync_clock.time()
+                sleep_time = frame.beg_timepoint - self._timer.playback_timepoint()
 
         if sleep_time <= sleep_threshold:
             return True

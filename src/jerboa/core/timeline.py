@@ -23,7 +23,7 @@ class TMSection:
         self._beg = beg
         self._end = end
         self._modifier = modifier
-        self._duration = self.modifier * (self.end - self.beg)
+        self._duration = self.modifier * (self.end - self.beg) if modifier != 0 else 0.0
 
     @property
     def beg(self) -> float:
@@ -45,9 +45,9 @@ class TMSection:
         """The duration of the section, taking into account the duration modifier."""
         return self._duration
 
-    # def __repr__(self) -> str:
-    #     """Returns a string representation of the section."""
-    #     return f"TMSection({self.beg=}, {self.end=}, {self.modifier=})"
+    def __repr__(self) -> str:
+        """Returns a string representation of the section."""
+        return f"TMSection({self.beg=}, {self.end=}, {self.modifier=})"
 
     def __eq__(self, other: object) -> bool:
         """Checks if two sections are equal."""
@@ -251,10 +251,10 @@ class FragmentedTimeline:
 
             while idx < len(self._sections) and end > self._sections[idx].beg:
                 overlap_section = self._sections[idx].overlap(beg, end)
-                mapped_end += overlap_section.duration
-                involved_sections.append(overlap_section)
+                if overlap_section.duration > 0:
+                    mapped_end += overlap_section.duration
+                    involved_sections.append(overlap_section)
                 idx += 1
-            assert all(s.duration > 0.0 for s in involved_sections)
 
             if end < self._sections[idx - 1].end:
                 next_timepoint = end

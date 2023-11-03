@@ -1,12 +1,20 @@
 import time
+from abc import ABC, abstractmethod
 
 
-class SynchronizationClock:
+class PlaybackTimer(ABC):
+    @abstractmethod
+    def playback_timepoint(self) -> float:
+        raise NotImplementedError()
+
+
+class ClockPlaybackTimer(PlaybackTimer):
     def __init__(self) -> None:
+        super().__init__()
         self._time_now_ns = time.perf_counter_ns
-        self.stop()
+        self.reset()
 
-    def stop(self) -> None:
+    def reset(self) -> None:
         self._cumulative_time_ns = 0
         self._last_time_ns: int | None = None
 
@@ -18,7 +26,7 @@ class SynchronizationClock:
             self._cumulative_time_ns += self._time_now_ns() - self._last_time_ns
         self._last_time_ns = None
 
-    def time(self) -> float:
+    def playback_timepoint(self) -> float:
         result = self._cumulative_time_ns
         if self._last_time_ns is not None:
             result += self._time_now_ns() - self._last_time_ns
