@@ -6,31 +6,28 @@ import PySide6.QtCore as QtC
 
 from jerboa.core.signal import Signal
 from jerboa.media.source import AudioSourceVariant
-from jerboa.media.core import MediaType, AudioConstraints, USING_PLANAR_AUDIO_ONLY
+from jerboa.media.core import MediaType, AudioSampleFormat, AudioChannelLayout, AudioConstraints
 from .decoding.decoder import JbDecoder, pipeline
 from .state import PlayerState
 from .timer import PlaybackTimer
-
-# TODO: enable specifing
-assert USING_PLANAR_AUDIO_ONLY, "This player assumes audio is planar"
 
 TIMEOUT_TIME = 0.1
 
 
 def jb_to_qt_audio_sample_format(
-    sample_format_jb: AudioConstraints.SampleFormat,
+    sample_format_jb: AudioSampleFormat,
 ) -> QtM.QAudioFormat.SampleFormat:
-    match sample_format_jb:
-        case AudioConstraints.SampleFormat.U8:
+    match sample_format_jb.data_type:
+        case AudioSampleFormat.DataType.U8:
             return QtM.QAudioFormat.SampleFormat.UInt8
-        case AudioConstraints.SampleFormat.S16:
+        case AudioSampleFormat.DataType.S16:
             return QtM.QAudioFormat.SampleFormat.Int16
-        case AudioConstraints.SampleFormat.S32:
+        case AudioSampleFormat.DataType.S32:
             return QtM.QAudioFormat.SampleFormat.Int16
-        case AudioConstraints.SampleFormat.F32:
+        case AudioSampleFormat.DataType.F32:
             return QtM.QAudioFormat.SampleFormat.Float
         case _:
-            raise ValueError(f"Unrecognized audio sample format: {sample_format_jb}")
+            raise ValueError(f"Unrecognized sample data type: {sample_format_jb.data_type}")
 
 
 class AudioManager:
@@ -76,49 +73,60 @@ class AudioManager:
             sample_rate_max=self._current_device.maximumSampleRate(),
         )
 
-    def _get_supported_sample_formats(self) -> AudioConstraints.SampleFormat:
-        sample_formats_jb = AudioConstraints.SampleFormat.NONE
+    def _get_supported_sample_formats(self) -> list[AudioSampleFormat]:
+        sample_formats_jb = list[AudioSampleFormat]()
 
         sample_formats_qt = self._current_device.supportedSampleFormats()
         for sample_format_qt in sample_formats_qt:
             match sample_format_qt:
                 case QtM.QAudioFormat.SampleFormat.UInt8:
-                    sample_formats_jb |= AudioConstraints.SampleFormat.U8
+                    sample_formats_jb.append(
+                        AudioSampleFormat(data_type=AudioSampleFormat.DataType.U8, is_planar=False)
+                    )
                 case QtM.QAudioFormat.SampleFormat.Int16:
-                    sample_formats_jb |= AudioConstraints.SampleFormat.S16
+                    sample_formats_jb.append(
+                        AudioSampleFormat(data_type=AudioSampleFormat.DataType.S16, is_planar=False)
+                    )
                 case QtM.QAudioFormat.SampleFormat.Int32:
-                    sample_formats_jb |= AudioConstraints.SampleFormat.S32
+                    sample_formats_jb.append(
+                        AudioSampleFormat(data_type=AudioSampleFormat.DataType.S32, is_planar=False)
+                    )
                 case QtM.QAudioFormat.SampleFormat.Float:
-                    sample_formats_jb |= AudioConstraints.SampleFormat.F32
+                    sample_formats_jb.append(
+                        AudioSampleFormat(data_type=AudioSampleFormat.DataType.F32, is_planar=False)
+                    )
                 case _:
                     raise ValueError(f"Unrecognized sample format: {sample_format_qt}")
 
-        if sample_formats_jb == AudioConstraints.SampleFormat.NONE:
+        assert len(set(sample_formats_jb)) == len(sample_formats_jb)
+
+        if len(sample_formats_jb) == 0:
             raise EnvironmentError(
                 f"The current audio device ({self._current_device.description()}) "
                 "does not support any sample format"
             )
+
         return sample_formats_jb
 
-    def _get_supported_channel_layout(self) -> AudioConstraints.ChannelLayout:
-        result = AudioConstraints.ChannelLayout.LAYOUT_MONO  # enable mono by default
+    def _get_supported_channel_layout(self) -> AudioChannelLayout:
+        result = AudioChannelLayout.LAYOUT_MONO  # enable mono by default
         match self._current_device.channelConfiguration():
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigSurround7Dot1:
-                result |= AudioConstraints.ChannelLayout.LAYOUT_SURROUND_7_1
+                result |= AudioChannelLayout.LAYOUT_SURROUND_7_1
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigSurround7Dot0:
-                result |= AudioConstraints.ChannelLayout.LAYOUT_SURROUND_7_0
+                result |= AudioChannelLayout.LAYOUT_SURROUND_7_0
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigSurround5Dot1:
-                result |= AudioConstraints.ChannelLayout.LAYOUT_SURROUND_5_1
+                result |= AudioChannelLayout.LAYOUT_SURROUND_5_1
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigSurround5Dot0:
-                result |= AudioConstraints.ChannelLayout.LAYOUT_SURROUND_5_0
+                result |= AudioChannelLayout.LAYOUT_SURROUND_5_0
             case QtM.QAudioFormat.ChannelConfig.ChannelConfig3Dot1:
-                result |= AudioConstraints.ChannelLayout.LAYOUT_3_1
+                result |= AudioChannelLayout.LAYOUT_3_1
             case QtM.QAudioFormat.ChannelConfig.ChannelConfig3Dot0:
-                result |= AudioConstraints.ChannelLayout.LAYOUT_3_0
+                result |= AudioChannelLayout.LAYOUT_3_0
             case QtM.QAudioFormat.ChannelConfig.ChannelConfig2Dot1:
-                result |= AudioConstraints.ChannelLayout.LAYOUT_2_1
+                result |= AudioChannelLayout.LAYOUT_2_1
             case QtM.QAudioFormat.ChannelConfig.ChannelConfigStereo:
-                result |= AudioConstraints.ChannelLayout.LAYOUT_STEREO
+                result |= AudioChannelLayout.LAYOUT_STEREO
             case _:
                 pass
         return result
@@ -143,7 +151,7 @@ class QtAudioSourceDevice(QtC.QIODevice):
             audio = None
 
         if audio is not None:
-            return bytes(audio.audio_signal.T)
+            return bytes(audio.audio_signal)
         return -1
 
     def writeData(self, _) -> int:
@@ -207,6 +215,7 @@ class AudioPlayer(PlaybackTimer):
 
         def _startup() -> None:
             assert self._mutex.locked()
+
             media = pipeline.context.MediaContext(
                 av=av_context,
                 media_constraints=self._audio_manager.get_current_output_device_constraints(),

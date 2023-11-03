@@ -8,7 +8,9 @@ from jerboa.media.core import (
     MediaType,
     AudioConfig,
     VideoConfig,
+    AudioSampleFormat,
     AudioConstraints,
+    AudioChannelLayout,
     VIDEO_FRAME_PIXEL_FORMAT,
 )
 from jerboa.media.player.decoding.task_queue import Task, TaskQueue
@@ -104,17 +106,17 @@ class MediaContext:
 
     @staticmethod
     def _select_best_audio_presentation_sample_format(
-        supported_sample_formats: AudioConstraints.SampleFormat,
-    ) -> AudioConstraints.SampleFormat:
-        if std_audio.SAMPLE_FORMAT_JB & supported_sample_formats:
+        supported_sample_formats: list[AudioSampleFormat],
+    ) -> AudioSampleFormat:
+        if std_audio.SAMPLE_FORMAT_JB in supported_sample_formats:
             return std_audio.SAMPLE_FORMAT_JB
-        return supported_sample_formats.best_quality()
+        return supported_sample_formats[-1]  # last == best quality
 
     @staticmethod
     def _select_best_audio_channel_layout(
         av_channel_layout: av.AudioLayout,
-        supported_channel_layouts: AudioConstraints.ChannelLayout,
-    ) -> AudioConstraints.SampleFormat:
+        supported_channel_layouts: AudioChannelLayout,
+    ) -> AudioChannelLayout:
         jb_channel_layout = av_to_jb.audio_channel_layout(av_channel_layout)
         return jb_channel_layout.closest_standard_layout(constraint=supported_channel_layouts)
 

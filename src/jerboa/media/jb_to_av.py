@@ -1,46 +1,46 @@
 import av
 import numpy as np
 
-from .core import AudioConstraints, VideoConfig
+from .core import AudioConstraints, AudioSampleFormat, AudioChannelLayout, VideoConfig
 
 
-def audio_sample_format(sample_format_jb: AudioConstraints.SampleFormat) -> av.AudioFormat:
-    match sample_format_jb:
-        case AudioConstraints.SampleFormat.U8:
+def audio_sample_format(sample_format_jb: AudioSampleFormat) -> av.AudioFormat:
+    match sample_format_jb.data_type:
+        case AudioSampleFormat.DataType.U8:
             av_name = "u8"
-        case AudioConstraints.SampleFormat.S16:
+        case AudioSampleFormat.DataType.S16:
             av_name = "s16"
-        case AudioConstraints.SampleFormat.S32:
+        case AudioSampleFormat.DataType.S32:
             av_name = "s32"
-        case AudioConstraints.SampleFormat.F32:
+        case AudioSampleFormat.DataType.F32:
             av_name = "flt"
         case _:
-            raise ValueError(f"Unrecognized sample format: {sample_format_jb}")
+            raise ValueError(f"Unrecognized sample data type: {sample_format_jb.data_type}")
 
     av_name += "p" if sample_format_jb.is_planar else ""
 
     return av.AudioFormat(av_name)
 
 
-def audio_channel_layout(channel_layout_jb: AudioConstraints.ChannelLayout) -> av.AudioLayout:
+def audio_channel_layout(channel_layout_jb: AudioChannelLayout) -> av.AudioLayout:
     match channel_layout_jb:
-        case AudioConstraints.ChannelLayout.LAYOUT_MONO:
+        case AudioChannelLayout.LAYOUT_MONO:
             av_name = "mono"
-        case AudioConstraints.ChannelLayout.LAYOUT_STEREO:
+        case AudioChannelLayout.LAYOUT_STEREO:
             av_name = "stereo"
-        case AudioConstraints.ChannelLayout.LAYOUT_2_1:
+        case AudioChannelLayout.LAYOUT_2_1:
             av_name = "2.1"
-        case AudioConstraints.ChannelLayout.LAYOUT_3_0:
+        case AudioChannelLayout.LAYOUT_3_0:
             av_name = "3.0"
-        case AudioConstraints.ChannelLayout.LAYOUT_3_1:
+        case AudioChannelLayout.LAYOUT_3_1:
             av_name = "3.1"
-        case AudioConstraints.ChannelLayout.LAYOUT_SURROUND_5_0:
+        case AudioChannelLayout.LAYOUT_SURROUND_5_0:
             av_name = "5.0"
-        case AudioConstraints.ChannelLayout.LAYOUT_SURROUND_5_1:
+        case AudioChannelLayout.LAYOUT_SURROUND_5_1:
             av_name = "5.1"
-        case AudioConstraints.ChannelLayout.LAYOUT_SURROUND_7_0:
+        case AudioChannelLayout.LAYOUT_SURROUND_7_0:
             av_name = "7.0"
-        case AudioConstraints.ChannelLayout.LAYOUT_SURROUND_7_1:
+        case AudioChannelLayout.LAYOUT_SURROUND_7_1:
             av_name = "7.1"
         case _:
             raise ValueError(f"Unrecognized channel layout: {channel_layout_jb}")

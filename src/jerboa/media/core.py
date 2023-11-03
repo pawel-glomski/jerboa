@@ -3,119 +3,129 @@ import numpy as np
 from dataclasses import dataclass
 from fractions import Fraction
 
-USING_PLANAR_AUDIO_ONLY = True
-
 
 class MediaType(enum.Enum):
     AUDIO = "audio"
     VIDEO = "video"
 
 
-@dataclass
-class AudioConstraints:
-    class SampleFormat(enum.Flag):
+@dataclass(frozen=True)
+class AudioSampleFormat:
+    class DataType(enum.Enum):
         NONE = 0
-
         U8 = enum.auto()
         S16 = enum.auto()
         S32 = enum.auto()
         F32 = enum.auto()
 
         @property
-        def is_packed(self) -> bool:
-            return not self.is_planar
-
-        @property
-        def is_planar(self) -> bool:
-            assert USING_PLANAR_AUDIO_ONLY
-            return True
-
-        @property
         def dtype(self) -> np.dtype:
             match self:
-                case AudioConstraints.SampleFormat.U8:
+                case AudioSampleFormat.DataType.U8:
                     return np.dtype(np.uint8)
-                case AudioConstraints.SampleFormat.S16:
+                case AudioSampleFormat.DataType.S16:
                     return np.dtype(np.int16)
-                case AudioConstraints.SampleFormat.S32:
+                case AudioSampleFormat.DataType.S32:
                     return np.dtype(np.int32)
-                case AudioConstraints.SampleFormat.F32:
+                case AudioSampleFormat.DataType.F32:
                     return np.dtype(np.float32)
                 case _:
                     raise ValueError(f"Unrecognized sample format: {self}")
 
-        def best_quality(self) -> "AudioConstraints.SampleFormat":
-            for sf in reversed(AudioConstraints.SampleFormat):
-                if sf & self:
-                    return sf
-            return AudioConstraints.SampleFormat.NONE
+    data_type: DataType
+    is_planar: bool
 
-    class ChannelLayout(enum.Flag):
-        NONE = 0
+    @property
+    def is_packed(self) -> bool:
+        return not self.is_planar
 
-        CHANNEL_LFE = enum.auto()
-        CHANNEL_FRONT_LEFT = enum.auto()
-        CHANNEL_FRONT_RIGHT = enum.auto()
-        CHANNEL_FRONT_CENTER = enum.auto()
-        CHANNEL_BACK_LEFT = enum.auto()
-        CHANNEL_BACK_RIGHT = enum.auto()
-        CHANNEL_SIDE_LEFT = enum.auto()
-        CHANNEL_SIDE_RIGHT = enum.auto()
+    @property
+    def dtype(self) -> np.dtype:
+        return self.data_type.dtype
 
-        _LAYOUT_MARK = enum.auto()
-        LAYOUT_MONO = _LAYOUT_MARK | CHANNEL_FRONT_CENTER
-        LAYOUT_STEREO = _LAYOUT_MARK | CHANNEL_FRONT_LEFT | CHANNEL_FRONT_RIGHT
-        LAYOUT_2_1 = LAYOUT_STEREO | CHANNEL_LFE
-        LAYOUT_3_0 = _LAYOUT_MARK | CHANNEL_FRONT_LEFT | CHANNEL_FRONT_RIGHT | CHANNEL_FRONT_CENTER
-        LAYOUT_3_1 = LAYOUT_3_0 | CHANNEL_LFE
-        LAYOUT_SURROUND_5_0 = LAYOUT_3_0 | CHANNEL_BACK_LEFT | CHANNEL_BACK_RIGHT
-        LAYOUT_SURROUND_5_1 = LAYOUT_SURROUND_5_0 | CHANNEL_LFE
-        LAYOUT_SURROUND_7_0 = LAYOUT_SURROUND_5_0 | CHANNEL_SIDE_LEFT | CHANNEL_SIDE_RIGHT
-        LAYOUT_SURROUND_7_1 = LAYOUT_SURROUND_7_0 | CHANNEL_LFE
+    def planar(self) -> "AudioSampleFormat":
+        return AudioSampleFormat(data_type=self.data_type, is_planar=True)
 
-        @property
-        def channels_num(self) -> int:
-            return self.value.bit_count() - bool(self & AudioConstraints.ChannelLayout._LAYOUT_MARK)
+    def packed(self) -> "AudioSampleFormat":
+        return AudioSampleFormat(data_type=self.data_type, is_planar=False)
 
-        def closest_standard_layout(
-            self, constraint: "AudioConstraints.ChannelLayout"
-        ) -> "AudioConstraints.ChannelLayout":
-            assert AudioConstraints.ChannelLayout._LAYOUT_MARK & constraint
 
-            wanted_layout = (AudioConstraints.ChannelLayout._LAYOUT_MARK | self) & constraint
-            standard_layouts = AudioConstraints.ChannelLayout.get_all_standard_layouts()
+class AudioChannelLayout(enum.Flag):
+    NONE = 0
 
-            # find the wanted layout in standard layouts
-            if wanted_layout in standard_layouts:
-                return wanted_layout
+    CHANNEL_LFE = enum.auto()
+    CHANNEL_FRONT_LEFT = enum.auto()
+    CHANNEL_FRONT_RIGHT = enum.auto()
+    CHANNEL_FRONT_CENTER = enum.auto()
+    CHANNEL_BACK_LEFT = enum.auto()
+    CHANNEL_BACK_RIGHT = enum.auto()
+    CHANNEL_SIDE_LEFT = enum.auto()
+    CHANNEL_SIDE_RIGHT = enum.auto()
 
-            # find a standard layout in the wanted layout
-            for std_layout in reversed(standard_layouts):
-                if (std_layout & wanted_layout) == std_layout:
-                    return std_layout
+    _LAYOUT_MARK = enum.auto()
+    LAYOUT_MONO = _LAYOUT_MARK | CHANNEL_FRONT_CENTER
+    LAYOUT_STEREO = _LAYOUT_MARK | CHANNEL_FRONT_LEFT | CHANNEL_FRONT_RIGHT
+    LAYOUT_2_1 = LAYOUT_STEREO | CHANNEL_LFE
+    LAYOUT_3_0 = _LAYOUT_MARK | CHANNEL_FRONT_LEFT | CHANNEL_FRONT_RIGHT | CHANNEL_FRONT_CENTER
+    LAYOUT_3_1 = LAYOUT_3_0 | CHANNEL_LFE
+    LAYOUT_SURROUND_5_0 = LAYOUT_3_0 | CHANNEL_BACK_LEFT | CHANNEL_BACK_RIGHT
+    LAYOUT_SURROUND_5_1 = LAYOUT_SURROUND_5_0 | CHANNEL_LFE
+    LAYOUT_SURROUND_7_0 = LAYOUT_SURROUND_5_0 | CHANNEL_SIDE_LEFT | CHANNEL_SIDE_RIGHT
+    LAYOUT_SURROUND_7_1 = LAYOUT_SURROUND_7_0 | CHANNEL_LFE
 
-            # use mono if the wanted layout is not recognized
-            return AudioConstraints.ChannelLayout.LAYOUT_MONO
+    @property
+    def channels_num(self) -> int:
+        return self.value.bit_count() - bool(self & AudioChannelLayout._LAYOUT_MARK)
 
-        @staticmethod
-        def get_all_standard_layouts() -> list["AudioConstraints.ChannelLayout"]:
-            return [
-                layout
-                for layout in AudioConstraints.ChannelLayout.__members__.values()
-                if layout & AudioConstraints.ChannelLayout._LAYOUT_MARK
-                and layout != AudioConstraints.ChannelLayout._LAYOUT_MARK
-            ]
+    def closest_standard_layout(self, constraint: "AudioChannelLayout") -> "AudioChannelLayout":
+        assert AudioChannelLayout._LAYOUT_MARK & constraint
 
-    sample_formats: SampleFormat
-    channel_layouts: ChannelLayout
+        wanted_layout = (AudioChannelLayout._LAYOUT_MARK | self) & constraint
+        standard_layouts = AudioChannelLayout.get_all_standard_layouts()
+
+        # find the wanted layout in standard layouts
+        if wanted_layout in standard_layouts:
+            return wanted_layout
+
+        # find a standard layout in the wanted layout
+        for std_layout in reversed(standard_layouts):
+            if (std_layout & wanted_layout) == std_layout:
+                return std_layout
+
+        # use mono if the wanted layout is not recognized
+        return AudioChannelLayout.LAYOUT_MONO
+
+    @staticmethod
+    def get_all_standard_layouts() -> list["AudioChannelLayout"]:
+        return [
+            layout
+            for layout in AudioChannelLayout.__members__.values()
+            if layout & AudioChannelLayout._LAYOUT_MARK
+            and layout != AudioChannelLayout._LAYOUT_MARK
+        ]
+
+
+@dataclass
+class AudioConstraints:
+    sample_formats: list[AudioSampleFormat]
+    channel_layouts: AudioChannelLayout
     channels_num_min: int
     channels_num_max: int
     sample_rate_min: int
     sample_rate_max: int
 
+    def __post_init__(self):
+        super().__setattr__(
+            "sample_formats",
+            sorted(
+                self.sample_formats,
+                key=lambda sample_format: (sample_format.data_type.value, sample_format.is_planar),
+            ),
+        )
+
     def is_valid(self) -> bool:
         return (
-            bool(self.sample_formats)
+            len(self.sample_formats) > 0
             and bool(self.channel_layouts)
             and self.channels_num_min > 0
             and self.channels_num_max >= self.channels_num_min
@@ -126,8 +136,8 @@ class AudioConstraints:
 
 @dataclass
 class AudioConfig:
-    sample_format: AudioConstraints.SampleFormat
-    channel_layout: AudioConstraints.ChannelLayout
+    sample_format: AudioSampleFormat
+    channel_layout: AudioChannelLayout
     sample_rate: int
     frame_duration: float | None
 

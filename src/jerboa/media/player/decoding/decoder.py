@@ -93,19 +93,22 @@ class JbDecoder:
 
     def stop(self) -> None:
         with self._mutex:
-            if self._decoding_pipeline.initialized:
-                self._tasks.add_task__without_lock(JbDecoder.StopTask())
-                self._decoding_pipeline.add_task(JbDecoder.StopTask())
-                self._is_not_running_condition.wait_for(lambda: not self.is_running)
+            self._stop__without_lock()
+
+    def _stop__without_lock(self) -> None:
+        assert self._mutex.locked()
+        if self._decoding_pipeline.initialized:
+            self._tasks.add_task__without_lock(JbDecoder.StopTask())
+            self._decoding_pipeline.add_task(JbDecoder.StopTask())
+            self._is_not_running_condition.wait_for(lambda: not self.is_running)
 
     def start(
         self,
         media: pipeline.context.MediaContext,
         start_timepoint: float | None = None,
     ) -> None:
-        self.stop()
-
         with self._mutex:
+            self._stop__without_lock()
             assert not self.is_running
 
             self._buffer = create_buffer(media.presentation_config, BUFFER_DURATION)
