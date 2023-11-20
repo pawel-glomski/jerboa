@@ -2,7 +2,7 @@ from collections import deque
 
 from jerboa.core.circular_buffer import create_circular_audio_buffer
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig
-from .pipeline.frame import JbAudioFrame, JbVideoFrame
+from .frame import JbAudioFrame, JbVideoFrame
 
 
 AUDIO_BUFFER_SIZE_MODIFIER = 1.2
@@ -33,17 +33,17 @@ class AudioBuffer:
 
     def clear(self) -> None:
         self._audio.clear()
-        # self._audio_last_sample[:] = 0
         self._timepoint = None
+        # self._audio_last_sample[:] = 0
 
     def put(self, audio_frame: JbAudioFrame) -> None:
         assert not self.is_full()
 
-        if self._timepoint is None:
-            self._timepoint = audio_frame.beg_timepoint
-
         self._audio.put(audio_frame.audio_signal)
         # self._audio_last_sample[:] = self._audio[-1]
+
+        if self._timepoint is None:
+            self._timepoint = audio_frame.beg_timepoint
 
     def pop(self, samples_num: int) -> JbAudioFrame:
         assert not self.is_empty()
@@ -60,7 +60,7 @@ class AudioBuffer:
             audio_signal=audio_signal,
         )
 
-        self._timepoint += frame.end_timepoint
+        self._timepoint = frame.end_timepoint
 
         return frame
 
@@ -101,6 +101,7 @@ class VideoBuffer:
         frame = self._frames.popleft()
         self._duration -= frame.duration
         self._duration *= not self.is_empty()  # ensure `_duration == 0` when `is_empty() == true`
+
         return frame
 
     def is_empty(self) -> bool:

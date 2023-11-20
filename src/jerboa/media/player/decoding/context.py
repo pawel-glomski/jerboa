@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from threading import Lock
 from gmpy2 import mpq as FastFraction
 
+from jerboa.core.timeline import FragmentedTimeline
 from jerboa.media import av_to_jb, standardized_audio as std_audio
 from jerboa.media.core import (
     MediaType,
@@ -13,7 +14,7 @@ from jerboa.media.core import (
     AudioChannelLayout,
     VIDEO_FRAME_PIXEL_FORMAT,
 )
-from jerboa.media.player.decoding.task_queue import Task, TaskQueue
+from jerboa.core.multithreading import Task, TaskQueue
 
 DEFAULT_MEAN_KEYFRAME_INTERVAL = 0.25
 
@@ -23,9 +24,12 @@ class AVContext:
     container: av.container.InputContainer
     stream: av.audio.AudioStream | av.video.VideoStream
 
+    def __post_init__(self):
+        assert self.stream.container is self.container
+
     @property
     def start_timepoint(self) -> float:
-        return max(0, self.stream.start_time * self.stream.time_base)
+        return max(0, (self.stream.start_time or 0) * self.stream.time_base)
 
     @staticmethod
     def open(
@@ -35,7 +39,11 @@ class AVContext:
     ) -> "AVContext":
         assert media_type in [MediaType.AUDIO, MediaType.VIDEO]
 
-        container = av.open(filepath)
+        container = av.open(
+            filepath,
+            # timeout=(None, 0.5),
+        )
+        # container.flags |= av.container.core.Flags.NONBLOCK
         if media_type == MediaType.AUDIO:
             stream = container.streams.audio[stream_idx]
         else:
@@ -132,17 +140,29 @@ class MediaContext:
 @dataclass
 class DecodingContext:
     media: MediaContext
-
-    last_seek_timepoint: float | None = None
-    min_timepoint: float = 0
-    mean_keyframe_interval: float = DEFAULT_MEAN_KEYFRAME_INTERVAL
+    timeline: FragmentedTimeline
 
     mutex: Lock = field(default_factory=Lock)
+
+    last_seek_timepoint: float | None = field(default=None, init=False)
+    min_timepoint: float = field(default=0, init=False)
+    mean_keyframe_interval: float = field(default=DEFAULT_MEAN_KEYFRAME_INTERVAL, init=False)
 
     def __post_init__(self):
         self.tasks = TaskQueue(mutex=self.mutex)
 
+    def seek__locked(self, timepoint: float) -> None:
+        assert self.mutex.locked()
+        assert timepoint >= 0
 
-@dataclass
+        self.media.av.container.seek(
+            round(timepoint / self.media.av.stream.time_base),
+            stream=self.media.av.stream,
+        )
+        self.last_seek_timepoint = timepoint
+        self.min_timepoint = timepoint
+
+
+@dataclass(frozen=True)
 class SeekTask(Task):
     timepoint: float

@@ -2,6 +2,18 @@ from enum import Enum, auto
 
 
 class PlayerState(Enum):
-    SHUT_DOWN = auto()
+    UNINITIALIZED = auto()
     SUSPENDED = auto()
     PLAYING = auto()
+
+
+# class PlayerInitializationError(Exception):
+#     ...
+
+
+# class PlayerSeekError(Exception):
+#     ...
+
+
+# class PlayerNotRespondingError(Exception):
+#     ...

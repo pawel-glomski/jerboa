@@ -1,23 +1,22 @@
-from collections import deque
-from threading import Condition, Lock
 from dataclasses import dataclass
 
 from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import ThreadSpawner
+from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask
 from jerboa.media.core import MediaType
-from jerboa.media.source import VideoSourceVariant
-from .decoding.task_queue import Task, FnTask
-from .decoding.decoder import pipeline, JbDecoder
-from .decoding.pipeline.frame import JbVideoFrame
+from .decoding.decoder import Decoder
+from .decoding.frame import JbVideoFrame
 from .state import PlayerState
 from .timer import PlaybackTimer
 
 
-TIMEOUT_TIME = 0.1 * 50
+THREAD_RESPONSE_TIMEOUT = 0.1
+SLEEP_THRESHOLD_RATIO = 1 / 3  # how much earlier can we display the frame (ratio of frame duration)
+SLEEP_THRESHOLD_MAX = 1 / 24 * SLEEP_THRESHOLD_RATIO  # but we cannot display it earlier than this
+SLEEP_TIME_MAX = 0.25
 
 
-class ShutdownTask(Task):
+class DeinitializeTask(Task):
     ...
 
 
@@ -29,28 +28,42 @@ class SeekTask(Task):
 class VideoPlayer:
     def __init__(
         self,
-        decoder: JbDecoder,
         thread_spawner: ThreadSpawner,
-        player_stalled_signal: Signal,
+        fatal_error_signal: Signal,
+        buffer_underrun_signal: Signal,
+        eof_signal: Signal,
         video_frame_update_signal: Signal,
     ):
-        self._decoder = decoder
+        self._decoder: Decoder | None = None
+
         self._thread_spawner = thread_spawner
-        self._player_stalled_signal = player_stalled_signal
+
+        self._fatal_error_signal = fatal_error_signal
+        self._buffer_underrun_signal = buffer_underrun_signal
+        self._eof_signal = eof_signal
         self._video_frame_update_signal = video_frame_update_signal
 
-        self._mutex = Lock()
-        self._tasks = deque[Task]()
-        self._new_tasks_added = Condition(self._mutex)
+        self._tasks = TaskQueue()
+        self._mutex = self._tasks.mutex
 
-        self._state = PlayerState.SHUT_DOWN
-        self._state_changed = Condition(self._mutex)
+        self._state = PlayerState.UNINITIALIZED
 
         self._timer: PlaybackTimer | None = None
 
+    def __del__(self):
+        self.deinitialize(wait=True)
+
     @property
-    def player_stalled_signal(self) -> Signal:
-        return self._player_stalled_signal
+    def fatal_error_signal(self) -> Signal:
+        return self._fatal_error_signal
+
+    @property
+    def buffer_underrun_signal(self) -> Signal:
+        return self._buffer_underrun_signal
+
+    @property
+    def eof_signal(self) -> Signal:
+        return self._eof_signal
 
     @property
     def video_frame_update_signal(self) -> Signal:
@@ -60,154 +73,163 @@ class VideoPlayer:
     def state(self) -> PlayerState:
         return self._state
 
-    def __del__(self):
-        self.shutdown(wait=True)
-
-    # @property
-    # def is_playing(self) -> bool:
-    #     return self._state == PlayerState.PLAYING
-
-    # @property
-    # def has_media(self) -> bool:
-    #     return self._state in [PlayerState.PLAYING, PlayerState.SUSPENDED]
-
-    def shutdown(self, wait: bool = False) -> None:
+    def deinitialize(self) -> Task.Future:
         with self._mutex:
-            self._shutdown__without_lock(wait=wait)
+            return self._deinitialize__locked()
 
-    def _shutdown__without_lock(self, wait: bool) -> None:
+    def _deinitialize__locked(self) -> Task.Future:
         assert self._mutex.locked()
 
-        if self.state != PlayerState.SHUT_DOWN:
-            self._tasks.clear()
-            self._put_task__without_lock(ShutdownTask())
-            if wait:
-                self._wait_for_state__without_lock(
-                    PlayerState.SHUT_DOWN,
-                    timeout=2 * TIMEOUT_TIME,
-                )
+        deinit_task = DeinitializeTask()
+        if self.state != PlayerState.UNINITIALIZED:
+            self._tasks.clear__locked()
+            self._tasks.add_task__locked(deinit_task)
+        else:
+            deinit_task.complete()
+        return deinit_task.future
 
-    def _wait_for_state__without_lock(self, state: PlayerState, timeout: float | None) -> None:
-        assert self._mutex.locked()
+    def initialize(self, decoder: Decoder, timer: PlaybackTimer) -> Task.Future:
+        assert decoder.media_type == MediaType.VIDEO
 
-        if not self._state_changed.wait_for(lambda: self._state == state, timeout=timeout):
-            raise TimeoutError(f"Waiting for state ({state=}) timed out ({timeout=})")
+        def _initialize():
+            with self._mutex:
+                assert self._state == PlayerState.UNINITIALIZED
+                self._deinitialize__locked().wait_done(timeout=THREAD_RESPONSE_TIMEOUT)
 
-    def startup(self, source: VideoSourceVariant, timer: PlaybackTimer) -> None:
-        assert source.media_type == MediaType.VIDEO
+                self._tasks.clear__locked()
+                self._timer = timer
+                self._decoder = decoder
 
-        with self._mutex:
-            self._shutdown__without_lock(wait=True)
+                self.__player_job__set_state__locked(PlayerState.SUSPENDED)
 
-            self._timer = timer
-            self._tasks.clear()
+        task = FnTask(_initialize)
+        self._thread_spawner.start(self.__player_job, task)
+        return task.future
 
-            self._decoder.start(
-                pipeline.context.MediaContext(
-                    av=pipeline.context.AVContext.open(
-                        source.path,
-                        MediaType.VIDEO,
-                        stream_idx=0,
-                    ),
-                    media_constraints=None,
-                )
-            )
-
-            logger.debug("VideoPlayer: Starting the job")
-            self._thread_spawner.start(self._player_job)
-
-    def _player_job(self) -> None:
+    def __player_job(self, init_task: Task) -> None:
+        logger.debug("VideoPlayer: Starting the job")
+        init_task.run()
         try:
-            self._set_state_with_notify(PlayerState.SUSPENDED)
-            self._playback_seek_loop()
-        except ShutdownTask:
-            logger.debug("VideoPlayer: The job was stopped by a task")
-            self._decoder.stop()
-            self._set_state_with_notify(PlayerState.SHUT_DOWN)
-        except Exception:
-            logger.debug("VideoPlayer: The job was stopped by an error")
-            self._set_state_with_notify(PlayerState.SHUT_DOWN)
-            raise
+            self.__player_job__playback_loop()
+        except Exception as exc:
+            try:
+                self._decoder.kill()
+                self._decoder = None
+            finally:
+                self.__player_job__set_state(PlayerState.UNINITIALIZED)
 
-    def _set_state_with_notify(self, state: PlayerState) -> None:
-        with self._mutex:
-            self._set_state_with_notify__without_lock(state)
+                if isinstance(exc, DeinitializeTask):
+                    task: DeinitializeTask = exc
+                    task.complete()
+                    logger.debug("VideoPlayer: Stopped by a task")
+                else:
+                    logger.error("VideoPlayer: Stopped by an error")
+                    self._fatal_error_signal.emit()
+                    raise exc
 
-    def _set_state_with_notify__without_lock(self, state: PlayerState) -> None:
-        assert self._mutex.locked()
+    def __player_job__playback_loop(self) -> None:
+        frame: JbVideoFrame | None = None
 
-        self._state = state
-        self._state_changed.notify_all()
-
-    def _playback_seek_loop(self) -> None:
+        self.__player_job__emit_first_frame()
         while True:
             try:
-                self._playback_loop()
-            except SeekTask as seek:
-                self._decoder.seek(seek_timepoint=seek.timepoint)
-
-    def _playback_loop(self):
-        frame: JbVideoFrame | None = None
-        while True:
-            self._do_tasks()
-
-            if self.state == PlayerState.SUSPENDED:
-                frame = None
-                with self._mutex:
-                    self._new_tasks_added.wait_for(lambda: len(self._tasks) > 0)
-                continue
-
-            if frame is None:
-                try:
-                    frame = self._decoder.pop(timeout=TIMEOUT_TIME)
-                    if frame is None:
-                        logger.warning("VideoPlayer: Player suspended by EOF")
-                        self._set_state_with_notify(PlayerState.SUSPENDED)
-                        continue
-                except TimeoutError:
-                    logger.warning("VideoPlayer: Player suspended by a timeout")
-                    self._set_state_with_notify(PlayerState.SUSPENDED)
-                    self._player_stalled_signal.emit()
+                if self._tasks.run_all(wait_when_empty=(self.state == PlayerState.SUSPENDED)) > 0:
                     continue
-            assert self.state == PlayerState.PLAYING
 
-            if frame is not None and self._sync_with_timer(frame):
-                self._video_frame_update_signal.emit(frame=frame)
+                if frame is None:
+                    frame = self.__player_job__get_frame()
+
+                if frame is not None and self.__player_job__sync_with_timer(frame):
+                    self._video_frame_update_signal.emit(frame=frame)
+                    frame = None
+
+            except SeekTask as seek_task:
+                logger.debug(f"VideoPlayer: Seeking to {seek_task.timepoint}")
+
+                seek_task.complete_after(self.__player_job__seek, seek_task.timepoint)
+
+                self.__player_job__emit_first_frame()
                 frame = None
 
-    def _do_tasks(self) -> None:
-        with self._mutex:
-            while self._tasks:
-                self._tasks.popleft().run()
+    def __player_job__seek(self, timepoint: float) -> None:
+        self._decoder.seek(timepoint).wait_done(
+            timeout=THREAD_RESPONSE_TIMEOUT  # TODO: better timeout
+        )
+        self._decoder.prefill(timeout=1.0).wait_done()
 
-    def _sync_with_timer(self, frame: JbVideoFrame) -> bool:
-        sleep_threshold = min(0.004, frame.duration / 3)
+    def __player_job__emit_first_frame(self) -> None:
+        self.video_frame_update_signal.emit(frame=self.__player_job__get_frame())
+
+    def __player_job__get_frame(self) -> JbVideoFrame | None:
+        try:
+            frame = self._decoder.pop(timeout=0)
+            logger.info(frame)
+            if frame is None:
+                logger.debug("VideoPlayer: Suspended by EOF")
+                self.__player_job__set_state(PlayerState.SUSPENDED)
+                self._eof_signal.emit()
+            return frame
+        except TimeoutError:
+            logger.warning("VideoPlayer: Suspended by buffer underrun")
+            self.__player_job__set_state(PlayerState.SUSPENDED)
+            self._buffer_underrun_signal.emit()
+        return None
+
+    def __player_job__sync_with_timer(self, frame: JbVideoFrame) -> bool:
+        sleep_threshold = min(SLEEP_THRESHOLD_MAX, frame.duration * SLEEP_THRESHOLD_RATIO)
         with self._mutex:
-            sleep_time = frame.beg_timepoint - self._timer.playback_timepoint()
-            if sleep_time > sleep_threshold and not self._new_tasks_added.wait(sleep_time):
-                sleep_time = frame.beg_timepoint - self._timer.playback_timepoint()
+            current_timepoint = self._timer.current_timepoint()
+            if current_timepoint is None:
+                return False
+
+            sleep_time = frame.beg_timepoint - current_timepoint
+            if sleep_time > sleep_threshold:
+                # wait for the timer to catch up
+                if self._tasks.task_added.wait(timeout=min(SLEEP_TIME_MAX, sleep_time)):
+                    current_timepoint = self._timer.current_timepoint()
+                    if current_timepoint is None:
+                        return False
+
+                    sleep_time = frame.beg_timepoint - current_timepoint
 
         if sleep_time <= sleep_threshold:
             return True
         return False
 
-    def suspend(self) -> None:
-        self._put_task__with_lock(
-            FnTask(self._set_state_with_notify__without_lock, PlayerState.SUSPENDED)
-        )
-
-    def resume(self) -> None:
-        self._put_task__with_lock(
-            FnTask(self._set_state_with_notify__without_lock, PlayerState.PLAYING)
-        )
-
-    def seek(self, timepoint: float):
-        self._put_task__with_lock(SeekTask(timepoint))
-
-    def _put_task__with_lock(self, task: Exception):
+    def __player_job__set_state(self, state: PlayerState) -> None:
         with self._mutex:
-            self._put_task__without_lock(task)
+            self.__player_job__set_state__locked(state)
 
-    def _put_task__without_lock(self, task: Exception):
-        self._tasks.append(task)
-        self._new_tasks_added.notify()
+    def __player_job__set_state__locked(self, state: PlayerState) -> None:
+        assert self._mutex.locked()
+
+        self._state = state
+
+    def suspend(self) -> Task.Future:
+        task = FnTask(self.__player_job__set_state, state=PlayerState.SUSPENDED)
+        with self._mutex:
+            if self.state != PlayerState.UNINITIALIZED:
+                self._tasks.add_task__locked(task)
+            else:
+                task.cancel()
+        return task.future
+
+    def resume(self) -> Task.Future:
+        task = FnTask(self.__player_job__set_state, state=PlayerState.PLAYING)
+        with self._mutex:
+            if self.state != PlayerState.UNINITIALIZED:
+                self._tasks.add_task__locked(task)
+            else:
+                task.cancel()
+        return task.future
+
+    def seek(self, source_timepoint: float) -> Task.Future:
+        assert source_timepoint >= 0
+
+        task = SeekTask(timepoint=source_timepoint)
+        with self._mutex:
+            if self.state != PlayerState.UNINITIALIZED:
+                self._tasks.add_task__locked(task)
+            else:
+                task.cancel()
+        return task.future

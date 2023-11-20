@@ -1,17 +1,19 @@
-from threading import Lock
+from threading import RLock, Lock, Condition
 
 import PySide6.QtWidgets as QtW
 import PySide6.QtMultimedia as QtM
 import PySide6.QtCore as QtC
 
+from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
-from jerboa.media.source import AudioSourceVariant
+from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask
 from jerboa.media.core import MediaType, AudioSampleFormat, AudioChannelLayout, AudioConstraints
-from .decoding.decoder import JbDecoder, pipeline
+from .decoding.decoder import Decoder
 from .state import PlayerState
 from .timer import PlaybackTimer
 
-TIMEOUT_TIME = 0.1
+SEEK_PREFILL_TIMEOUT = 2.5  # in seconds
+THREAD_RESPONSE_TIMEOUT = 0.1
 
 
 def jb_to_qt_audio_sample_format(
@@ -31,19 +33,30 @@ def jb_to_qt_audio_sample_format(
 
 
 class AudioManager:
+    class KillTask(Task):
+        ...
+
     def __init__(
         self,
         app: QtW.QApplication,
+        thread_spawner: ThreadSpawner,
         output_devices_changed_signal: Signal,
         current_output_device_changed_signal: Signal,
     ):
         self._app = app
-        self._output_devices = QtM.QMediaDevices()
-        self._current_device = self._output_devices.defaultAudioOutput()
-
-        self._output_devices.audioOutputsChanged.connect(output_devices_changed_signal.emit)
         self._output_devices_changed_signal = output_devices_changed_signal
         self._current_output_device_changed_signal = current_output_device_changed_signal
+
+        self._mutex = Lock()
+        self._media_devices: QtM.QMediaDevices | None = None
+        self._current_device: QtM.QAudioDevice | None = None
+
+        self._is_thread_killed = False
+        self._is_thread_running = False
+        self._is_thread_running_condition = Condition(lock=self._mutex)
+
+        self._tasks = TaskQueue()
+        thread_spawner.start(self.__audio_thread)
 
     @property
     def output_devices_changed_signal(self) -> Signal:
@@ -54,24 +67,44 @@ class AudioManager:
         return self._current_output_device_changed_signal
 
     def set_current_output_device(self, output_device: QtM.QAudioDevice) -> None:
-        self._current_device = output_device
-        self._current_output_device_changed_signal.emit()
+        with self._mutex:
+            self._is_thread_running_condition.wait_for(
+                lambda: self._is_thread_running, timeout=THREAD_RESPONSE_TIMEOUT
+            )
+
+            self._current_device = output_device
+            self._current_output_device_changed_signal.emit()
 
     def get_output_devices(self) -> list:
-        return self._output_devices.audioOutputs()
+        with self._mutex:
+            self._is_thread_running_condition.wait_for(
+                lambda: self._is_thread_running, timeout=THREAD_RESPONSE_TIMEOUT
+            )
+
+            return self._media_devices.audioOutputs()
 
     def get_current_output_device(self) -> QtM.QAudioDevice:
-        return self._current_device
+        with self._mutex:
+            self._is_thread_running_condition.wait_for(
+                lambda: self._is_thread_running, timeout=THREAD_RESPONSE_TIMEOUT
+            )
+
+            return self._current_device
 
     def get_current_output_device_constraints(self) -> AudioConstraints:
-        return AudioConstraints(
-            sample_formats=self._get_supported_sample_formats(),
-            channel_layouts=self._get_supported_channel_layout(),
-            channels_num_min=self._current_device.minimumChannelCount(),
-            channels_num_max=self._current_device.maximumChannelCount(),
-            sample_rate_min=self._current_device.minimumSampleRate(),
-            sample_rate_max=self._current_device.maximumSampleRate(),
-        )
+        with self._mutex:
+            self._is_thread_running_condition.wait_for(
+                lambda: self._is_thread_running, timeout=THREAD_RESPONSE_TIMEOUT
+            )
+
+            return AudioConstraints(
+                sample_formats=self._get_supported_sample_formats(),
+                channel_layouts=self._get_supported_channel_layout(),
+                channels_num_min=self._current_device.minimumChannelCount(),
+                channels_num_max=self._current_device.maximumChannelCount(),
+                sample_rate_min=self._current_device.minimumSampleRate(),
+                sample_rate_max=self._current_device.maximumSampleRate(),
+            )
 
     def _get_supported_sample_formats(self) -> list[AudioSampleFormat]:
         sample_formats_jb = list[AudioSampleFormat]()
@@ -131,28 +164,54 @@ class AudioManager:
                 pass
         return result
 
+    # --------------------------------------- Audio thread --------------------------------------- #
+
+    def __audio_thread(self) -> None:
+        with self._mutex:
+            self._current_device = QtM.QMediaDevices.defaultAudioOutput()
+            self._media_devices = QtM.QMediaDevices()
+            self._media_devices.audioOutputsChanged.connect(self.output_devices_changed_signal.emit)
+            self._is_thread_running = True
+            self._is_thread_running_condition.notify_all()
+        while True:
+            try:
+                QtC.QCoreApplication.processEvents()
+
+                self._tasks.run_all(wait_when_empty=True, timeout=1 / 60)
+            except AudioManager.KillTask as kill_task:
+                kill_task.complete()
+                break
+            finally:
+                self._tasks.clear()
+
+    def run_on_audio_thread(self, task: Task) -> Task.Future:
+        if self._is_thread_killed:
+            task.cancel()
+        else:
+            self._tasks.add_task(task)
+        return task.future
+
 
 class QtAudioSourceDevice(QtC.QIODevice):
-    def __init__(self, decoder: JbDecoder):
-        assert decoder.media_type == MediaType.AUDIO
-
+    def __init__(self, decoder: Decoder):
         QtC.QIODevice.__init__(self)
 
         self._decoder = decoder
         self._bytes_per_sample = self._decoder.presentation_media_config.bytes_per_sample
 
-        self.open(QtC.QIODevice.ReadOnly)
+        self.open(QtC.QIODevice.OpenModeFlag.ReadWrite)
 
     def readData(self, maxSize: int) -> bytes:
         wanted_samples_num = int(maxSize / self._bytes_per_sample)
         try:
-            audio = self._decoder.pop(wanted_samples_num, timeout=TIMEOUT_TIME)
+            audio = self._decoder.pop(wanted_samples_num, timeout=0)
         except TimeoutError:
             audio = None
+            logger.debug("QtAudioSourceDevice: Buffer underrun")
 
         if audio is not None:
-            return bytes(audio.audio_signal)
-        return -1
+            return audio.audio_signal.tobytes()
+        return bytes()
 
     def writeData(self, _) -> int:
         return 0  # Not implemented as we're only reading audio data
@@ -161,72 +220,87 @@ class QtAudioSourceDevice(QtC.QIODevice):
         return 0
 
 
+class Context:
+    def __init__(self):
+        self._depth = 0
+
+    def __del__(self):
+        assert self._depth == 0
+
+    def __bool__(self) -> bool:
+        return self._depth > 0
+
+    def __enter__(self) -> None:
+        self._depth += 1
+
+    def __exit__(self, *_) -> None:
+        self._depth -= 1
+        assert self._depth >= 0
+
+
 class AudioPlayer(PlaybackTimer):
     def __init__(
         self,
         audio_manager: AudioManager,
-        decoder: JbDecoder,
-        shutdown_signal: Signal,
-        suspend_signal: Signal,
-        resume_signal: Signal,
-        seek_signal: Signal,
+        fatal_error_signal: Signal,
+        buffer_underrun_signal: Signal,
+        eof_signal: Signal,
     ):
-        self._decoder = decoder
-
-        self._mutex = Lock()
+        self._decoder: Decoder | None = None
+        self._state = PlayerState.UNINITIALIZED
+        self._time_offset = 0.0
+        self._fatal_error_signal = fatal_error_signal
+        self._buffer_underrun_signal = buffer_underrun_signal
+        self._eof_signal = eof_signal
 
         self._audio_sink: QtM.QAudioSink | None = None
-
         self._audio_manager = audio_manager
         self._audio_manager.current_output_device_changed_signal.connect(
             self._on_output_device_changed
         )
 
-        self._shutdown_signal = shutdown_signal
-        self._suspend_signal = suspend_signal
-        self._resume_signal = resume_signal
-        self._seek_signal = seek_signal
+        self._clear_buffers_on_resume = False
+        self._ignore_state_changes = Context()
 
-        self._shutdown_signal.connect(self._shutdown)
-        self._suspend_signal.connect(self._suspend)
-        self._resume_signal.connect(self._resume)
-        self._seek_signal.connect(self._seek)
+        # Operations on `audio_sink` change its state, thus `_on_audio_sink_state_change` will be
+        # called. `_on_audio_sink_state_change` needs the mutex locked, so RLock is required
+        self._mutex = RLock()
 
     def __del__(self):
-        self.shutdown()
+        self.deinitialize()
 
-    def _on_output_device_changed(self) -> None:
+    @property
+    def fatal_error_signal(self) -> Signal:
+        return self._fatal_error_signal
+
+    @property
+    def buffer_underrun_signal(self) -> Signal:
+        return self._buffer_underrun_signal
+
+    @property
+    def eof_signal(self) -> Signal:
+        return self._eof_signal
+
+    @property
+    def state(self) -> PlayerState:
+        return self._state
+
+    def initialize(self, decoder: Decoder) -> Task.Future:
+        assert decoder.media_type == MediaType.AUDIO
+        return self._audio_manager.run_on_audio_thread(FnTask(self._initialize, decoder))
+
+    def _initialize(self, decoder: Decoder) -> None:
         with self._mutex:
-            if self._audio_sink:
-                self._audio_sink.reset()
-                self._decoder.apply_new_media_constraints(
-                    self._audio_manager.get_current_output_device_constraints(),
-                    start_timepoint=0,
-                )
+            logger.debug("AudioPlayer: Initialization...")
 
-    def startup(self, source: AudioSourceVariant) -> None:
-        assert source.media_type == MediaType.AUDIO
+            assert self.state == PlayerState.UNINITIALIZED and self._decoder is None
 
-        av_context = pipeline.context.AVContext.open(
-            source.path,
-            MediaType.AUDIO,
-            stream_idx=0,
-        )
-
-        def _startup() -> None:
-            assert self._mutex.locked()
-
-            media = pipeline.context.MediaContext(
-                av=av_context,
-                media_constraints=self._audio_manager.get_current_output_device_constraints(),
+            self._decoder = decoder
+            self._decoder.apply_new_media_constraints(self.get_constraints()).wait_done(
+                timeout=THREAD_RESPONSE_TIMEOUT
             )
 
-            # if the decoder is already is running, `start()` will wait for it to stop,
-            # but since this function is called post-shutdown, this shouldn't be the case
-            assert not self._decoder.is_running
-            self._decoder.start(media)
-
-            jb_audio_cofnig = media.presentation_config
+            jb_audio_cofnig = decoder.presentation_media_config
             audio_format = QtM.QAudioFormat()
             audio_format.setSampleRate(jb_audio_cofnig.sample_rate)
             audio_format.setChannelCount(jb_audio_cofnig.channels_num)
@@ -234,55 +308,132 @@ class AudioPlayer(PlaybackTimer):
                 jb_to_qt_audio_sample_format(jb_audio_cofnig.sample_format)
             )
 
-            self._audio_sink = QtM.QAudioSink(
-                self._audio_manager.get_current_output_device(),
-                audio_format,
-            )
-            self._audio_sink.start(QtAudioSourceDevice(self._decoder))
+            self._reset_audio_sink__locked(audio_format)
 
-        self._shutdown_signal.emit(self._mutex, _startup, lock=False)
+            logger.debug("AudioPlayer: Initialization done")
 
-    def shutdown(self) -> None:
-        self._shutdown_signal.emit()
+    def _reset_audio_sink__locked(self, format: QtM.QAudioFormat) -> None:
+        logger.debug("AudioPlayer: Resetting audio sink")
 
-    def _shutdown(self, lock: bool = True) -> None:
-        if lock:
-            with self._mutex:
-                self._shutdown__without_lock()
-        else:
-            self._shutdown__without_lock()
-
-    def _shutdown__without_lock(self) -> None:
-        assert self._mutex.locked()
         if self._audio_sink is not None:
-            self._decoder.stop()
             self._audio_sink.stop()
-        self._audio_sink = None
+            self._audio_sink.stateChanged.disconnect()
 
-    def suspend(self) -> None:
-        self._suspend_signal.emit()
+        self._audio_sink = QtM.QAudioSink(
+            self._audio_manager.get_current_output_device(),
+            format,
+        )
+        self._audio_sink.stateChanged.connect(self._on_audio_sink_state_change)
+
+        self._audio_sink.start(QtAudioSourceDevice(self._decoder))
+        self._audio_sink.suspend()
+
+    def deinitialize(self) -> Task.Future:
+        return self._audio_manager.run_on_audio_thread(FnTask(self._deinitialize))
+
+    def _deinitialize(self) -> None:
+        with self._mutex:
+            logger.debug("AudioPlayer: Deinitialization...")
+            if self._audio_sink is not None:
+                self._audio_sink.stop()
+                self._audio_sink = None
+
+                self._decoder.kill()
+                self._decoder = None
+            logger.debug("AudioPlayer: Deinitialization done")
+
+    def suspend(self) -> Task.Future:
+        return self._audio_manager.run_on_audio_thread(FnTask(self._suspend))
 
     def _suspend(self) -> None:
         with self._mutex:
+            logger.debug("AudioPlayer: Suspending...")
             if self._audio_sink is not None:
                 self._audio_sink.suspend()
+            logger.debug("AudioPlayer: Suspended")
 
-    def resume(self) -> None:
-        self._resume_signal.emit()
+    def resume(self) -> Task.Future:
+        return self._audio_manager.run_on_audio_thread(FnTask(self._resume))
 
     def _resume(self) -> None:
         with self._mutex:
             if self._audio_sink is not None:
+                logger.debug("AudioPlayer: Resuming...")
+                if self._clear_buffers_on_resume:
+                    self._clear_buffers_on_resume = False
+                    with self._ignore_state_changes:
+                        self._reset_audio_sink__locked(self._audio_sink.format())
                 self._audio_sink.resume()
+                logger.debug("AudioPlayer: Resumed")
+            else:
+                logger.debug("AudioPlayer: Not resuming - media source without audio")
 
-    def seek(self, timepoint: float) -> None:
-        self._seek_signal.emit(timepoint=timepoint)
+    def seek(self, source_timepoint: float, new_timer_offset: float) -> Task.Future:
+        assert self._state in [PlayerState.SUSPENDED, PlayerState.UNINITIALIZED]
 
-    def _seek(self, timepoint: float) -> None:
+        return self._audio_manager.run_on_audio_thread(
+            FnTask(self._seek, source_timepoint, new_timer_offset)
+        )
+
+    def _seek(self, source_timepoint: float, new_timer_offset: float) -> None:
+        assert source_timepoint >= 0
+
         with self._mutex:
-            ...
+            if self._audio_sink is not None:
+                self._decoder.seek(source_timepoint).wait_done(timeout=SEEK_PREFILL_TIMEOUT)
+                self._decoder.prefill(timeout=SEEK_PREFILL_TIMEOUT).wait_done()
 
-    def playback_timepoint(self) -> float:
-        if self._audio_sink is not None:
-            return self._audio_sink.processedUSecs() / 1e6
-        return 0
+                self._time_offset = new_timer_offset
+                self._clear_buffers_on_resume = True
+
+    def current_timepoint(self) -> float | None:
+        with self._mutex:
+            if self._audio_sink is not None:
+                return self._time_offset + self._audio_sink.processedUSecs() / 1e6
+        return None
+
+    def get_constraints(self) -> AudioConstraints:
+        return self._audio_manager.get_current_output_device_constraints()
+
+    @QtC.Slot()
+    def _on_output_device_changed(self) -> None:
+        with self._mutex:
+            if self._audio_sink:
+                self._audio_sink.reset()
+                self._decoder.apply_new_media_constraints(self.get_constraints())
+
+    @QtC.Slot(QtM.QAudio.State)
+    def _on_audio_sink_state_change(self, qt_state: QtM.QAudio.State) -> None:
+        with self._mutex:
+            if self._ignore_state_changes:
+                return
+
+            match qt_state:
+                case QtM.QAudio.State.ActiveState:
+                    self._set_state_with_log(PlayerState.PLAYING)
+                case QtM.QAudio.State.SuspendedState:
+                    self._set_state_with_log(PlayerState.SUSPENDED)
+                case QtM.QAudio.State.IdleState:
+                    self._set_state_with_log(PlayerState.SUSPENDED)
+                    # these emits may indirectly call other methods of this class that can modify
+                    # the state, so the new state must be set before emiting the signals, otherwise
+                    # it could override the changes made by the signal callbacks
+                    if self._decoder is not None:
+                        if self._decoder.is_done and self._decoder.buffered_duration <= 0:
+                            logger.debug("AudioPlayer: Suspended by EOF")
+                            self.eof_signal.emit()
+                        else:
+                            print(f"{self._decoder.buffered_duration=}")
+                            logger.warning("AudioPlayer: Suspended by buffer underrun")
+                            self.buffer_underrun_signal.emit()
+                case QtM.QAudio.State.StoppedState:
+                    self._set_state_with_log(PlayerState.UNINITIALIZED)
+                    if self._decoder is not None:
+                        self.fatal_error_signal.emit()
+                case _:
+                    raise ValueError(f"Unrecognized state: {qt_state}")
+
+    def _set_state_with_log(self, state: PlayerState) -> None:
+        if self._state != state:
+            logger.debug(f"AudioPlayer: New state: {state}")
+        self._state = state

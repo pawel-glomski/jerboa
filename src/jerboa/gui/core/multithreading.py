@@ -1,4 +1,5 @@
 from typing import Callable
+from concurrent import futures
 
 from PySide6 import QtCore as QtC
 
@@ -13,15 +14,21 @@ class QtThreadPool(ThreadPool):
         if workers:
             self._thread_pool.setMaxThreadCount(workers)
 
-    def start(self, job: Callable, *args, **kwargs):
+    def start(self, job: Callable, *args, **kwargs) -> futures.Future:
+        future = futures.Future()
+
         def worker():
             try:
-                job(*args, **kwargs)
-            except Exception as e:
-                logger.exception(e)
+                future.set_running_or_notify_cancel()
+                if not future.cancelled():
+                    future.set_result(job(*args, **kwargs))
+            except Exception as exception:
+                future.set_exception(exception)
+                logger.exception(exception)
                 raise
 
         self._thread_pool.start(worker)
+        return future
 
     def wait(self, timeout: int | None = None) -> bool:
         return self._thread_pool.waitForDone(-1 if timeout is None else timeout)
@@ -46,10 +53,11 @@ class QtThreadSpawner(ThreadSpawner):
         def run(self) -> None:
             try:
                 self._job(*self._args, **self._kwargs)
-                self.finished.emit()
             except Exception as e:
                 logger.exception(e)
                 raise
+            finally:
+                self.finished.emit()
 
     def __init__(self):
         self._threads = dict[QtC.QThread, QtThreadSpawner.Worker]()

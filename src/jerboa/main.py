@@ -24,9 +24,9 @@ class Container(containers.DeclarativeContainer):
     ready_to_play_signal = providers.Singleton(gui.core.signal.QtSignal, "media_source")
     video_frame_update_signal = providers.Singleton(gui.core.signal.QtSignal, "frame")
 
-    # media_player_start_signal = providers.Singleton(gui.core.signal.QtSignal)
-    # media_player_resume_signal = providers.Singleton(gui.core.signal.QtSignal)
-    # media_player_pause_signal = providers.Singleton(gui.core.signal.QtSignal)
+    playback_toggle_signal = providers.Singleton(gui.core.signal.QtSignal)
+    seek_backward_signal = providers.Singleton(gui.core.signal.QtSignal)
+    seek_forward_signal = providers.Singleton(gui.core.signal.QtSignal)
 
     audio_output_devices_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
     current_audio_output_device_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
@@ -34,8 +34,8 @@ class Container(containers.DeclarativeContainer):
     # ------------------------------ Multithreading ------------------------------ #
 
     thread_spawner = providers.Singleton(
-        # gui.core.multithreading.QtThreadSpawner
-        core.multithreading.PyThreadSpawner
+        gui.core.multithreading.QtThreadSpawner
+        # core.multithreading.PyThreadSpawner
     )
     thread_pool = providers.Singleton(
         # gui.core.multithreading.QtThreadPool,
@@ -48,6 +48,7 @@ class Container(containers.DeclarativeContainer):
     audio_manager = providers.Singleton(
         media.player.audio_player.AudioManager,
         app=qt_app,
+        thread_spawner=thread_spawner,
         output_devices_changed_signal=audio_output_devices_changed_signal,
         current_output_device_changed_signal=current_audio_output_device_changed_signal,
     )
@@ -55,30 +56,17 @@ class Container(containers.DeclarativeContainer):
     audio_player = providers.Singleton(
         media.player.audio_player.AudioPlayer,
         audio_manager=audio_manager,
-        decoder=providers.Factory(
-            media.player.audio_player.JbDecoder,
-            decoding_pipeline=media.player.decoding.decoder.create_decoding_pipeline(
-                media.core.MediaType.AUDIO
-            ),
-            thread_spawner=thread_spawner,
-        ),
-        shutdown_signal=providers.Factory(gui.core.signal.QtSignal, "lock"),
-        suspend_signal=providers.Factory(gui.core.signal.QtSignal),
-        resume_signal=providers.Factory(gui.core.signal.QtSignal),
-        seek_signal=providers.Factory(gui.core.signal.QtSignal, "timepoint"),
+        fatal_error_signal=providers.Factory(gui.core.signal.QtSignal),
+        buffer_underrun_signal=providers.Factory(gui.core.signal.QtSignal),
+        eof_signal=providers.Factory(gui.core.signal.QtSignal),
     )
 
     video_player = providers.Singleton(
         media.player.video_player.VideoPlayer,
-        decoder=providers.Factory(
-            media.player.video_player.JbDecoder,
-            decoding_pipeline=media.player.decoding.decoder.create_decoding_pipeline(
-                media.core.MediaType.VIDEO
-            ),
-            thread_spawner=thread_spawner,
-        ),
         thread_spawner=thread_spawner,
-        player_stalled_signal=providers.Factory(gui.core.signal.QtSignal),
+        fatal_error_signal=providers.Factory(gui.core.signal.QtSignal),
+        buffer_underrun_signal=providers.Factory(gui.core.signal.QtSignal),
+        eof_signal=providers.Factory(gui.core.signal.QtSignal),
         video_frame_update_signal=video_frame_update_signal,
     )
 
@@ -86,9 +74,21 @@ class Container(containers.DeclarativeContainer):
         media.player.media_player.MediaPlayer,
         audio_player=audio_player,
         video_player=video_player,
+        audio_decoding_pipeline_factory=providers.Factory(
+            media.player.decoding.pipeline.create_audio_decoding_pipeline,
+            thread_spawner=thread_spawner,
+        ).provider,
+        video_decoding_pipeline_factory=providers.Factory(
+            media.player.decoding.pipeline.create_video_decoding_pipeline,
+            thread_spawner=thread_spawner,
+        ).provider,
+        timeline=providers.Factory(
+            core.timeline.FragmentedTimeline,
+            init_sections=[core.timeline.TMSection(i, i + 0.5) for i in range(1000)],
+        ),
         thread_pool=thread_pool,
+        fatal_error_signal=providers.Factory(gui.core.signal.QtSignal),
         ready_to_play_signal=ready_to_play_signal,
-        # playback_stalled_signal=...
     )
 
     # ------------------------------------ GUI ----------------------------------- #
@@ -99,18 +99,25 @@ class Container(containers.DeclarativeContainer):
         thread_pool=thread_pool,
         media_source_selected_signal=media_source_selected_signal,
         ready_to_play_signal=ready_to_play_signal,
+        playback_toggle_signal=playback_toggle_signal,
         video_frame_update_signal=video_frame_update_signal,
+        seek_backward_signal=seek_backward_signal,
+        seek_forward_signal=seek_forward_signal,
     )
 
 
 @inject
 def connect_signals(
-    media_source_selected_signal: core.signal.Signal = Provide[
-        Container.media_source_selected_signal
-    ],
+    media_source_selected: core.signal.Signal = Provide[Container.media_source_selected_signal],
+    playback_toggle: core.signal.Signal = Provide[Container.playback_toggle_signal],
+    seek_backward: core.signal.Signal = Provide[Container.seek_backward_signal],
+    seek_forward: core.signal.Signal = Provide[Container.seek_forward_signal],
     media_player: media.player.media_player.MediaPlayer = Provide[Container.media_player],
 ):
-    media_source_selected_signal.connect(media_player.start)
+    media_source_selected.connect(media_player.initialize)
+    playback_toggle.connect(media_player.playback_toggle)
+    seek_backward.connect(media_player.seek_backward)
+    seek_forward.connect(media_player.seek_forward)
 
 
 if __name__ == "__main__":

@@ -55,6 +55,19 @@ class Canvas(QtMW.QVideoWidget):
 
         video_frame_update_signal.connect(self._on_frame_update)
 
+    def _on_frame_update(self, frame: JbVideoFrame) -> None:
+        if frame is not None:
+            self._assure_correct_frame_size(frame.width, frame.height)
+
+            frame_qt = self._new_frame()
+            with FrameMappingContext(frame_qt, QtM.QVideoFrame.MapMode.ReadWrite):
+                for plane_idx in range(frame_qt.planeCount()):
+                    frame_qt.bits(plane_idx)[:] = frame.planes[plane_idx]
+
+            self.videoSink().setVideoFrame(frame_qt)
+        else:
+            self.videoSink().setVideoFrame(QtM.QVideoFrame())
+
     def _assure_correct_frame_size(self, width: int, height: int) -> None:
         if width != self._frame_format.frameWidth() or height != self._frame_format.frameHeight():
             self._frame_format.setFrameSize(QtC.QSize(width, height))
@@ -67,28 +80,6 @@ class Canvas(QtMW.QVideoWidget):
     def _new_frame(self) -> QtM.QVideoFrame:
         self._frame_idx = (self._frame_idx + 1) % 2
         return self._frames[self._frame_idx]
-
-    def _on_frame_update(self, frame: JbVideoFrame) -> None:
-        self._assure_correct_frame_size(frame.width, frame.height)
-
-        frame_qt = self._new_frame()
-        with FrameMappingContext(frame_qt, QtM.QVideoFrame.MapMode.ReadWrite):
-            for plane_idx in range(frame_qt.planeCount()):
-                frame_qt.bits(plane_idx)[:] = frame.planes[plane_idx]
-
-        self.videoSink().setVideoFrame(frame_qt)
-
-    def resizeEvent(self, event: QtG.QResizeEvent):
-        super().resizeEvent(event)
-        ...
-        # if self._current_pixmap is not None:
-        #     self.setPixmap(
-        #         self._current_pixmap.scaled(
-        #             self.size(),
-        #             aspectMode=Qt.AspectRatioMode.KeepAspectRatio,
-        #             mode=Qt.TransformationMode.SmoothTransformation,
-        #         )
-        #     )
 
 
 class Timeline(QtW.QLabel):
@@ -106,11 +97,18 @@ class PlayerView(QtW.QWidget):
         self,
         canvas: Canvas,
         timeline: Timeline,
+        playback_toggle_signal: Signal,
+        seek_forward_signal: Signal,
+        seek_backward_signal: Signal,
     ):
         super().__init__()
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         self._canvas = canvas
         self._timeline = timeline
+        self._playback_toggle_signal = playback_toggle_signal
+        self._seek_backward_signal = seek_backward_signal
+        self._seek_forward_signal = seek_forward_signal
 
         self._splitter = QtW.QSplitter()
         self._splitter.setOrientation(Qt.Orientation.Vertical)
@@ -136,3 +134,14 @@ class PlayerView(QtW.QWidget):
         self._splitter.addWidget(widget)
         self._splitter.setStretchFactor(idx, stretch_factor)
         self._splitter.setCollapsible(idx, collapsible)
+
+    def keyPressEvent(self, event: QtG.QKeyEvent):
+        super().keyPressEvent(event)
+        if event.key() == Qt.Key.Key_Space:
+            self._playback_toggle_signal.emit()
+        if event.key() == Qt.Key.Key_Left:
+            self._seek_backward_signal.emit()
+        if event.key() == Qt.Key.Key_Right:
+            self._seek_forward_signal.emit()
+        else:
+            super().keyPressEvent(event)

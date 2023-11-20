@@ -31,7 +31,12 @@ class Container(containers.DeclarativeContainer):
     thread_pool = providers.Dependency(ThreadPool)
     media_source_selected_signal = providers.Dependency(Signal)
     ready_to_play_signal = providers.Dependency(Signal)
+
     video_frame_update_signal = providers.Dependency(Signal)
+
+    playback_toggle_signal = providers.Dependency(Signal)
+    seek_backward_signal = providers.Dependency(Signal)
+    seek_forward_signal = providers.Dependency(Signal)
 
     # ---------------------------------- Palette --------------------------------- #
 
@@ -84,6 +89,9 @@ class Container(containers.DeclarativeContainer):
         player_view.PlayerView,
         canvas=player_view_canvas,
         timeline=player_view_timeline,
+        playback_toggle_signal=playback_toggle_signal,
+        seek_backward_signal=seek_backward_signal,
+        seek_forward_signal=seek_forward_signal,
     )
 
     # ----------------------------- Main view stack ---------------------------- #
@@ -131,7 +139,8 @@ class Container(containers.DeclarativeContainer):
             placeholder_text="Media file path (or URL)...",
             apply_button_text="Apply",
             local_file_extension_filter=(
-                "Media files (*.mp3 *.wav *.ogg *.flac *.mp4 *.avi *.mkv *.mov);; All files (*)"
+                "Media files (*.mp3 *.wav *.aac *.ogg *.flac "
+                "*.mp4 *.avi *.mkv *.mov);; All files (*)"
             ),
             path_invalid_signal=providers.Factory(core.signal.QtSignal, "error_message"),
             path_selected_signal=providers.Factory(core.signal.QtSignal, "media_source_path"),

@@ -7,8 +7,8 @@ from abc import ABC, abstractmethod
 from threading import Condition
 from gmpy2 import mpq as FastFraction
 
-from jerboa.core.timeline import FragmentedTimeline, TMSection
-from jerboa.media import jb_to_av, standardized_audio as std_audio
+from jerboa.core.timeline import FragmentedTimeline
+from jerboa.media import standardized_audio as std_audio
 from jerboa.media.core import MediaType
 from .context import DecodingContext, SeekTask
 from .reformatter import AudioReformatter, VideoReformatter
@@ -191,8 +191,7 @@ class DecodingNode(Node):
     def pull(self, context: DecodingContext) -> av.AudioFrame | av.VideoFrame | None:
         while True:
             try:
-                frame = self._decoded_frames.popleft()
-                return frame
+                return self._decoded_frames.popleft()
             except IndexError:
                 while len(self._decoded_frames) == 0:
                     packet = self.parent.pull(context)
@@ -384,22 +383,12 @@ class FrameMappingPreparationNode(Node):
             parent=parent,
         )
 
-        # TODO: maybe reference some global timeline instead?
-        # i.e.: timeline.on_changed_signal.connect(self._on_timeline_change)
-        # TODO: remove any initial sections, this should be an empty timeline
-        self._timeline: FragmentedTimeline = FragmentedTimeline(
-            TMSection(0, float("inf"), 0.5)
-            # *[TMSection(i * 0.2, i * 0.2 + 0.1, 0.5) for i in range(10000)]
-        )
-        self._timeline_updated_or_task_added: Condition | None = None
+        self._timeline: FragmentedTimeline | None = None
         self._returned_frame = False
 
     def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
         self._returned_frame = False
-        if hard:
-            # self._timeline = FragmentedTimeline() TODO: uncomment this
-            self._timeline_updated_or_task_added = Condition(context.mutex)
-            context.tasks.add_on_task_added_callback(self._timeline_updated_or_task_added.notify)
+        self._timeline = context.timeline
         return super().reset(context, hard, recursive)
 
     def pull(self, context: DecodingContext) -> PreMappedFrame | None:
@@ -407,13 +396,6 @@ class FrameMappingPreparationNode(Node):
             frame: TimedAVFrame = self.parent.pull(context)
 
             if frame is not None:
-                with context.mutex:
-                    self._timeline_updated_or_task_added.wait_for(
-                        lambda: self._timeline.time_scope >= frame.end_timepoint
-                        or not context.tasks.is_empty()
-                    )
-                    context.tasks.run_all__without_lock()
-
                 if frame.end_timepoint >= context.min_timepoint:
                     # note that the value of `beg` is `max(beg_timepoint, min_timepoint)`
                     # this assures the mapped frame will start exactly where it should
@@ -421,7 +403,9 @@ class FrameMappingPreparationNode(Node):
                     mapping_scheme, context.min_timepoint = self._timeline.map_time_range(
                         beg=max(frame.beg_timepoint, context.min_timepoint),
                         end=frame.end_timepoint,
+                        interrupt_condition=context.tasks.task_added,
                     )
+                    context.tasks.run_all()
 
                     if mapping_scheme.beg < mapping_scheme.end:
                         self._returned_frame = True
@@ -460,13 +444,15 @@ class FrameMappingNode(Node):
 
     def pull(self, context: DecodingContext) -> MappedAudioFrame | MappedVideoFrame | None:
         while True:
-            pre_mapped_frame = self.parent.pull(context)
+            pre_mapped_frame: PreMappedFrame = self.parent.pull(context)
             mapped_frame = self._mapper.map(pre_mapped_frame)
             if mapped_frame is not None or pre_mapped_frame is None:
                 return mapped_frame
 
 
 class AudioPresentationReformattingNode(Node):
+    assert JbAudioFrame == MappedAudioFrame
+
     def __init__(self, parent: Node | None):
         super().__init__(
             input_types={MappedAudioFrame},
@@ -485,8 +471,6 @@ class AudioPresentationReformattingNode(Node):
     def pull(self, context: DecodingContext) -> JbAudioFrame | None:
         frame: MappedAudioFrame = self.parent.pull(context)
         if frame is not None:
-            assert JbAudioFrame == MappedAudioFrame
-
             frame.audio_signal = std_audio.reformat(
                 frame.audio_signal,
                 wanted_dtype=self._wanted_dtype,

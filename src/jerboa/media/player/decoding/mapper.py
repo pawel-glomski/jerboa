@@ -9,6 +9,8 @@ from .frame import PreMappedFrame, MappedAudioFrame, MappedVideoFrame
 from concurrent import futures
 
 MAX_DRIFT_FIX = 0.1  # 10%
+
+RUBBERBAND_EXPECTED_DRIFT = 0.07  # in seconds
 DRIFT_FIX_THRESHOLD = 0.05  # in seconds
 
 
@@ -42,6 +44,10 @@ class AudioMapper:
         self.reset()
 
     def reset(self) -> None:
+        if hasattr(self, "_future"):
+            self._future.cancel()
+            futures.wait([self._future])
+
         self._audio.clear()
         self._stretcher.reset()
         self._next_frame_beg_timepoint: float | None = None
@@ -78,6 +84,9 @@ class AudioMapper:
                 else:
                     drift_fix_modifier = 1.0
 
+                # audio_data = std_audio.get_from_frame(frame.av_frame)
+                # self._stretcher.process(audio_data)
+                # self._audio.put(self._stretcher.retrieve_available())
                 for audio_section, section_modifier in self._cut_according_to_mapping_scheme(frame):
                     self._stretcher.time_ratio = section_modifier * drift_fix_modifier
                     self._stretcher.process(audio_section)
@@ -89,7 +98,9 @@ class AudioMapper:
                 self._drift = frame.mapping_scheme.end - (
                     self._next_frame_beg_timepoint + len(self._audio) / self._config.sample_rate
                 )
-                print(f"drift={self._drift:.4f}")
+                if self._drift > 0:
+                    self._drift = max(0, self._drift - RUBBERBAND_EXPECTED_DRIFT)
+                # print(f"drift={self._drift:.4f}")
 
             self._future = self._thread_pool.submit(map_frame)
             # map_frame()

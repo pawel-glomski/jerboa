@@ -15,7 +15,7 @@ class AudioFeatures:
     channels: int | None
 
     def __str__(self) -> str:
-        return f"{self.channels}x {self.sample_rate}"
+        return f"{self.channels or '?'} x {self.sample_rate or '?'}"
 
     @staticmethod
     def find_default(features_alternatives: list["AudioFeatures"]) -> int | None:
@@ -23,7 +23,7 @@ class AudioFeatures:
             idx = bisect_right(
                 features_alternatives,
                 DEFAULT_SAMPLE_RATE,
-                key=lambda audio_variant: audio_variant.sample_rate,
+                key=lambda audio_variant: audio_variant.sample_rate or 0,
             )
             return max(0, idx - 1)
         return None
@@ -58,6 +58,10 @@ class MediaStreamVariant:
     # codec_name: str
     bit_rate: float
     grouping_features: AudioFeatures | VideoFeatures
+
+    @property
+    def media_type(self) -> MediaType:
+        raise NotImplementedError()
 
 
 @dataclass(frozen=True)

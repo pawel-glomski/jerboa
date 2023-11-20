@@ -1,13 +1,22 @@
 import math
+from typing import Callable
+from threading import Condition
 from bisect import bisect_left
-from typing import Generator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+
+from jerboa.core.multithreading import MultiCondition, RWLock
 
 
+@dataclass(frozen=True, slots=True)
 class TMSection:
     """Represents a Timeline Modified Section - a timeline section with a duration modifier."""
 
-    def __init__(self, beg: float, end: float, modifier: float = 1.0):
+    beg: float
+    end: float
+    modifier: float = 1.0
+    duration: float = field(init=False)
+
+    def __post_init__(self):
         """Initializes a `TMSection` instance.
 
         Args:
@@ -15,53 +24,20 @@ class TMSection:
             end: The end time of the section.
             modifier: The duration modifier of the section (default 1.0).
         """
-        assert not math.isnan(end - beg), f"Invalid range values: ({beg}, {end}))."
-        assert not math.isnan(modifier), f"Invalid modifier value: {modifier})."
-        assert beg <= end, f"The beginning must precede the end: ({beg}, {end})."
-        assert modifier >= 0.0, f"Section modifier cannot be negative: {modifier}."
+        assert not math.isnan(self.end - self.beg)
+        assert not math.isnan(self.modifier)
+        assert self.beg <= self.end
+        assert self.modifier >= 0.0
 
-        self._beg = beg
-        self._end = end
-        self._modifier = modifier
-        self._duration = self.modifier * (self.end - self.beg) if modifier != 0 else 0.0
+        super(TMSection, self).__setattr__(
+            "duration", (self.end - self.beg) * self.modifier if self.modifier != 0 else 0.0
+        )
 
-    @property
-    def beg(self) -> float:
-        """The beginning time of the section."""
-        return self._beg
-
-    @property
-    def end(self) -> float:
-        """The end time of the section."""
-        return self._end
-
-    @property
-    def modifier(self) -> float:
-        """The duration modifier of the section."""
-        return self._modifier
-
-    @property
-    def duration(self) -> float:
-        """The duration of the section, taking into account the duration modifier."""
-        return self._duration
-
-    def __repr__(self) -> str:
-        """Returns a string representation of the section."""
-        return f"TMSection({self.beg=}, {self.end=}, {self.modifier=})"
-
-    def __eq__(self, other: object) -> bool:
-        """Checks if two sections are equal."""
-        if isinstance(other, TMSection):
-            return (
-                self.beg == other.beg and self.end == other.end and self.modifier == other.modifier
-            )
-        return False
-
-    def try_extending_with(self, other: "TMSection") -> bool:
+    def can_be_merged(self, other: "TMSection") -> bool:
         """If the other section is a direct continuation, extends this section.
 
-        A TMSection is considered a direct continuation of another if its `beg` time is the same as the
-        other's `end` time, and both sections have the same duration modifier.
+        A TMSection is considered a direct continuation of another if it begins where the other
+        ends, and they share a common modifier.
 
         Args:
             other: The section to extend to.
@@ -69,11 +45,14 @@ class TMSection:
         Returns:
             True if the section was extended, False otherwise.
         """
-        if self.end == other.beg and self.modifier == other.modifier:
-            self._end = other.end
-            self._duration += other.duration
-            return True
-        return False
+        return (
+            max(self.beg, other.beg) <= min(self.end, other.end) and self.modifier == other.modifier
+        )
+
+    def merged(self, other: "TMSection") -> "TMSection | None":
+        if self.can_be_merged(other):
+            return TMSection(beg=self.beg, end=max(self.end, other.end), modifier=self.modifier)
+        return None
 
     def overlap(self, beg: float, end: float) -> "TMSection":
         """Returns a new `TMSection` instance representing the overlap between the current section
@@ -90,11 +69,11 @@ class TMSection:
             no overlap.
         """
         beg = max(self.beg, beg)
-        end = max(beg, min(self.end, end))  # end == beg when the section does not overlap the range
-        return TMSection(beg, end, self.modifier)
+        end = max(beg, min(self.end, end))
+        return TMSection(beg=beg, end=end, modifier=self.modifier)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class RangeMappingResult:
     beg: float  # The mapped beginning of the range.
     end: float  # The mapped ending of the range.
@@ -109,7 +88,11 @@ class FragmentedTimeline:
         The timeline sections must be added in ascending order by their beginning time.
     """
 
-    def __init__(self, *init_sections: tuple[TMSection]) -> None:
+    def __init__(
+        self,
+        init_sections: list[TMSection] = None,
+        mutex: RWLock = None,
+    ) -> None:
         """Initialize a new FragmentedTimeline instance.
 
         Args:
@@ -119,18 +102,14 @@ class FragmentedTimeline:
         self._resulting_timepoints: list[float] = []
         self._time_scope = -math.inf
 
-        for section in init_sections:
+        self._mutex = mutex or RWLock()
+        self._scope_extended__for_readers = MultiCondition(lock=self._mutex.as_reader())
+
+        for section in init_sections or []:
             self.append_section(section)
 
     def __len__(self) -> int:
         return len(self._sections)
-
-    def __iter__(self) -> Generator[tuple[TMSection, float], None, None]:
-        for idx in range(len(self)):
-            yield self[idx]
-
-    def __getitem__(self, idx: int) -> tuple[float, float]:
-        return (self._sections[idx], self._resulting_timepoints[idx])
 
     @property
     def time_scope(self) -> float:
@@ -143,8 +122,11 @@ class FragmentedTimeline:
 
         return self._time_scope
 
-    @time_scope.setter
-    def time_scope(self, new_value):
+    def extend_time_scope(self, new_value: float):
+        with self._mutex.as_writer():
+            self._extend_time_scope__locked(new_value)
+
+    def _extend_time_scope__locked(self, extended_scope: float):
         """Setter for the timeline's scope in seconds. This operation must always extend the scope.
 
         Args:
@@ -153,9 +135,15 @@ class FragmentedTimeline:
         Raises:
             AssertionError: If `new_value` does not extend the current scope.
         """
-        if new_value < self._time_scope:
-            raise ValueError(f"Scope cannot decrease: {self._time_scope=}, {new_value=}")
-        self._time_scope = new_value
+        if extended_scope < self._time_scope:
+            raise ValueError(f"Scope cannot decrease: {self._time_scope=}, {extended_scope=}")
+        if extended_scope > self._time_scope:
+            self._time_scope = extended_scope
+            self._scope_extended__for_readers.notify_all()
+
+    def get_sections(self) -> list[tuple[TMSection, float]]:
+        with self._mutex.as_reader():
+            return list(zip(self._sections, self._resulting_timepoints))
 
     def append_section(self, section: TMSection) -> None:
         """
@@ -168,51 +156,84 @@ class FragmentedTimeline:
             AssertionError: If the new section precedes existing sections or it overlaps the current
             time scope (which it should always extend).
         """
-        if self._sections and section.beg < self._sections[-1].end:
-            raise ValueError(
-                f"Section ({section}) precedes existing sections ({self._sections[-1]=})"
-            )
-        if section.beg < self.time_scope:
-            raise ValueError(f"Section ({section}) precedes the time scope ({self.time_scope})")
-
-        if section.beg < 0:
-            section = TMSection(0, section.end, section.modifier)
-
-        self.time_scope = section.end
-        section_duration = section.duration
-        if section_duration > 0:
-            if self._sections and self._sections[-1].try_extending_with(section):
-                self._resulting_timepoints[-1] += section_duration
-            else:
-                self._sections.append(section)
-                last_timepoint = (
-                    self._resulting_timepoints[-1] if self._resulting_timepoints else 0.0
+        with self._mutex.as_writer():
+            if self._sections and section.beg < self._sections[-1].end:
+                raise ValueError(
+                    f"Section ({section}) precedes existing sections ({self._sections[-1]=})"
                 )
-                self._resulting_timepoints.append(last_timepoint + section_duration)
+            if section.beg < self.time_scope:
+                raise ValueError(f"Section ({section}) precedes the time scope ({self.time_scope})")
 
-    # TODO(OPT): optimize for frequent sequential checks
-    def unmap_timepoint_to_source(self, mapped_timepoint: float) -> float | None:
-        """Unmaps a timepoint from the resulting timeline to its source timeline counterpart.
+            if section.beg < 0:
+                section = TMSection(0, section.end, section.modifier)
+
+            section_duration = section.duration
+            if section_duration > 0:
+                sections_merge = self._sections[-1].merged(section) if self._sections else None
+                if sections_merge is not None:
+                    self._sections[-1] = sections_merge
+                    self._resulting_timepoints[-1] += section_duration
+                else:
+                    self._sections.append(section)
+                    last_timepoint = (
+                        self._resulting_timepoints[-1] if self._resulting_timepoints else 0.0
+                    )
+                    self._resulting_timepoints.append(last_timepoint + section_duration)
+
+            self._extend_time_scope__locked(section.end)
+
+    def unmap_timepoint_to_source(
+        self,
+        mapped_timepoint: float,
+        interrupt_condition: Condition | None = None,
+        interrupt_predicate: Callable[[], bool] = lambda: False,
+        timeout: float | None = None,
+    ):
+        """Unmaps a timepoint from the resulting timeline back to its source timeline counterpart.
 
         Args:
             mapped_timepoint: The timepoint to be unmapped.
 
+            interrupt_condition: Condition that will be used to wait unit the scope covers the
+            requested timepoint. It must be locked before calling this function. When None, the wait
+            will be omitted.
+
+            interrupt_predicate: Interrupt predicate.
+
+            timeout: How long to wait at most.
+
         Returns:
-           float | None: The unmapped timepoint if the timepoint was valid; None otherwise.
+            If the timepoint is out of scope (the wait was omitted, timed out, or interrupted):
+                `None`
+            Otherwise:
+                The unmapped timepoint.
         """
-        if self._resulting_timepoints:
-            mapped_timepoint = max(0, mapped_timepoint)
-            idx = bisect_left(self._resulting_timepoints, mapped_timepoint)
-            if idx < len(self._resulting_timepoints):
-                scale = 1.0 / self._sections[idx].modifier
-                beg_src = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
-                return self._sections[idx].beg + scale * (mapped_timepoint - beg_src)
-            if self.time_scope == math.inf:
-                return self._sections[-1].end
+        with self._scope_extended__for_readers:
+            if interrupt_condition is None or self._scope_extended__for_readers.wait_with(
+                condition=interrupt_condition,
+                condition_predicate=lambda: self._resulting_timepoints[-1] >= mapped_timepoint,
+                interrupt_predicate=interrupt_predicate,
+                timeout=timeout,
+            ):
+                if self._resulting_timepoints:
+                    mapped_timepoint = max(0, mapped_timepoint)
+                    idx = bisect_left(self._resulting_timepoints, mapped_timepoint)
+                    if idx < len(self._resulting_timepoints):
+                        scale = 1.0 / self._sections[idx].modifier
+                        beg_src = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
+                        return self._sections[idx].beg + scale * (mapped_timepoint - beg_src)
+                    if self.time_scope == math.inf:
+                        return self._sections[-1].end
         return None
 
-    # TODO(OPT): optimize for frequent sequential checks
-    def map_time_range(self, beg: float, end: float) -> tuple[RangeMappingResult, float]:
+    def map_time_range(
+        self,
+        beg: float,
+        end: float,
+        interrupt_condition: Condition | None = None,
+        interrupt_predicate: Callable[[], bool] = lambda: False,
+        timeout: float | None = None,
+    ) -> tuple[RangeMappingResult, float] | tuple[None, None]:
         """Maps a time range to the resulting timeline.
 
         This method maps a time range specified by its beginning and ending timepoints in the source
@@ -220,23 +241,45 @@ class FragmentedTimeline:
 
         Args:
             beg: The beginning of the time range to be mapped.
+
             end: The ending of the time range to be mapped.
 
-        Returns:
-            A tuple of 2 values:\n
-                0: (RangeMappingResult) Results of the mapping.\n
-                1: (float) The next closest timepoint that can be mapped after the range ends. If such a
-                timepoint does not exist in the current time scope, it returns the scope itself.
+            interrupt_condition: Condition that will be used to wait unit the scope covers the
+            requested range. It must be locked before calling this function. When None, the wait
+            will be omitted.
 
-        Raises:
-            AssertionError: If the beginning timepoint is greater than the ending timepoint, or if the
-            end of the range is beyond the timeline's scope.
+            interrupt_predicate: Interrupt predicate.
+
+            timeout: How long to wait at most.
+
+        Returns:
+            If the range is out of scope (the wait was omitted, timed out, or interrupted):
+                `(None, None)`
+
+            Otherwise, a tuple of 2 values:
+                0: (RangeMappingResult) Results of the mapping.
+
+                1: (float) The next closest timepoint that can be mapped after the range ends. If
+                such a timepoint does not exist in the current time scope, it returns the scope
+                itself.
         """
+        with self._scope_extended__for_readers:
+            if interrupt_condition is None or self._scope_extended__for_readers.wait_with(
+                condition=interrupt_condition,
+                condition_predicate=lambda: self.time_scope >= end,
+                interrupt_predicate=interrupt_predicate,
+                timeout=timeout,
+            ):
+                return self._map_time_range__locked(beg, end)
+        # interrupted (timed out, or `interrupt_predicate` evaluated to True)
+        return (None, None)
+
+    def _map_time_range__locked(self, beg: float, end: float) -> tuple[RangeMappingResult, float]:
         beg = max(0, beg)
         if beg > end:
             raise ValueError(f"The beginning must precede the end ({beg}, {end}).")
         if end > self.time_scope:
-            raise ValueError(f"Range out of scope: ({beg}, {end}), {self.time_scope=}.")
+            return (None, None)
 
         involved_sections = list[TMSection]()
         idx = bisect_left(self._sections, beg, key=lambda s: s.end)  # TODO(OPT): don't use key

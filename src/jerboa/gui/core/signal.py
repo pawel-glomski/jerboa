@@ -1,12 +1,12 @@
 from typing import Callable, ContextManager
 from PySide6 import QtCore as QtC
 
-from jerboa.core.signal import Signal, EmitArg, NoOpContext
+from jerboa.core.signal import Signal
 
 
 class QtSignal(Signal):
     class SignalWrapper(QtC.QObject):
-        signal = QtC.Signal(EmitArg)
+        signal = QtC.Signal(Signal.EmitArg)
 
     def __init__(self, /, *arg_names: str, max_subscribers: float = float("inf")):
         super().__init__(*arg_names, max_subscribers=max_subscribers)
@@ -14,19 +14,22 @@ class QtSignal(Signal):
 
     def connect(self, subscriber: Callable) -> None:
         super().connect(subscriber)
-        self._signal_wrapper.signal.connect(QtC.Slot(EmitArg)(self.subscribers[-1]))
+        self._signal_wrapper.signal.connect(QtC.Slot(Signal.EmitArg)(self.subscribers[-1]))
 
     def emit(
         self,
-        context: ContextManager = NoOpContext(),
-        post_callback: Callable = lambda: None,
+        context: ContextManager = Signal.NoOpContext(),
+        success_callback: Callable = lambda: None,
+        error_callback: Callable = lambda: None,
         /,
         **kwargs: dict,
     ) -> None:
-        self._signal_wrapper.signal.emit(
-            EmitArg(
-                context=context,
-                post_callback=post_callback,
-                slot_kwargs=kwargs,
-            )
+        emit_arg = Signal.EmitArg(
+            context=context,
+            success_callback=success_callback,
+            error_callback=error_callback,
+            slot_kwargs=kwargs,
+            promise=Signal.Promise(len(self.subscribers)),
         )
+        self._signal_wrapper.signal.emit(emit_arg)
+        return emit_arg.promise
