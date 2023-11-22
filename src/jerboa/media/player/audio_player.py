@@ -1,4 +1,5 @@
 from threading import RLock, Lock, Condition
+from dataclasses import dataclass
 
 import PySide6.QtWidgets as QtW
 import PySide6.QtMultimedia as QtM
@@ -11,6 +12,8 @@ from jerboa.media.core import MediaType, AudioSampleFormat, AudioChannelLayout, 
 from .decoding.decoder import Decoder
 from .state import PlayerState
 from .timer import PlaybackTimer
+
+AUDIO_THREAD_EVENT_PROCESS_FREQUENCY = 1 / 60
 
 SEEK_PREFILL_TIMEOUT = 2.5  # in seconds
 THREAD_RESPONSE_TIMEOUT = 0.1
@@ -176,11 +179,19 @@ class AudioManager:
         while True:
             try:
                 QtC.QCoreApplication.processEvents()
+                self._tasks.run_all(
+                    wait_when_empty=True, timeout=AUDIO_THREAD_EVENT_PROCESS_FREQUENCY
+                )
 
-                self._tasks.run_all(wait_when_empty=True, timeout=1 / 60)
             except AudioManager.KillTask as kill_task:
+                logger.info("AudioThread: Killed by a task")
+                self._is_thread_killed = True
                 kill_task.complete()
                 break
+            except:
+                logger.info("AudioThread: Killed by an error")
+                self._is_thread_killed = True
+                raise
             finally:
                 self._tasks.clear()
 
@@ -287,7 +298,7 @@ class AudioPlayer(PlaybackTimer):
 
     def initialize(self, decoder: Decoder) -> Task.Future:
         assert decoder.media_type == MediaType.AUDIO
-        return self._audio_manager.run_on_audio_thread(FnTask(self._initialize, decoder))
+        return self._audio_manager.run_on_audio_thread(FnTask(lambda: self._initialize(decoder)))
 
     def _initialize(self, decoder: Decoder) -> None:
         with self._mutex:
@@ -334,12 +345,14 @@ class AudioPlayer(PlaybackTimer):
     def _deinitialize(self) -> None:
         with self._mutex:
             logger.debug("AudioPlayer: Deinitialization...")
-            if self._audio_sink is not None:
-                self._audio_sink.stop()
-                self._audio_sink = None
-
+            if self.state != PlayerState.UNINITIALIZED:
+                # kill decoder first, to signal the audio sink that this is a controlled deinit
                 self._decoder.kill()
                 self._decoder = None
+
+                self._audio_sink.stop()
+                self._audio_sink = None
+                self._time_offset = 0
             logger.debug("AudioPlayer: Deinitialization done")
 
     def suspend(self) -> Task.Future:
@@ -372,7 +385,7 @@ class AudioPlayer(PlaybackTimer):
         assert self._state in [PlayerState.SUSPENDED, PlayerState.UNINITIALIZED]
 
         return self._audio_manager.run_on_audio_thread(
-            FnTask(self._seek, source_timepoint, new_timer_offset)
+            FnTask(lambda: self._seek(source_timepoint, new_timer_offset))
         )
 
     def _seek(self, source_timepoint: float, new_timer_offset: float) -> None:
@@ -423,7 +436,6 @@ class AudioPlayer(PlaybackTimer):
                             logger.debug("AudioPlayer: Suspended by EOF")
                             self.eof_signal.emit()
                         else:
-                            print(f"{self._decoder.buffered_duration=}")
                             logger.warning("AudioPlayer: Suspended by buffer underrun")
                             self.buffer_underrun_signal.emit()
                 case QtM.QAudio.State.StoppedState:

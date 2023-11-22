@@ -155,19 +155,20 @@ class Pipeline(Decoder):
     def prefill(self, timeout: float | None = None) -> Task.Future:
         from threading import Thread
 
-        prefill_task = FnTask(
-            self._buffer_not_empty_or_done_decoding.wait_for,
-            predicate=lambda: self._is_done
-            or self._buffer.duration >= PREFILL_DURATION
-            or self._buffer.is_full(),
-            timeout=timeout,
-        )
-
-        def _prefill_thread():
+        def _prefill():
             with self._mutex:
-                prefill_task.run()
+                self._buffer_not_empty_or_done_decoding.wait_for(
+                    predicate=lambda: (
+                        self._is_done
+                        or self._buffer.duration >= PREFILL_DURATION
+                        or self._buffer.is_full()
+                    ),
+                    timeout=timeout,
+                )
 
-        Thread(target=_prefill_thread, daemon=True).start()
+        prefill_task = FnTask(_prefill)
+
+        Thread(target=prefill_task.run_if_unresolved, daemon=True).start()
         return prefill_task.future
 
     def seek(self, timepoint: float) -> Task.Future:
@@ -188,7 +189,7 @@ class Pipeline(Decoder):
         task = Pipeline.KillTask()
         with self._mutex:
             if self._is_killed:
-                task.complete()
+                task.complete(without_running=True)
             else:
                 self._context.tasks.add_task__locked(task)
         return task.future

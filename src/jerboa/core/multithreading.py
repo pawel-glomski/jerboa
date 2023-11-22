@@ -1,4 +1,4 @@
-from typing import Callable
+from typing import Callable, Any
 from abc import ABC, abstractmethod
 from threading import Thread, Lock, RLock, Condition
 from concurrent import futures
@@ -28,7 +28,7 @@ class Task(Exception):
     class Future:
         def __init__(self):
             self._mutex = Lock()
-            self._is_resolved = Condition(lock=self._mutex)
+            self._is_done = Condition(lock=self._mutex)
             self._state = Task.State.UNRESOLVED
 
         @property
@@ -36,7 +36,7 @@ class Task(Exception):
             return self._state == Task.State.UNRESOLVED
 
         @property
-        def is_resolved(self) -> bool:
+        def is_done(self) -> bool:
             return self.is_completed or self.is_cancelled
 
         @property
@@ -51,22 +51,35 @@ class Task(Exception):
         def is_completed(self) -> bool:
             return self._state == Task.State.COMPLETED
 
+        def cancel(self) -> bool:
+            with self._mutex:
+                if self.is_unresolved:
+                    self._set_state__locked(Task.State.CANCELLED)
+            return self.is_cancelled
+
         def wait_done(self, timeout: float | None = None) -> bool:
             with self._mutex:
-                if not self._is_resolved.wait_for(lambda: self.is_resolved, timeout=timeout):
+                if not self._is_done.wait_for(lambda: self.is_done, timeout=timeout):
                     raise TimeoutError("Task not resolved in time")
                 return self.is_completed
 
         def _set_state__locked(self, new_state: "Task.State") -> None:
             assert self._mutex.locked()
-            assert (
-                self._state == Task.State.UNRESOLVED and new_state != Task.State.UNRESOLVED
-            ) or (self._state == Task.State.IN_PROGRESS and new_state == Task.State.COMPLETED)
+
+            invalid_transition_msg = None
+            if (self._state == Task.State.IN_PROGRESS and new_state != Task.State.COMPLETED) or (
+                self._state == Task.State.UNRESOLVED
+                and new_state not in [Task.State.IN_PROGRESS, Task.State.CANCELLED]
+            ):
+                invalid_transition_msg = f"Invalid state transition: {self._state} -> {new_state}"
 
             self._state = new_state
-            if self.is_resolved:
-                self._is_resolved.notify_all()
+            if self.is_done:
+                self._is_done.notify_all()
 
+            assert invalid_transition_msg is None, invalid_transition_msg
+
+    id: Any = field(default=None, kw_only=True)
     future: Future = field(default_factory=Future, init=False, compare=False, repr=False)
 
     def __del__(self):
@@ -91,17 +104,25 @@ class Task(Exception):
         """
         raise self
 
-    def run(self) -> None:
+    def run_if_unresolved(self) -> None:
         can_run = False
         with self.future._mutex:
-            if self.future._state == Task.State.UNRESOLVED:
+            if self.future.is_unresolved:
                 self.future._set_state__locked(Task.State.IN_PROGRESS)
                 can_run = True
         if can_run:
             self.run_impl()
 
-    def complete(self) -> None:
+    def complete(self, without_running: bool = False) -> None:
         with self.future._mutex:
+            if without_running:
+                if self.future.is_unresolved:
+                    self.future._set_state__locked(Task.State.IN_PROGRESS)
+                else:
+                    logger.error(
+                        f"Task ({repr(self)}) has unexpected state ({self.future._state}). "
+                        "This should never happen - please report this error."
+                    )
             self.future._set_state__locked(Task.State.COMPLETED)
 
     def complete_after(self, fn: Callable, /, *args, **kwargs) -> None:
@@ -111,21 +132,19 @@ class Task(Exception):
             with self.future._mutex:
                 self.future._set_state__locked(Task.State.COMPLETED)
 
-    def cancel(self) -> None:
-        with self.future._mutex:
-            if self.future.is_unresolved:
-                self.future._set_state__locked(Task.State.CANCELLED)
+    def cancel(self) -> bool:
+        return self.future.cancel()
+
+    def invalidates(self, task: "Task") -> bool:
+        return False
 
 
+@dataclass(frozen=True)
 class FnTask(Task):
-    def __init__(self, fn: Callable, /, *args, **kwargs) -> None:
-        super().__init__()
-        self._fn = fn
-        self._args = args
-        self._kwargs = kwargs
+    fn: Callable[[], None]
 
     def run_impl(self) -> None:
-        self.complete_after(self._fn, *self._args, **self._kwargs)
+        self.complete_after(self.fn)
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -164,6 +183,16 @@ class TaskQueue:
             task.cancel()
         self._tasks.clear()
 
+    def pop(self, wait_when_empty: bool = False, timeout: float | None = None) -> Task | None:
+        if wait_when_empty:
+            with self._mutex:
+                if self.task_added.wait_for(lambda: not self.is_empty(), timeout=timeout):
+                    return self._tasks.popleft()
+        try:
+            return self._tasks.popleft()
+        except IndexError:
+            return None
+
     def run_all(self, wait_when_empty: bool = False, timeout: float | None = None) -> int:
         if wait_when_empty:
             with self._mutex:
@@ -176,15 +205,24 @@ class TaskQueue:
                     break
                 tasks_run += 1
                 task = self._tasks.popleft()
-            task.run()  # this should usually raise a task exception
+            task.run_if_unresolved()  # this should usually raise a task exception
         return tasks_run
 
-    def add_task(self, task: Task) -> None:
+    def add_task(self, task: Task, apply_invalidation_rules: bool = False) -> None:
         with self.mutex:
-            self.add_task__locked(task)
+            self.add_task__locked(task, apply_invalidation_rules)
 
-    def add_task__locked(self, task: Task) -> None:
+    def add_task__locked(self, task: Task, apply_invalidation_rules: bool = False) -> None:
         assert self.mutex.locked()
+
+        if apply_invalidation_rules:
+            tasks = deque[Task]()
+            for other_task in self._tasks:
+                if task.invalidates(other_task):
+                    other_task.cancel()
+                else:
+                    tasks.append(other_task)
+            self._tasks = tasks
 
         self._tasks.append(task)
         self.task_added.notify_all()

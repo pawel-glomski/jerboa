@@ -16,16 +16,14 @@ SLEEP_THRESHOLD_MAX = 1 / 24 * SLEEP_THRESHOLD_RATIO  # but we cannot display it
 SLEEP_TIME_MAX = 0.25
 
 
-class DeinitializeTask(Task):
-    ...
-
-
-@dataclass(frozen=True)
-class SeekTask(Task):
-    timepoint: float
-
-
 class VideoPlayer:
+    class DeinitializeTask(Task):
+        ...
+
+    @dataclass(frozen=True)
+    class SeekTask(Task):
+        timepoint: float
+
     def __init__(
         self,
         thread_spawner: ThreadSpawner,
@@ -80,12 +78,12 @@ class VideoPlayer:
     def _deinitialize__locked(self) -> Task.Future:
         assert self._mutex.locked()
 
-        deinit_task = DeinitializeTask()
+        deinit_task = VideoPlayer.DeinitializeTask()
         if self.state != PlayerState.UNINITIALIZED:
             self._tasks.clear__locked()
             self._tasks.add_task__locked(deinit_task)
         else:
-            deinit_task.complete()
+            deinit_task.complete(without_running=True)
         return deinit_task.future
 
     def initialize(self, decoder: Decoder, timer: PlaybackTimer) -> Task.Future:
@@ -108,7 +106,7 @@ class VideoPlayer:
 
     def __player_job(self, init_task: Task) -> None:
         logger.debug("VideoPlayer: Starting the job")
-        init_task.run()
+        init_task.run_if_unresolved()
         try:
             self.__player_job__playback_loop()
         except Exception as exc:
@@ -117,9 +115,10 @@ class VideoPlayer:
                 self._decoder = None
             finally:
                 self.__player_job__set_state(PlayerState.UNINITIALIZED)
+                self._tasks.clear()
 
-                if isinstance(exc, DeinitializeTask):
-                    task: DeinitializeTask = exc
+                if isinstance(exc, VideoPlayer.DeinitializeTask):
+                    task: VideoPlayer.DeinitializeTask = exc
                     task.complete()
                     logger.debug("VideoPlayer: Stopped by a task")
                 else:
@@ -143,7 +142,7 @@ class VideoPlayer:
                     self._video_frame_update_signal.emit(frame=frame)
                     frame = None
 
-            except SeekTask as seek_task:
+            except VideoPlayer.SeekTask as seek_task:
                 logger.debug(f"VideoPlayer: Seeking to {seek_task.timepoint}")
 
                 seek_task.complete_after(self.__player_job__seek, seek_task.timepoint)
@@ -163,7 +162,6 @@ class VideoPlayer:
     def __player_job__get_frame(self) -> JbVideoFrame | None:
         try:
             frame = self._decoder.pop(timeout=0)
-            logger.info(frame)
             if frame is None:
                 logger.debug("VideoPlayer: Suspended by EOF")
                 self.__player_job__set_state(PlayerState.SUSPENDED)
@@ -206,7 +204,7 @@ class VideoPlayer:
         self._state = state
 
     def suspend(self) -> Task.Future:
-        task = FnTask(self.__player_job__set_state, state=PlayerState.SUSPENDED)
+        task = FnTask(lambda: self.__player_job__set_state(PlayerState.SUSPENDED))
         with self._mutex:
             if self.state != PlayerState.UNINITIALIZED:
                 self._tasks.add_task__locked(task)
@@ -215,7 +213,7 @@ class VideoPlayer:
         return task.future
 
     def resume(self) -> Task.Future:
-        task = FnTask(self.__player_job__set_state, state=PlayerState.PLAYING)
+        task = FnTask(lambda: self.__player_job__set_state(PlayerState.PLAYING))
         with self._mutex:
             if self.state != PlayerState.UNINITIALIZED:
                 self._tasks.add_task__locked(task)
@@ -226,7 +224,7 @@ class VideoPlayer:
     def seek(self, source_timepoint: float) -> Task.Future:
         assert source_timepoint >= 0
 
-        task = SeekTask(timepoint=source_timepoint)
+        task = VideoPlayer.SeekTask(timepoint=source_timepoint)
         with self._mutex:
             if self.state != PlayerState.UNINITIALIZED:
                 self._tasks.add_task__locked(task)

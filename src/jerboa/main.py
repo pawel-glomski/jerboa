@@ -87,6 +87,7 @@ class Container(containers.DeclarativeContainer):
             init_sections=[core.timeline.TMSection(i, i + 0.5) for i in range(1000)],
         ),
         thread_pool=thread_pool,
+        thread_spawner=thread_spawner,
         fatal_error_signal=providers.Factory(gui.core.signal.QtSignal),
         ready_to_play_signal=ready_to_play_signal,
     )

@@ -1,12 +1,13 @@
-from threading import RLock
+from threading import Lock
 from concurrent.futures import Future, wait as futures_wait
-from typing import Callable
+from typing import Any, Callable
+import enum
 
 from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import ThreadPool
+from jerboa.core.multithreading import ThreadPool, ThreadSpawner, TaskQueue, Task, FnTask
 from jerboa.core.timeline import FragmentedTimeline
-from jerboa.media.core import MediaType, AudioConstraints
+from jerboa.media.core import AudioConstraints
 from jerboa.media.source import MediaSource, MediaStreamVariant
 from .audio_player import AudioPlayer
 from .video_player import VideoPlayer
@@ -20,7 +21,37 @@ DECODER_PREFILL_TIMEOUT = 10
 SEEK_TIME = 5  # in seconds
 
 
+class PlayerTask(FnTask):
+    class ID(enum.Enum):
+        INITIALIZE = enum.auto()
+        DEINITIALIZE = enum.auto()
+        SUSPEND = enum.auto()
+        RESUME = enum.auto()
+        SEEK = enum.auto()
+
+    def __init__(self, fn: Callable[[], None], *, id: ID) -> None:
+        super().__init__(fn, id=id)
+
+    def invalidates(self, task: Task) -> bool:
+        match self.id:
+            case None:  # default unnamed task
+                return False  # invalidates none
+            case PlayerTask.ID.INITIALIZE:
+                return task.id != PlayerTask.ID.DEINITIALIZE
+            case PlayerTask.ID.DEINITIALIZE:
+                return True  # invalidates all
+            case PlayerTask.ID.SUSPEND | PlayerTask.ID.RESUME:
+                return (task.id in [PlayerTask.ID.SUSPEND, PlayerTask.ID.RESUME],)
+            case PlayerTask.ID.SEEK:
+                return task.id == PlayerTask.ID.SEEK
+            case _:
+                return False
+
+
 class MediaPlayer:
+    class KillTask(Task):
+        ...
+
     def __init__(
         self,
         audio_player: AudioPlayer,
@@ -33,6 +64,7 @@ class MediaPlayer:
         ],
         timeline: FragmentedTimeline,
         thread_pool: ThreadPool,
+        thread_spawner: ThreadSpawner,
         fatal_error_signal: Signal,
         ready_to_play_signal: Signal,
     ):
@@ -61,7 +93,9 @@ class MediaPlayer:
         self._audio_player.eof_signal.connect(self._on_eof)
         self._video_player.eof_signal.connect(self._on_eof)
 
-        self._mutex = RLock()
+        self._mutex = Lock()
+        self._tasks = TaskQueue()
+        thread_spawner.start(self.__player_job)
 
     @property
     def ready_to_play_signal(self) -> Signal:
@@ -73,10 +107,28 @@ class MediaPlayer:
 
     def _on_fatal_error(self) -> None:
         logger.error("MediaPlayer: Player crashed")
-        with self._mutex:
-            self._deinitialize__locked()
+        self.deinitialize()
 
-    def _deinitialize__locked(self) -> None:
+    def _on_buffer_underrun(self) -> None:
+        logger.error("MediaPlayer: Buffer underrun, suspending playback")
+        self.suspend()
+
+    def _on_eof(self) -> None:
+        logger.info("MediaPlayer: EOF Reached... Suspending playback")
+        self.suspend()
+
+    def deinitialize(self) -> None:
+        self._add_player_task(
+            PlayerTask(self.__player_job__deinitialize, id=PlayerTask.ID.DEINITIALIZE)
+        )
+
+    def __player_job__deinitialize(self) -> None:
+        with self._mutex:
+            self.__player_job__deinitialize__locked()
+
+    def __player_job__deinitialize__locked(self) -> None:
+        assert self._mutex.locked()
+
         try:
             self._clock_timer.deinitialize()
             deinit_task_audio = self._audio_player.deinitialize()
@@ -99,34 +151,33 @@ class MediaPlayer:
             logger.error("MediaPlayer: Failed to deinitialize")
             raise
 
-    def _on_buffer_underrun(self) -> None:
-        logger.error("MediaPlayer: Buffer underrun, suspending playback")
-        with self._mutex:
-            self._suspend__locked()
-
-    def _on_eof(self) -> None:
-        if PlayerState.PLAYING not in [self._audio_player.state, self._video_player.state]:
-            self._clock_timer.suspend()
-            logger.error("MediaPlayer: EOF Reached... Suspending playback")
-
     def initialize(self, media_source: MediaSource):
         assert media_source.audio.is_available or media_source.video.is_available
         assert media_source.is_resolved
 
         logger.info(f"MediaPlayer: Preparing to play '{media_source.title}'")
 
-        self._thread_pool.start(self._init_players, media_source)
+        self._add_player_task(
+            PlayerTask(
+                lambda: self.__player_job__initialize(media_source),
+                id=PlayerTask.ID.INITIALIZE,
+            )
+        )
 
-    def _init_players(self, media_source: MediaSource):
-        audio_context, video_context = self._open_media_contexts(media_source)
+    def __player_job__initialize(self, media_source: MediaSource):
+        audio_context, video_context = self.__player_job__initialize__open_media_contexts(
+            media_source
+        )
         assert not (audio_context is None and video_context is None)
 
-        audio_decoder, video_decoder = self._create_decoders(audio_context, video_context)
+        audio_decoder, video_decoder = self.__player_job__initialize__create_decoders(
+            audio_context, video_context
+        )
         assert not (audio_decoder is None and video_decoder is None)
 
         with self._mutex:
             try:
-                self._deinitialize__locked()
+                self.__player_job__deinitialize__locked()
 
                 self._clock_timer.initialize()
                 video_timer = self._clock_timer
@@ -161,7 +212,7 @@ class MediaPlayer:
                 if video_decoder is not None:
                     video_decoder.kill()
 
-                self._deinitialize__locked()
+                self.__player_job__deinitialize__locked()
 
                 self._fatal_error_signal.emit()
                 logger.error(
@@ -170,23 +221,23 @@ class MediaPlayer:
                 )
                 raise  # thread pool worker will log the exception
 
-    def _open_media_contexts(
+    def __player_job__initialize__open_media_contexts(
         self, media_source: MediaSource
     ) -> tuple[decoding.context.DecodingContext | None, decoding.context.DecodingContext | None]:
         audio_context: Future[decoding.context.DecodingContext] | None = None
         video_context: Future[decoding.context.DecodingContext] | None = None
         if media_source.audio.is_available:
             audio_context = self._thread_pool.start(
-                self._open_media_context,
+                self.__player_job__initialize__open_media_context,
                 source=media_source.audio.selected_variant_group[0],
                 constraints=self._audio_player.get_constraints(),
             )
-        # if media_source.video.is_available:
-        #     video_context = self._thread_pool.start(
-        #         self._open_media_context,
-        #         source=media_source.video.selected_variant_group[0],
-        #         constraints=None,
-        #     )
+        if media_source.video.is_available:
+            video_context = self._thread_pool.start(
+                self.__player_job__initialize__open_media_context,
+                source=media_source.video.selected_variant_group[0],
+                constraints=None,
+            )
 
         futures_wait(future for future in [audio_context, video_context] if future is not None)
 
@@ -197,7 +248,7 @@ class MediaPlayer:
             video_context = video_context.result()
         return (audio_context, video_context)
 
-    def _open_media_context(
+    def __player_job__initialize__open_media_context(
         self, source: MediaStreamVariant, constraints: AudioConstraints
     ) -> decoding.decoder.Decoder:
         return decoding.context.DecodingContext(
@@ -212,7 +263,7 @@ class MediaPlayer:
             timeline=self._timeline,
         )
 
-    def _create_decoders(
+    def __player_job__initialize__create_decoders(
         self,
         audio_media_context: decoding.context.DecodingContext | None,
         video_media_context: decoding.context.DecodingContext | None,
@@ -242,24 +293,27 @@ class MediaPlayer:
                 audio_decoder.kill()
             raise
 
-    def _on_fatal_error(self) -> None:
-        logger.error("MediaPlayer: Player crashed")
-        with self._mutex:
-            self._audio_player.deinitialize()
-            self._video_player.deinitialize()
-            self._clock_timer.deinitialize()
-
     def playback_toggle(self) -> None:
         with self._mutex:
             if not self._clock_timer.is_initialized:
                 return
 
             if self._clock_timer.is_running:
-                self._suspend__locked()
-            else:
-                self._resume__locked()
+                self.suspend()
 
-    def _suspend__locked(self) -> None:
+            else:
+                self.resume()
+
+    def suspend(self) -> None:
+        self._add_player_task(PlayerTask(self.__player_job__suspend, id=PlayerTask.ID.SUSPEND))
+
+    def __player_job__suspend(self) -> None:
+        with self._mutex:
+            self.__player_job__suspend__locked()
+
+    def __player_job__suspend__locked(self) -> None:
+        assert self._mutex.locked()
+
         try:
             audio_task = self._audio_player.suspend()
             video_task = self._video_player.suspend()
@@ -274,7 +328,16 @@ class MediaPlayer:
             logger.error("MediaPlayer: Failed to suspend")
             raise
 
-    def _resume__locked(self) -> None:
+    def resume(self) -> None:
+        self._add_player_task(PlayerTask(self.__player_job__resume, id=PlayerTask.ID.RESUME))
+
+    def __player_job__resume(self) -> None:
+        with self._mutex:
+            self.__player_job__resume__locked()
+
+    def __player_job__resume__locked(self) -> None:
+        assert self._mutex.locked()
+
         try:
             audio_task = self._audio_player.resume()
             video_task = self._video_player.resume()
@@ -286,7 +349,7 @@ class MediaPlayer:
             else:
                 logger.info("MediaPlayer: Players failed to resume")
         except:
-            self._suspend__locked()  # suspend players that may have succeeded
+            self.__player_job__suspend__locked()  # suspend players that may have succeeded
             logger.error("MediaPlayer: Failed to resume")
             raise
 
@@ -297,12 +360,17 @@ class MediaPlayer:
         self._seek(SEEK_TIME)
 
     def _seek(self, time_change: float):
+        self._add_player_task(
+            PlayerTask(lambda: self.__player_job__seek(time_change), id=PlayerTask.ID.SEEK)
+        )
+
+    def __player_job__seek(self, time_change: float):
         with self._mutex:
             if not self._clock_timer.is_initialized:
                 return
 
             playing = self._clock_timer.is_running
-            self._suspend__locked()
+            self.__player_job__suspend__locked()
 
             if self._audio_player.state == PlayerState.UNINITIALIZED:
                 current_timepoint = self._clock_timer.current_timepoint()
@@ -323,4 +391,24 @@ class MediaPlayer:
             video_task.wait_done()
 
             if playing:
-                self._resume__locked()
+                self.__player_job__resume__locked()
+
+    def __player_job(self) -> None:
+        while True:
+            try:
+                self._current_task = self._tasks.pop(wait_when_empty=True)
+                self._current_task.run_if_unresolved()
+            except MediaPlayer.KillTask as kill_task:
+                logger.info("MediaPlayer: Killed by a task")
+                kill_task.complete()
+                break
+            except:
+                logger.error("MediaPlayer: Killed by an error")
+                raise
+            finally:
+                with self._mutex:
+                    self._current_task = None
+                    self._tasks.clear()
+
+    def _add_player_task(self, task: PlayerTask) -> None:
+        self._tasks.add_task(task, apply_invalidation_rules=True)
