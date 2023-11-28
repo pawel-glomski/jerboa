@@ -1,6 +1,6 @@
 import av
 import numpy as np
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from jerboa.core.timeline import RangeMappingResult
 
@@ -17,7 +17,7 @@ class TimedFrame:
 
 @dataclass
 class TimedAVFrame(TimedFrame):
-    av_frame: av.AudioFrame | av.VideoFrame
+    av_frame: av.AudioFrame | av.VideoFrame = field(repr=False)
 
 
 @dataclass
@@ -32,7 +32,7 @@ class MappedAudioFrame(TimedFrame):
 
 @dataclass
 class MappedVideoFrame(TimedFrame):
-    av_frame: av.VideoFrame
+    av_frame: av.VideoFrame = field(repr=False)
 
 
 JbAudioFrame = MappedAudioFrame

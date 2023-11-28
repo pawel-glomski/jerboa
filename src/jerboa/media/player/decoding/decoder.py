@@ -1,10 +1,11 @@
 from threading import Condition
+from dataclasses import dataclass
 
 from jerboa.core.logger import logger
 from jerboa.core.multithreading import ThreadSpawner, Task, FnTask, Future, MultiCondition
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig, AudioConstraints
 from .buffer import create_buffer
-from .context import DecodingContext, SeekTask
+from .context import DecodingContext
 from .frame import JbAudioFrame, JbVideoFrame
 from . import node
 
@@ -23,6 +24,10 @@ class Decoder:
             self.complete__locked()
             # does not rise anything
 
+    @dataclass(frozen=True)
+    class SeekTask(Task):
+        timepoint: float
+
     def __init__(
         self,
         output_node: node.Node,
@@ -31,12 +36,9 @@ class Decoder:
     ) -> None:
         super().__init__()
 
-        self._output_node = output_node
         self._context = context
-
-        self._root_node = self._output_node
-        while self._root_node.parent is not None:
-            self._root_node = self._root_node.parent
+        self._output_node = output_node
+        self._root_node = output_node.find_root_node()
         self._root_node.reset(self._context, hard=True, recursive=True)
 
         self._mutex__shared_with_task_queue = self._context.tasks.mutex
@@ -89,7 +91,7 @@ class Decoder:
                         self._is_done = True
                         self._buffer_not_empty_or_done_decoding.notify_all()
 
-            except SeekTask as seek_task:
+            except Decoder.SeekTask as seek_task:
                 seek_task.execute_and_finish_with(self.__thread__seek, seek_task.timepoint)
             except Decoder.KillTask as task:
                 with task.execute() as executor:
@@ -196,7 +198,7 @@ class Decoder:
     def seek(self, timepoint: float) -> Future:
         assert timepoint >= 0
 
-        task = SeekTask(timepoint)
+        task = Decoder.SeekTask(timepoint)
         with self._mutex__shared_with_task_queue:
             if self._is_killed:
                 task.future.abort()

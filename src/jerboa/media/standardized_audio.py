@@ -7,6 +7,8 @@ from pylibrb import (  # pylint: disable=unused-import
     SAMPLES_AXIS,
     CHANNELS_AXIS,
     create_audio_array,
+    RubberBandStretcher,
+    Option,
 )
 
 from jerboa.media.core import AudioSampleFormat
@@ -28,7 +30,7 @@ FRAME_DURATION = 1.0  # in seconds
 TRANSITION_DURATION = 8.0 / 16000  # in seconds, 8 steps when sample_rate == 16000
 
 
-def get_from_frame(frame: av.AudioFrame) -> np.ndarray:
+def signal_from_av_frame(frame: av.AudioFrame) -> np.ndarray:
     assert frame.format.name == SAMPLE_FORMAT_AV.name
     # this is faster than frame.to_ndarray
     return np.vstack([np.frombuffer(x, dtype=DType, count=frame.samples) for x in frame.planes])

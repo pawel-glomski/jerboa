@@ -1,5 +1,3 @@
-from pylibrb import RubberBandStretcher, Option
-
 from jerboa.core.circular_buffer import create_circular_audio_buffer
 from jerboa.media import standardized_audio as std_audio
 from jerboa.media.core import AudioConfig
@@ -32,10 +30,12 @@ class AudioMapper:
         )
         # self._transition_steps = std_audio.get_transition_steps(audio_config.sample_rate)
 
-        self._stretcher = RubberBandStretcher(
+        self._stretcher = std_audio.RubberBandStretcher(
             config.sample_rate,
             config.channels_num,
-            Option.PROCESS_REALTIME | Option.ENGINE_FASTER | Option.WINDOW_STANDARD,
+            std_audio.Option.PROCESS_REALTIME
+            | std_audio.Option.ENGINE_FINER
+            | std_audio.Option.WINDOW_SHORT,
         )
         self._stretcher.set_max_process_size(self._audio.max_size)
 
@@ -84,7 +84,7 @@ class AudioMapper:
                 else:
                     drift_fix_modifier = 1.0
 
-                # audio_data = std_audio.get_from_frame(frame.av_frame)
+                # audio_data = std_audio.signal_from_av_frame(frame.av_frame)
                 # self._stretcher.process(audio_data)
                 # self._audio.put(self._stretcher.retrieve_available())
                 for audio_section, section_modifier in self._cut_according_to_mapping_scheme(frame):
@@ -100,9 +100,10 @@ class AudioMapper:
                 )
                 if self._drift > 0:
                     self._drift = max(0, self._drift - RUBBERBAND_EXPECTED_DRIFT)
-                # print(f"drift={self._drift:.4f}")
+                print(f"{self._drift=:.4f}")
 
             self._future = self._thread_pool.submit(map_frame)
+
             # map_frame()
 
         if len(self._audio):
@@ -120,11 +121,8 @@ class AudioMapper:
             )
         return None
 
-    def _create_mapped_frame(self) -> MappedAudioFrame:
-        ...
-
     def _cut_according_to_mapping_scheme(self, frame: PreMappedFrame):
-        frame_audio = std_audio.get_from_frame(frame.av_frame)
+        frame_audio = std_audio.signal_from_av_frame(frame.av_frame)
         for section in frame.mapping_scheme.sections:
             sample_idx_beg = round((section.beg - frame.beg_timepoint) * self._config.sample_rate)
             sample_idx_end = round((section.end - frame.beg_timepoint) * self._config.sample_rate)
@@ -140,14 +138,13 @@ class VideoMapper:
 
     def map(self, frame: PreMappedFrame | None) -> MappedVideoFrame | None:
         if frame is not None:
-            av_frame = frame.av_frame
-            mapping_scheme = frame.mapping_scheme
-            duration = mapping_scheme.end - mapping_scheme.beg
-            assert duration > 0, "Dropped frames should never appear here"
+            assert (
+                frame.mapping_scheme.end > frame.mapping_scheme.beg
+            ), "Dropped frames should never appear here"
 
             return MappedVideoFrame(
-                beg_timepoint=mapping_scheme.beg,
-                end_timepoint=mapping_scheme.beg + duration,
-                av_frame=av_frame,
+                beg_timepoint=frame.mapping_scheme.beg,
+                end_timepoint=frame.mapping_scheme.end,
+                av_frame=frame.av_frame,
             )
         return None

@@ -160,5 +160,5 @@ class DecodingContext:
 
 
 @dataclass(frozen=True)
-class SeekTask(Task):
+class SkipDiscardedFramesSeekTask(Task):
     timepoint: float

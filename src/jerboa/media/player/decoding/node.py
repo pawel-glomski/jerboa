@@ -4,13 +4,12 @@ from collections import deque
 from collections.abc import Iterable
 from typing import Any, Callable, Optional
 from abc import ABC, abstractmethod
-from threading import Condition
 from gmpy2 import mpq as FastFraction
 
 from jerboa.core.timeline import FragmentedTimeline
 from jerboa.media import standardized_audio as std_audio
 from jerboa.media.core import MediaType
-from .context import DecodingContext, SeekTask
+from .context import DecodingContext, SkipDiscardedFramesSeekTask
 from .reformatter import AudioReformatter, VideoReformatter
 from .mapper import AudioMapper, VideoMapper
 from .frame import (
@@ -76,6 +75,12 @@ class Node(ABC):
     def child(self) -> "Node":
         return self._child
 
+    def find_root_node(self) -> "Node":
+        root_node = self.parent
+        while root_node.parent is not None:
+            root_node = root_node.parent
+        return root_node
+
     def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
         if recursive and self.child is not None:
             self.child.reset(context, hard, recursive)
@@ -109,6 +114,12 @@ class Node(ABC):
                 return node_output
             except Node.Discontinuity:
                 repeats -= 1
+            except SkipDiscardedFramesSeekTask as skip_task:
+                with skip_task.execute() as executor:
+                    root_node = self.find_root_node()
+                    with executor.finish_context():
+                        context.seek(skip_task.timepoint)
+                        root_node.reset(context, hard=False, recursive=True)
         raise Node.DiscontinuitiesLimitExcededError()
 
     @abstractmethod
@@ -324,7 +335,7 @@ class AccurateSeekNode(Node):
                 context.min_timepoint - frame.end_timepoint >= context.mean_keyframe_interval
             ):
                 if context.last_seek_timepoint != context.min_timepoint:
-                    raise SeekTask(timepoint=context.min_timepoint)
+                    SkipDiscardedFramesSeekTask(context.min_timepoint).run_if_unresolved()
 
                 # we cannot get any closer using "seek", so we drop all the frames until we get to
                 # the "min_timepoint"
