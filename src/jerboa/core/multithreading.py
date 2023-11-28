@@ -5,6 +5,7 @@ from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 import dataclasses as dclass
 import enum
+import traceback
 
 from .logger import logger
 
@@ -76,6 +77,54 @@ class RWLock:
 
 
 class MultiCondition:
+    @dclass.dataclass
+    class ConditionInfo:
+        different_locks: bool
+        waiters: int = 0
+
+    class NotifyAlsoContext:
+        def __init__(
+            self,
+            multi_condition: "MultiCondition",
+            conditions: dict["Condition | MultiCondition", bool],
+        ):
+            self._multi_condition = multi_condition
+            self._conditions = {}
+            for condition, different_locks in conditions.items():
+                if isinstance(condition, MultiCondition):
+                    assert (
+                        condition._internal_lock != multi_condition._internal_lock
+                    ) == different_locks
+                    self._conditions[condition._internal_condition] = different_locks
+
+        def __enter__(self):
+            with self._multi_condition._internal_lock:
+                for condition, different_locks in self._conditions.items():
+                    info = self._multi_condition._external_conditions.setdefault(
+                        condition, MultiCondition.ConditionInfo(different_locks)
+                    )
+                    try:
+                        assert info.different_locks == different_locks, (
+                            f"MultiCondition: The same conditon ({repr(condition)}), added twice, "
+                            "has conflicting values for `different_locks`",
+                        )
+                    except AssertionError as exception:
+                        info.different_locks = False  # avoid deadlock, assume a shared lock
+                        logger.exception(exception)
+
+                    info.waiters += 1
+
+        def __exit__(self, *exc_args) -> bool:
+            with self._multi_condition._internal_lock:
+                to_remove = []
+                for condition in self._conditions.keys():
+                    info = self._multi_condition._external_conditions[condition]
+                    info.waiters -= 1
+                    if info.waiters == 0:
+                        to_remove.append(condition)
+                for condition_to_remove in to_remove:
+                    self._multi_condition._external_conditions.pop(condition_to_remove)
+
     @dclass.dataclass(frozen=True)
     class WaitArg:
         predicate: Callable[[], bool] | None = None
@@ -96,13 +145,18 @@ class MultiCondition:
     def __init__(self, lock: "Lock | RLock | RWLock") -> None:
         self._internal_lock = lock
         self._internal_condition = Condition(lock=lock)
-        self._external_conditions = dict[Condition, bool]()
+        self._external_conditions = dict[Condition, MultiCondition.ConditionInfo]()
 
     def __enter__(self):
         return self._internal_lock.__enter__()
 
     def __exit__(self, *args):
         return self._internal_lock.__exit__(*args)
+
+    def notify_also(
+        self, conditions: dict["Condition | MultiCondition", bool]
+    ) -> NotifyAlsoContext:
+        return MultiCondition.NotifyAlsoContext(self, conditions)
 
     def wait(self, wait_arg: WaitArg) -> bool:
         """This instance, and (if present) `wait_arg.external_wait_condition` must be already locked"""
@@ -550,7 +604,7 @@ class Task(Exception, Generic[T1]):
     def execute(self) -> "Task.Executor":
         return Task.Executor(self.future)
 
-    def execute_and_finish_with(self, fn, /, *args, **kwargs) -> None:
+    def execute_and_finish_with(self, fn: Callable, /, *args, **kwargs) -> None:
         with self.execute() as executor:
             executor.finish_with(fn, *args, **kwargs)
 
