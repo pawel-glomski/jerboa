@@ -4,9 +4,10 @@ from dependency_injector.wiring import Provide, inject
 
 from PySide6 import QtWidgets as QtW
 
-from jerboa import gui
-from jerboa import media
 from jerboa import core
+from jerboa import analysis
+from jerboa import media
+from jerboa import gui
 
 
 class Container(containers.DeclarativeContainer):
@@ -18,7 +19,7 @@ class Container(containers.DeclarativeContainer):
 
     qt_app = providers.Singleton(QtW.QApplication, [])
 
-    # ---------------------------------- Signals --------------------------------- #
+    # ------------------------------------------ Signals ----------------------------------------- #
 
     media_source_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "media_source")
     ready_to_play_signal = providers.Singleton(gui.core.signal.QtSignal, "media_source")
@@ -31,7 +32,9 @@ class Container(containers.DeclarativeContainer):
     audio_output_devices_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
     current_audio_output_device_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
 
-    # ------------------------------ Multithreading ------------------------------ #
+    analysis_algorithm_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
+
+    # -------------------------------------- Multithreading -------------------------------------- #
 
     thread_spawner = providers.Singleton(
         gui.core.multithreading.QtThreadSpawner
@@ -43,7 +46,21 @@ class Container(containers.DeclarativeContainer):
         workers=8,
     )
 
-    # ------------------------------- Media player ------------------------------- #
+    # ----------------------------------------- Timeline ----------------------------------------- #
+
+    timeline = providers.Singleton(
+        core.timeline.FragmentedTimeline,
+        # init_sections=[core.timeline.TMSection(0, float("inf"), 1)],
+        init_sections=[core.timeline.TMSection(i, i + 1, 0.5 + 0.5 * (i % 2)) for i in range(1000)],
+    )
+
+    # ------------------------------------- Analysis Manager ------------------------------------- #
+
+    algorithm_registry = providers.Singleton(analysis.registry.AlgorithmRegistry)
+
+    analysis_manager = providers.Singleton(analysis.manager.AnalysisManager)
+
+    # --------------------------------------- Media player --------------------------------------- #
 
     audio_manager = providers.Singleton(
         media.player.audio_player.AudioManager,
@@ -74,25 +91,22 @@ class Container(containers.DeclarativeContainer):
         media.player.media_player.MediaPlayer,
         audio_player=audio_player,
         video_player=video_player,
-        audio_decoding_pipeline_factory=providers.Factory(
-            media.player.decoding.pipeline.create_audio_decoding_pipeline,
+        audio_decoder_factory=providers.Factory(
+            media.player.decoding.decoder.create_audio_decoder,
             thread_spawner=thread_spawner,
         ).provider,
-        video_decoding_pipeline_factory=providers.Factory(
-            media.player.decoding.pipeline.create_video_decoding_pipeline,
+        video_decoder_factory=providers.Factory(
+            media.player.decoding.decoder.create_video_decoder,
             thread_spawner=thread_spawner,
         ).provider,
-        timeline=providers.Factory(
-            core.timeline.FragmentedTimeline,
-            init_sections=[core.timeline.TMSection(i, i + 0.5) for i in range(1000)],
-        ),
+        timeline=timeline,
         thread_pool=thread_pool,
         thread_spawner=thread_spawner,
         fatal_error_signal=providers.Factory(gui.core.signal.QtSignal),
         ready_to_play_signal=ready_to_play_signal,
     )
 
-    # ------------------------------------ GUI ----------------------------------- #
+    # -------------------------------------------- GUI ------------------------------------------- #
 
     gui_container = providers.Container(
         gui.container.Container,
@@ -101,9 +115,11 @@ class Container(containers.DeclarativeContainer):
         media_source_selected_signal=media_source_selected_signal,
         ready_to_play_signal=ready_to_play_signal,
         playback_toggle_signal=playback_toggle_signal,
-        video_frame_update_signal=video_frame_update_signal,
         seek_backward_signal=seek_backward_signal,
         seek_forward_signal=seek_forward_signal,
+        video_frame_update_signal=video_frame_update_signal,
+        analysis_algorithm_selected_signal=analysis_algorithm_selected_signal,
+        algorithm_registry=algorithm_registry,
     )
 
 
@@ -127,6 +143,5 @@ if __name__ == "__main__":
     _dependencies_container.gui_container().wire()
 
     connect_signals()
-    gui.container.connect_signals()
 
     sys.exit(gui.container.run())

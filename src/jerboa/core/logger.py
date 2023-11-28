@@ -13,6 +13,7 @@ handler.setFormatter(formatter)
 
 logger = logging.getLogger("jerboa")
 logger.addHandler(handler)
+# logger.setLevel(logging.WARNING)
 logger.setLevel(logging.DEBUG)
 
 

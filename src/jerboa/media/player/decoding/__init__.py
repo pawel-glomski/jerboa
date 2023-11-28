@@ -1,4 +1,4 @@
 from . import context
 from . import decoder
 from . import node
-from . import pipeline
+from . import decoder

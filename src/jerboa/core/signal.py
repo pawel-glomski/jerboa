@@ -86,7 +86,7 @@ class Signal(ABC):
             or param.default is not inspect.Parameter.empty
         }
         if len(missing_args) > 0 or len(unexpected_args):
-            raise ValueError(
+            raise KeyError(
                 f"Subscriber ({subscriber}) has wrong signature. "
                 f"Missing args={missing_args}, unexpected args={unexpected_args}"
             )

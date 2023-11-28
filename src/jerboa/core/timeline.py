@@ -4,7 +4,7 @@ from threading import Condition
 from bisect import bisect_left
 from dataclasses import dataclass, field
 
-from jerboa.core.multithreading import MultiCondition, RWLock
+from jerboa.core.multithreading import RWLock
 
 
 @dataclass(frozen=True, slots=True)
@@ -29,6 +29,7 @@ class TMSection:
         assert self.beg <= self.end
         assert self.modifier >= 0.0
 
+        # super() does not work with slots ¯\_(ツ)_/¯
         super(TMSection, self).__setattr__(
             "duration", (self.end - self.beg) * self.modifier if self.modifier != 0 else 0.0
         )
@@ -103,7 +104,7 @@ class FragmentedTimeline:
         self._time_scope = -math.inf
 
         self._mutex = mutex or RWLock()
-        self._scope_extended__for_readers = MultiCondition(lock=self._mutex.as_reader())
+        self._scope_extended__for_readers = Condition(lock=self._mutex.as_reader())
 
         for section in init_sections or []:
             self.append_section(section)
@@ -121,6 +122,10 @@ class FragmentedTimeline:
         """
 
         return self._time_scope
+
+    @property
+    def scope_extended__for_readers(self) -> Condition:
+        return self._scope_extended__for_readers
 
     def extend_time_scope(self, new_value: float):
         with self._mutex.as_writer():
@@ -182,13 +187,7 @@ class FragmentedTimeline:
 
             self._extend_time_scope__locked(section.end)
 
-    def unmap_timepoint_to_source(
-        self,
-        mapped_timepoint: float,
-        interrupt_condition: Condition | None = None,
-        interrupt_predicate: Callable[[], bool] = lambda: False,
-        timeout: float | None = None,
-    ):
+    def unmap_timepoint_to_source(self, mapped_timepoint: float) -> float | None:
         """Unmaps a timepoint from the resulting timeline back to its source timeline counterpart.
 
         Args:
@@ -198,41 +197,32 @@ class FragmentedTimeline:
             requested timepoint. It must be locked before calling this function. When None, the wait
             will be omitted.
 
-            interrupt_predicate: Interrupt predicate.
+            interrupt_predicate: Callable that returns whether the wait should be interrupted.
 
             timeout: How long to wait at most.
 
         Returns:
-            If the timepoint is out of scope (the wait was omitted, timed out, or interrupted):
-                `None`
-            Otherwise:
+            If the timepoint is in scope:
                 The unmapped timepoint.
+            Otherwise:
+                `None`
         """
-        with self._scope_extended__for_readers:
-            if interrupt_condition is None or self._scope_extended__for_readers.wait_with(
-                condition=interrupt_condition,
-                condition_predicate=lambda: self._resulting_timepoints[-1] >= mapped_timepoint,
-                interrupt_predicate=interrupt_predicate,
-                timeout=timeout,
-            ):
-                if self._resulting_timepoints:
-                    mapped_timepoint = max(0, mapped_timepoint)
-                    idx = bisect_left(self._resulting_timepoints, mapped_timepoint)
-                    if idx < len(self._resulting_timepoints):
-                        scale = 1.0 / self._sections[idx].modifier
-                        beg_src = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
-                        return self._sections[idx].beg + scale * (mapped_timepoint - beg_src)
-                    if self.time_scope == math.inf:
-                        return self._sections[-1].end
+        with self._mutex.as_reader():
+            if self._resulting_timepoints:
+                mapped_timepoint = max(0, mapped_timepoint)
+                idx = bisect_left(self._resulting_timepoints, mapped_timepoint)
+                if idx < len(self._resulting_timepoints):
+                    scale = 1.0 / self._sections[idx].modifier
+                    beg_src = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
+                    return self._sections[idx].beg + scale * (mapped_timepoint - beg_src)
+                if self.time_scope == math.inf:
+                    return self._sections[-1].end
         return None
 
     def map_time_range(
         self,
         beg: float,
         end: float,
-        interrupt_condition: Condition | None = None,
-        interrupt_predicate: Callable[[], bool] = lambda: False,
-        timeout: float | None = None,
     ) -> tuple[RangeMappingResult, float] | tuple[None, None]:
         """Maps a time range to the resulting timeline.
 
@@ -244,66 +234,46 @@ class FragmentedTimeline:
 
             end: The ending of the time range to be mapped.
 
-            interrupt_condition: Condition that will be used to wait unit the scope covers the
-            requested range. It must be locked before calling this function. When None, the wait
-            will be omitted.
-
-            interrupt_predicate: Interrupt predicate.
-
-            timeout: How long to wait at most.
-
         Returns:
-            If the range is out of scope (the wait was omitted, timed out, or interrupted):
+            If the range is in scope, a tuple of 2 objects:
+                0: Results of the mapping.
+                1: The next closest timepoint that can be mapped after the range ends. If such a
+                timepoint does not exist in the current time scope, it returns the scope itself.
+
+            Otherwise:
                 `(None, None)`
-
-            Otherwise, a tuple of 2 values:
-                0: (RangeMappingResult) Results of the mapping.
-
-                1: (float) The next closest timepoint that can be mapped after the range ends. If
-                such a timepoint does not exist in the current time scope, it returns the scope
-                itself.
         """
-        with self._scope_extended__for_readers:
-            if interrupt_condition is None or self._scope_extended__for_readers.wait_with(
-                condition=interrupt_condition,
-                condition_predicate=lambda: self.time_scope >= end,
-                interrupt_predicate=interrupt_predicate,
-                timeout=timeout,
-            ):
-                return self._map_time_range__locked(beg, end)
-        # interrupted (timed out, or `interrupt_predicate` evaluated to True)
-        return (None, None)
-
-    def _map_time_range__locked(self, beg: float, end: float) -> tuple[RangeMappingResult, float]:
         beg = max(0, beg)
         if beg > end:
             raise ValueError(f"The beginning must precede the end ({beg}, {end}).")
-        if end > self.time_scope:
-            return (None, None)
 
-        involved_sections = list[TMSection]()
-        idx = bisect_left(self._sections, beg, key=lambda s: s.end)  # TODO(OPT): don't use key
-        if idx >= len(self._sections):
-            mapped_beg = self._sections[-1].end if self._sections else 0
-            mapped_end = mapped_beg
-            next_timepoint = self.time_scope
-        else:
-            mapped_beg = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
-            mapped_beg += self._sections[idx].modifier * max(0, beg - self._sections[idx].beg)
-            mapped_end = mapped_beg
+        with self._mutex.as_reader():
+            if end > self.time_scope:
+                return (None, None)
 
-            while idx < len(self._sections) and end > self._sections[idx].beg:
-                overlap_section = self._sections[idx].overlap(beg, end)
-                if overlap_section.duration > 0:
-                    mapped_end += overlap_section.duration
-                    involved_sections.append(overlap_section)
-                idx += 1
-
-            if end < self._sections[idx - 1].end:
-                next_timepoint = end
-            elif idx < len(self._sections):
-                next_timepoint = self._sections[idx].beg
+            involved_sections = list[TMSection]()
+            idx = bisect_left(self._sections, beg, key=lambda s: s.end)  # TODO(OPT): don't use key
+            if idx >= len(self._sections):
+                mapped_beg = self._sections[-1].end if self._sections else 0
+                mapped_end = mapped_beg
+                next_timepoint = self.time_scope
             else:
-                next_timepoint = self._time_scope
+                mapped_beg = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
+                mapped_beg += self._sections[idx].modifier * max(0, beg - self._sections[idx].beg)
+                mapped_end = mapped_beg
 
-        return (RangeMappingResult(mapped_beg, mapped_end, involved_sections), next_timepoint)
+                while idx < len(self._sections) and end > self._sections[idx].beg:
+                    overlap_section = self._sections[idx].overlap(beg, end)
+                    if overlap_section.duration > 0:
+                        mapped_end += overlap_section.duration
+                        involved_sections.append(overlap_section)
+                    idx += 1
+
+                if end < self._sections[idx - 1].end:
+                    next_timepoint = end
+                elif idx < len(self._sections):
+                    next_timepoint = self._sections[idx].beg
+                else:
+                    next_timepoint = self._time_scope
+
+            return (RangeMappingResult(mapped_beg, mapped_end, involved_sections), next_timepoint)

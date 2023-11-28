@@ -142,17 +142,13 @@ class DecodingContext:
     media: MediaContext
     timeline: FragmentedTimeline
 
-    mutex: Lock = field(default_factory=Lock)
+    tasks: TaskQueue = field(default_factory=TaskQueue)
 
     last_seek_timepoint: float | None = field(default=None, init=False)
     min_timepoint: float = field(default=0, init=False)
     mean_keyframe_interval: float = field(default=DEFAULT_MEAN_KEYFRAME_INTERVAL, init=False)
 
-    def __post_init__(self):
-        self.tasks = TaskQueue(mutex=self.mutex)
-
-    def seek__locked(self, timepoint: float) -> None:
-        assert self.mutex.locked()
+    def seek(self, timepoint: float) -> None:
         assert timepoint >= 0
 
         self.media.av.container.seek(

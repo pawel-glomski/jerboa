@@ -1,5 +1,3 @@
-from typing import Callable
-
 import av
 import math
 import numpy as np
@@ -80,3 +78,9 @@ def smooth_out_transition(last_sample: np.ndarray, audio: np.ndarray, steps: int
 
 def get_transition_steps(sample_rate: int) -> int:
     return int(math.ceil(TRANSITION_DURATION * sample_rate))
+
+
+def resampled(audio: np.ndarray, current_sample_rate: int, new_sample_rate: int) -> np.ndarray:
+    import soxr
+
+    return soxr.resample(audio.T, current_sample_rate, new_sample_rate, quality=soxr.HQ).T

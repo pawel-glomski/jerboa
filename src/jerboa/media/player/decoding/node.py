@@ -397,15 +397,25 @@ class FrameMappingPreparationNode(Node):
 
             if frame is not None:
                 if frame.end_timepoint >= context.min_timepoint:
-                    # note that the value of `beg` is `max(beg_timepoint, min_timepoint)`
+                    # Wait for the frame to be in the timeline's scope.
+                    # This is kind of unintuitive, but instead of waiting for the timeline to be
+                    # updated, we wait for a task to be added, and treat timeline updates as
+                    # "interrupts". This way this thread can still be responsive.
+                    frame_in_scope = lambda: context.timeline.time_scope >= frame.end_timepoint
+                    while not frame_in_scope():
+                        context.tasks.run_all(
+                            wait_when_empty=True,
+                            interrupt_condition=self._timeline.scope_extended__for_readers,
+                            interrupt_predicate=frame_in_scope,
+                        )
+
+                    # note the value of `beg` is `max(beg_timepoint, min_timepoint)`
                     # this assures the mapped frame will start exactly where it should
-                    # (according to the timeline)
+                    # (according to the timeline/seek)
                     mapping_scheme, context.min_timepoint = self._timeline.map_time_range(
                         beg=max(frame.beg_timepoint, context.min_timepoint),
                         end=frame.end_timepoint,
-                        interrupt_condition=context.tasks.task_added,
                     )
-                    context.tasks.run_all()
 
                     if mapping_scheme.beg < mapping_scheme.end:
                         self._returned_frame = True
