@@ -1,10 +1,8 @@
 from abc import ABC, abstractmethod
-from typing import Callable, ContextManager
+from typing import Callable
 from dataclasses import dataclass
 from threading import Lock, Condition
 import inspect
-
-from .logger import logger
 
 
 class Signal(ABC):
@@ -42,18 +40,8 @@ class Signal(ABC):
                 if not self._condition.wait_for(lambda: self.is_fulfilled, timeout=timeout):
                     raise TimeoutError("Promise not fulfilled in time")
 
-    class NoOpContext:
-        def __enter__(self):
-            return self
-
-        def __exit__(self, exc_type, exc_val, exc_tb) -> None:
-            pass
-
     @dataclass
     class EmitArg:
-        context: ContextManager
-        success_callback: Callable
-        error_callback: Callable
         slot_kwargs: dict
         promise: "Signal.Promise"
 
@@ -93,12 +81,7 @@ class Signal(ABC):
 
         def _worker(emit_arg: Signal.EmitArg):
             try:
-                with emit_arg.context:
-                    subscriber(**emit_arg.slot_kwargs)
-                    emit_arg.success_callback()
-            except:
-                emit_arg.error_callback()
-                raise
+                subscriber(**emit_arg.slot_kwargs)
             finally:
                 emit_arg.promise.fulfill()
 
@@ -111,19 +94,9 @@ class Signal(ABC):
 
     # TODO: remove these args after a commit
     @abstractmethod
-    def emit(
-        self,
-        context: ContextManager = NoOpContext(),
-        success_callback: Callable = lambda: None,
-        error_callback: Callable = lambda: None,
-        /,
-        **kwargs,
-    ) -> Promise:
+    def emit(self, /, **kwargs) -> Promise:
         with self._mutex:
             emit_arg = Signal.EmitArg(
-                context=context,
-                success_callback=success_callback,
-                error_callback=error_callback,
                 slot_kwargs=kwargs,
                 promise=Signal.Promise(len(self.subscribers)),
             )

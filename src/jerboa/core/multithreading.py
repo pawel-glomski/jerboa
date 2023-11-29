@@ -86,66 +86,56 @@ class MultiCondition:
         def __init__(
             self,
             multi_condition: "MultiCondition",
-            conditions: dict["Condition | MultiCondition", bool],
+            external_condition: "Condition | MultiCondition",
+            different_locks: bool,
         ):
             self._multi_condition = multi_condition
-            self._conditions = {}
-            for condition, different_locks in conditions.items():
-                if isinstance(condition, MultiCondition):
-                    assert (
-                        condition._internal_lock != multi_condition._internal_lock
-                    ) == different_locks
-                    self._conditions[condition._internal_condition] = different_locks
+            self._external_condition = external_condition
+            self._different_locks = different_locks
 
-        def __enter__(self):
+            if isinstance(external_condition, MultiCondition):
+                diff_locks = external_condition._internal_lock != multi_condition._internal_lock
+                assert diff_locks == self._different_locks
+
+        def __enter__(self) -> Callable[[Callable[[], bool]], bool]:
             with self._multi_condition._internal_lock:
-                for condition, different_locks in self._conditions.items():
-                    info = self._multi_condition._external_conditions.setdefault(
-                        condition, MultiCondition.ConditionInfo(different_locks)
+                info = self._multi_condition._external_conditions.setdefault(
+                    self._external_condition, MultiCondition.ConditionInfo(self._different_locks)
+                )
+                try:
+                    assert info.different_locks == self._different_locks, (
+                        f"MultiCondition: The same conditon ({repr(self._external_condition)}), "
+                        "added multiple times, has conflicting values for `different_locks`",
                     )
-                    try:
-                        assert info.different_locks == different_locks, (
-                            f"MultiCondition: The same conditon ({repr(condition)}), added twice, "
-                            "has conflicting values for `different_locks`",
-                        )
-                    except AssertionError as exception:
-                        info.different_locks = False  # avoid deadlock, assume a shared lock
-                        logger.exception(exception)
+                except AssertionError as exception:
+                    info.different_locks = False  # avoid deadlock, assume a shared lock
+                    logger.exception(exception)
+                    raise
 
-                    info.waiters += 1
+                info.waiters += 1
+
+            def safe_predicate(predicate: Callable[..., bool], *args, **kwargs):
+                if self._different_locks:
+                    with self._multi_condition._internal_lock:
+                        return predicate(*args, **kwargs)
+                return predicate(*args, **kwargs)
+
+            return safe_predicate
 
         def __exit__(self, *exc_args) -> bool:
             with self._multi_condition._internal_lock:
-                to_remove = []
-                for condition in self._conditions.keys():
-                    info = self._multi_condition._external_conditions[condition]
-                    info.waiters -= 1
-                    if info.waiters == 0:
-                        to_remove.append(condition)
-                for condition_to_remove in to_remove:
-                    self._multi_condition._external_conditions.pop(condition_to_remove)
-
-    @dclass.dataclass(frozen=True)
-    class WaitArg:
-        predicate: Callable[[], bool] | None = None
-        external_wait_condition: "Condition | MultiCondition | None" = None
-        different_locks: bool | None = None
-        timeout: float | None = None
-
-        def __post_init__(self):
-            assert (self.external_wait_condition is None) == (self.different_locks is None)
-
-        def add_alternative_predicate(self, predicate: Callable[[], bool]):
-            if self.predicate is None:
-                super().__setattr__("predicate", predicate)
-            else:
-                previous_predicate = self.predicate
-                super().__setattr__("predicate", lambda: previous_predicate() or predicate())
+                info = self._multi_condition._external_conditions[self._external_condition]
+                info.waiters -= 1
+                if info.waiters == 0:
+                    self._multi_condition._external_conditions.pop(self._external_condition)
 
     def __init__(self, lock: "Lock | RLock | RWLock") -> None:
         self._internal_lock = lock
         self._internal_condition = Condition(lock=lock)
         self._external_conditions = dict[Condition, MultiCondition.ConditionInfo]()
+
+    def __hash__(self) -> int:
+        return hash(self._internal_condition)
 
     def __enter__(self):
         return self._internal_lock.__enter__()
@@ -154,79 +144,19 @@ class MultiCondition:
         return self._internal_lock.__exit__(*args)
 
     def notify_also(
-        self, conditions: dict["Condition | MultiCondition", bool]
+        self,
+        condition: "Condition | MultiCondition",
+        diffrent_locks: bool,
     ) -> NotifyAlsoContext:
-        return MultiCondition.NotifyAlsoContext(self, conditions)
+        return MultiCondition.NotifyAlsoContext(self, condition, diffrent_locks)
 
-    def wait(self, wait_arg: WaitArg) -> bool:
-        """This instance, and (if present) `wait_arg.external_wait_condition` must be already locked"""
-        if wait_arg.external_wait_condition is None:
-            return self._wait_with_internal(wait_arg)
-        else:
-            return self._wait_with_external(wait_arg)
+    def wait(self, timeout: float | None) -> bool:
+        """Must be locked"""
+        return self._internal_condition.wait(timeout=timeout)
 
-    def _wait_with_internal(self, wait_arg: WaitArg) -> bool:
-        if wait_arg.predicate is None:
-            return self._internal_condition.wait(timeout=wait_arg.timeout)
-        return self._internal_condition.wait_for(wait_arg.predicate, timeout=wait_arg.timeout)
-
-    def _wait_with_external(self, wait_arg: WaitArg) -> bool:
-        # before releasing any locks, check if we can exit early
-        if wait_arg.predicate is not None and wait_arg.predicate():
-            return True
-
-        if isinstance(wait_arg.external_wait_condition, MultiCondition):
-            other: MultiCondition = wait_arg.external_wait_condition
-            assert (other._internal_lock != self._internal_lock) == wait_arg.different_locks
-
-            wait_arg = MultiCondition.WaitArg(
-                predicate=wait_arg.predicate,
-                external_wait_condition=other._internal_condition,
-                different_locks=wait_arg.different_locks,
-                timeout=wait_arg.timeout,
-            )
-
-        self._external_conditions[wait_arg.external_wait_condition] = wait_arg.different_locks
-        try:
-            if wait_arg.different_locks:
-                return self._wait_with_external__different_locks(wait_arg)
-            return self._wait_with_external__same_lock(wait_arg)
-        finally:
-            del self._external_conditions[wait_arg.external_wait_condition]
-
-    def _wait_with_external__different_locks(self, wait_arg: WaitArg) -> bool:
-        # since we will be waiting using an external condition, we have to handle our lock manually
-        self._internal_lock.release()
-        try:
-            if wait_arg.predicate is None:
-                result = wait_arg.external_wait_condition.wait(timeout=wait_arg.timeout)
-            else:
-                result = wait_arg.external_wait_condition.wait_for(
-                    self._get_safe_predicate(wait_arg.predicate), timeout=wait_arg.timeout
-                )
-            return result
-        finally:
-            self._internal_lock.acquire(blocking=False)
-
-    def _get_safe_predicate(self, predicate: Callable[[], bool]):
-        def _safe_predicate():
-            self._internal_lock.acquire()
-
-            # in case of any exceptions here, we want the lock to be acquired,
-            # so we do not catch anything here
-            if predicate():
-                return True  # returns with the lock acquired on True
-
-            self._internal_lock.release()  # releases the lock on False
-            return False
-
-        return _safe_predicate
-
-    def _wait_with_external__same_lock(self, wait_arg: WaitArg) -> bool:
-        # since the external lock uses our internal lock, we don't have to manage it manually
-        if wait_arg.predicate is None:
-            return wait_arg.external_wait_condition.wait(timeout=wait_arg.timeout)
-        return wait_arg.external_wait_condition.wait_for(wait_arg.predicate, wait_arg.timeout)
+    def wait_for(self, predicate: Callable[[], bool], timeout: float | None) -> bool:
+        """Must be locked"""
+        return self._internal_condition.wait_for(predicate, timeout=timeout)
 
     def notify(self, n: int = 1) -> None:
         """Must be locked"""
@@ -234,8 +164,8 @@ class MultiCondition:
         self._internal_condition.notify(n)
 
         # to ensure correct iteration, capture the current state with a list
-        for external_condition, different_locks in list(self._external_conditions.items()):
-            if different_locks:
+        for external_condition, info in list(self._external_conditions.items()):
+            if info.different_locks:
                 with external_condition:
                     external_condition.notify(n)
             else:
@@ -247,8 +177,8 @@ class MultiCondition:
         self._internal_condition.notify_all()
 
         # to ensure correct iteration, capture the current state with a list
-        for external_condition, different_locks in list(self._external_conditions.items()):
-            if different_locks:
+        for external_condition, info in list(self._external_conditions.items()):
+            if info.different_locks:
                 with external_condition:
                     external_condition.notify_all()
             else:
@@ -326,8 +256,8 @@ class Future(Generic[T1]):
     def _abort__locked(self) -> bool:
         assert self._mutex.locked()
 
-    def result(self, wait_arg: MultiCondition.WaitArg | None = None) -> T1:
-        if self.exception(wait_arg) is not None:
+    def result(self, timeout: float | None = 0) -> T1:
+        if self.exception(timeout) is not None:
             raise self._exception
 
         if self.is_aborted():
@@ -335,21 +265,22 @@ class Future(Generic[T1]):
 
         return self._result
 
-    def exception(self, wait_arg: MultiCondition.WaitArg | None = None) -> Exception | None:
+    def exception(self, timeout: float | None = 0) -> Exception | None:
         # exception can be set only on non-aborted tasks
-        if (wait_arg is None and not self.is_finished(finishing_aborted=False)) or (
-            wait_arg is not None and self.wait(finishing_aborted=False, wait_arg=wait_arg)
+        if (
+            timeout is not None and timeout <= 0 and not self.is_finished(finishing_aborted=False)
+        ) or (
+            (timeout is None or timeout > 0) and self.wait(finishing_aborted=False, timeout=timeout)
         ):
             raise TimeoutError(f"Task ({repr(self._task)}) not resolved in time")
         return self._exception
 
-    def wait(self, finishing_aborted: bool, wait_arg: MultiCondition.WaitArg) -> bool:
-        """If present, `wait_arg.external_wait_condition` must be already locked"""
+    def wait(self, finishing_aborted: bool, timeout: float | None = None) -> bool:
         with self._state_changed:
-            wait_arg.add_alternative_predicate(
-                lambda: self.is_finished(finishing_aborted=finishing_aborted)
+            return self._state_changed.wait_for(
+                lambda: self.is_finished(finishing_aborted=finishing_aborted),
+                timeout=timeout,
             )
-            return self._state_changed.wait(wait_arg)
 
     def _set_exception__locked(self, exception: Exception, raise_now: bool) -> None:
         assert self._mutex.locked()
@@ -542,26 +473,37 @@ class Task(Exception, Generic[T1]):
             finishing_aborted: bool = False,
             timeout: float | None = None,
         ) -> bool:
+            """This function locks this future's lock on its own"""
             assert self._active
             assert future is not self._future
 
-            with future.state_changed:
-                self.abort_aware_wait(
-                    wait_arg=MultiCondition.WaitArg(
-                        predicate=lambda: future.is_finished(finishing_aborted=finishing_aborted),
-                        external_wait_condition=future.state_changed,
-                        different_locks=True,
-                        timeout=timeout,
-                    )
-                )
+            return self.abort_aware_wait(
+                predicate=lambda: future.is_finished(finishing_aborted=finishing_aborted),
+                condition=future.state_changed,
+                different_locks=True,  # every future has a unique lock
+                timeout=timeout,
+            )
 
-        def abort_aware_wait(self, wait_arg: MultiCondition.WaitArg) -> bool:
-            """If present, `wait_arg.external_wait_condition` must be already locked"""
+        def abort_aware_wait(
+            self,
+            predicate: Callable[[], bool],
+            condition: Condition,
+            different_locks: bool,
+            timeout: float | None = None,
+        ) -> bool:
+            """This function locks this future's lock on its own"""
             assert self._active
 
-            self._future.wait(finishing_aborted=False, wait_arg=wait_arg)
-            if self._future.is_aborted():
-                raise Task.Abort()
+            state_changed = self._future.state_changed
+            with state_changed.notify_also(condition, different_locks) as safe_predicate:
+                with condition:
+                    return condition.wait_for(
+                        lambda: (
+                            predicate()
+                            or safe_predicate(self._future.is_finished, finishing_aborted=False)
+                        ),
+                        timeout=timeout,
+                    )
 
     id: Any = dclass.field(default=None, kw_only=True)
     future: Future[T1] = dclass.field(init=False, compare=False, repr=False)
@@ -687,23 +629,14 @@ class TaskQueue:
             task.future.abort()
         self._tasks.clear()
 
-    def run_all(self, wait_arg: MultiCondition.WaitArg | None) -> None:
-        """If present, `wait_arg.external_wait_condition` must be unlocked and must share the lock with this
-        queue (`wait_arg.different_locks == True`).
-        """
-        assert (
-            wait_arg is None
-            or wait_arg.external_wait_condition is None
-            or not wait_arg.different_locks
-        )
+    def run_all(self, timeout: float | None = 0) -> None:
         assert self._current_task.future.is_finished(
             finishing_aborted=True
         ), f"{self._current_task} should be already finished"
 
-        if wait_arg is not None:
-            wait_arg.add_alternative_predicate(lambda: not self.is_empty())
+        if timeout is None or timeout > 0:
             with self.task_added:
-                self.task_added.wait(wait_arg)
+                self.task_added.wait_for(lambda: not self.is_empty(), timeout=timeout)
 
         while not self.is_empty():
             with self.mutex:

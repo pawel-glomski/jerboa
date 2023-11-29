@@ -4,15 +4,7 @@ import enum
 
 from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import (
-    ThreadPool,
-    ThreadSpawner,
-    TaskQueue,
-    Task,
-    FnTask,
-    Future,
-    MultiCondition,
-)
+from jerboa.core.multithreading import ThreadPool, ThreadSpawner, TaskQueue, Task, FnTask, Future
 from jerboa.core.timeline import FragmentedTimeline
 from jerboa.media.core import AudioConstraints
 from jerboa.media.source import MediaSource, MediaStreamVariant
@@ -37,9 +29,6 @@ class PlayerTask(FnTask):
         SEEK = enum.auto()
         EOF = enum.auto()
 
-    def __init__(self, fn: Callable[[], None], *, id: ID) -> None:
-        super().__init__(fn, id=id)
-
     def invalidates(self, task: Task) -> bool:
         match self.id:
             case None:  # default unnamed task
@@ -55,7 +44,12 @@ class PlayerTask(FnTask):
             case PlayerTask.ID.SEEK:
                 return task.id == PlayerTask.ID.SEEK
             case PlayerTask.ID.EOF:
-                return task.id in [PlayerTask.ID.EOF, PlayerTask.ID.RESUME, PlayerTask.ID.SUSPEND]
+                return task.id in [
+                    PlayerTask.ID.SUSPEND,
+                    PlayerTask.ID.RESUME,
+                    PlayerTask.ID.SEEK,
+                    PlayerTask.ID.EOF,
+                ]
             case _:
                 return False
 
@@ -499,7 +493,7 @@ class MediaPlayer:
     def __thread(self) -> None:
         while True:
             try:
-                self._tasks.run_all(MultiCondition.WaitArg())
+                self._tasks.run_all(timeout=None)
             except MediaPlayer.KillTask as kill_task:
                 with kill_task.execute() as executor:
                     with executor.finish_context():

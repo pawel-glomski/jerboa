@@ -2,7 +2,7 @@ from threading import Condition
 from dataclasses import dataclass
 
 from jerboa.core.logger import logger
-from jerboa.core.multithreading import ThreadSpawner, Task, FnTask, Future, MultiCondition
+from jerboa.core.multithreading import ThreadSpawner, Task, FnTask, Future
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig, AudioConstraints
 from .buffer import create_buffer
 from .context import DecodingContext
@@ -78,7 +78,7 @@ class Decoder:
         logger.debug(f"Decoder({self.media_type}): Starting decoding")
         while True:
             try:
-                self._context.tasks.run_all(MultiCondition.WaitArg() if self._is_done else None)
+                self._context.tasks.run_all(None if self._is_done else 0)
                 if self._is_done:
                     continue
 
@@ -106,26 +106,16 @@ class Decoder:
                 break
 
     def __thread__put_output_to_buffer(self, output: JbAudioFrame | JbVideoFrame) -> None:
-        # Wait for free space in the buffer.
-        # To keep the thread responsive during this time, instead of waiting for
-        # `self._buffer_not_full` directly, we use it to wait for a task. During this time,
-        # `self._buffer_not_full` will be aditionally notified when a task is added and `run_all`
-        # will execute it and return (or raise).
-        # Thus we must wait for an actual `_buffer_not_full` event in a loop
-        while self._buffer.is_full():
-            # we don't have to acquire `_buffer_not_full`, since it shares the lock
-            # with  `_context.tasks`, which is acquired inside `run_all`
-            self._context.tasks.run_all(
-                MultiCondition.WaitArg(
-                    predicate=lambda: not self._buffer.is_full(),
-                    external_wait_condition=self._buffer_not_full,
-                    different_locks=False,  # `_buffer_not_full` must share a lock with task queue
+        task_added = self._context.tasks.task_added
+        with task_added.notify_also(self._buffer_not_full, diffrent_locks=False) as safe_predicate:
+            with self._buffer_not_full:
+                self._buffer_not_full.wait_for(
+                    lambda: not self._buffer.is_full()
+                    or not safe_predicate(self._context.tasks.is_empty)
                 )
-            )
-
-        with self._buffer_not_empty_or_done_decoding:
-            self._buffer.put(output)
-            self._buffer_not_empty_or_done_decoding.notify()
+                if not self._buffer.is_full():
+                    self._buffer.put(output)
+                    self._buffer_not_empty_or_done_decoding.notify()
 
     def __thread__seek(self, timepoint: float) -> None:
         logger.debug(f"Decoder({self.media_type}): Seeking to {timepoint}")
@@ -173,22 +163,19 @@ class Decoder:
         from threading import Thread
 
         def _prefill(executor: FnTask.Executor):
-            with self._buffer_not_empty_or_done_decoding:
-                executor.abort_aware_wait(
-                    wait_arg=MultiCondition.WaitArg(
-                        predicate=lambda: (
-                            self._is_done
-                            or self._buffer.duration >= PREFILL_DURATION
-                            or self._buffer.is_full()
-                        ),
-                        external_wait_condition=self._buffer_not_empty_or_done_decoding,
-                        different_locks=True,
-                    )
-                )
-                if self._buffer.duration <= 0:
-                    executor.abort()
-                else:
-                    executor.finish()
+            executor.abort_aware_wait(
+                predicate=lambda: (
+                    self._is_done
+                    or self._buffer.duration >= PREFILL_DURATION
+                    or self._buffer.is_full()
+                ),
+                different_locks=True,
+                condition=self._buffer_not_empty_or_done_decoding,
+            )
+            if self._buffer.duration <= 0:
+                executor.abort()
+            else:
+                executor.finish()
 
         prefill_task = FnTask(_prefill)
 

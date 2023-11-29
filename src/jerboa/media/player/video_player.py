@@ -3,14 +3,7 @@ from threading import Lock
 
 from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import (
-    ThreadSpawner,
-    TaskQueue,
-    Task,
-    FnTask,
-    Future,
-    MultiCondition,
-)
+from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask, Future
 from jerboa.media.core import MediaType
 from .decoding.decoder import Decoder
 from .decoding.frame import JbVideoFrame
@@ -159,7 +152,7 @@ class VideoPlayer:
         self.__thread__emit_first_frame()
         while True:
             try:
-                self._tasks.run_all(MultiCondition.WaitArg() if self.state.is_suspended else None)
+                self._tasks.run_all(None if self.state.is_suspended else 0)
                 if self.state.is_suspended:
                     continue
 
@@ -235,7 +228,7 @@ class VideoPlayer:
         if sleep_time > sleep_threshold:
             # wait for the timer to catch up
             with self._tasks.task_added:
-                self._tasks.task_added.wait(MultiCondition.WaitArg(timeout=sleep_time))
+                self._tasks.task_added.wait(timeout=min(SLEEP_TIME_MAX, sleep_time))
 
             current_timepoint = self._timer.current_timepoint()
             if current_timepoint is None:
@@ -258,7 +251,7 @@ class VideoPlayer:
             logger.debug(f"VideoPlayer: Changing the state ({self.state} -> {state})")
             self._state = state
         else:
-            logger.debug(f"VideoPlayer: Player already has the state '{state}'")
+            logger.debug(f"VideoPlayer: Player already has state '{state}'")
 
     def suspend(self) -> Future:
         return self._add_task(

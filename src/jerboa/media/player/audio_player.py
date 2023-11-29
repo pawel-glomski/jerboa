@@ -6,14 +6,7 @@ import PySide6.QtCore as QtC
 
 from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import (
-    ThreadSpawner,
-    TaskQueue,
-    Task,
-    FnTask,
-    Future,
-    MultiCondition,
-)
+from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask, Future
 from jerboa.media.core import MediaType, AudioSampleFormat, AudioChannelLayout, AudioConstraints
 from .decoding.decoder import Decoder
 from .state import PlayerState
@@ -185,9 +178,7 @@ class AudioManager:
         while True:
             try:
                 QtC.QCoreApplication.processEvents()
-                self._tasks.run_all(
-                    MultiCondition.WaitArg(timeout=AUDIO_THREAD_EVENT_PROCESS_FREQUENCY)
-                )
+                self._tasks.run_all(timeout=AUDIO_THREAD_EVENT_PROCESS_FREQUENCY)
             except AudioManager.KillTask as kill_task:
                 with kill_task.execute() as executor:
                     with executor.finish_context():

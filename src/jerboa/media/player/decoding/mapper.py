@@ -100,7 +100,7 @@ class AudioMapper:
                 )
                 if self._drift > 0:
                     self._drift = max(0, self._drift - RUBBERBAND_EXPECTED_DRIFT)
-                print(f"{self._drift=:.4f}")
+                # print(f"{self._drift=:.4f}")
 
             self._future = self._thread_pool.submit(map_frame)
 

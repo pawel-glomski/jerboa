@@ -16,18 +16,8 @@ class QtSignal(Signal):
         super().connect(subscriber)
         self._signal_wrapper.signal.connect(QtC.Slot(Signal.EmitArg)(self.subscribers[-1]))
 
-    def emit(
-        self,
-        context: ContextManager = Signal.NoOpContext(),
-        success_callback: Callable = lambda: None,
-        error_callback: Callable = lambda: None,
-        /,
-        **kwargs: dict,
-    ) -> None:
+    def emit(self, /, **kwargs: dict) -> None:
         emit_arg = Signal.EmitArg(
-            context=context,
-            success_callback=success_callback,
-            error_callback=error_callback,
             slot_kwargs=kwargs,
             promise=Signal.Promise(len(self.subscribers)),
         )
