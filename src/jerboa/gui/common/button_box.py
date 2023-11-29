@@ -1,47 +1,36 @@
 import PySide6.QtWidgets as QtW
-from PySide6 import QtGui
+import PySide6.QtGui as QtG
 
-QButtonEnum = QtW.QDialogButtonBox.StandardButton
+ButtonType = QtW.QDialogButtonBox.StandardButton
 
 
-class RejectAcceptDialogButtonBox(QtW.QDialogButtonBox):
+class RejectAcceptButtonBox(QtW.QDialogButtonBox):
     def __init__(
         self,
-        reject_button: str,
-        accept_button: str,
+        reject_button: ButtonType,
+        accept_button: ButtonType,
         icons: bool,
-        accept_disabled_by_default: bool,
+        is_accept_button_disabled_by_default: bool,
     ) -> None:
-        match reject_button.lower():
-            case "cancel":
-                reject_button_bitmask = QButtonEnum.Cancel
-            case _:
-                raise ValueError(f"Missing reject button ({reject_button=})")
-        match accept_button.lower():
-            case "ok":
-                accept_button_bitmask = QButtonEnum.Ok
-            case _:
-                raise ValueError(f"Missing accept button ({accept_button=})")
+        super().__init__(reject_button | accept_button)
 
-        super().__init__(reject_button_bitmask | accept_button_bitmask)
-
-        self._reject_button = self.button(reject_button_bitmask)
-        self._ok_button = self.button(accept_button_bitmask)
+        self._reject_button = self.button(reject_button)
+        self._accept_button = self.button(accept_button)
 
         if not icons:
-            self._reject_button.setIcon(QtGui.QIcon())
-            self._ok_button.setIcon(QtGui.QIcon())
+            self._reject_button.setIcon(QtG.QIcon())
+            self._accept_button.setIcon(QtG.QIcon())
 
-        self._accept_disabled_by_default = accept_disabled_by_default
+        self._is_accept_button_disabled_by_default = is_accept_button_disabled_by_default
 
         self.reset()
 
     def reset(self) -> None:
-        self._ok_button.setDisabled(self._accept_disabled_by_default)
+        self._accept_button.setDisabled(self._is_accept_button_disabled_by_default)
 
     def enable_accept(self) -> None:
-        self._ok_button.setDisabled(False)
-        self._ok_button.setDefault(True)
+        self._accept_button.setDisabled(False)
+        self._accept_button.setDefault(True)
 
     def loose_accept_focus(self) -> None:
-        self._ok_button.setDefault(False)
+        self._accept_button.setDefault(False)

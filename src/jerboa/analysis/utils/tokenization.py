@@ -4,7 +4,7 @@ import spacy
 
 from typing import List
 
-from jerboa.core.timeline import TMSection, FragmentedTimeline
+from jerboa.core import timeline
 
 TOKEN_SEPARATOR = " "
 SENTENCE_SEPARATOR = "." + TOKEN_SEPARATOR
@@ -27,9 +27,9 @@ class EditToken:
 
     def __init__(self, text: str, start_time: float, end_time: float):
         """Some part of the transcript, for which the timestamps are known. The text of the token is
-        being normalized, which might reduce it to an empty string - this should be properly handled.
-        See `TEXT_SUB_PATTERNS` and `WHITESPACE_SUB_PATTERNS` for patterns, which are removed from the
-        text of the token.
+        being normalized, which might reduce it to an empty string - this should be properly
+        handled. See `TEXT_SUB_PATTERNS` and `WHITESPACE_SUB_PATTERNS` for patterns, which are
+        removed from the text of the token.
 
         Args:
             text (str): Text that occurred in the transcript of the recording
@@ -48,16 +48,17 @@ class EditToken:
         self.index = None  # index of the token in the document
         self.label = None  # label assigned later by an analysis method
 
-    def as_timeline_section(self, duration_modifier: float) -> TMSection:
-        return TMSection(self.start_time, self.end_time, duration_modifier)
+    def as_timeline_section(self, duration_modifier: float) -> timeline.TMSection:
+        return timeline.TMSection(self.start_time, self.end_time, duration_modifier)
 
     def __len__(self) -> int:
         return len(self.text)
 
 
 def spacy_nlp(text: str, pipes: List[str]) -> spacy.tokens.Doc:
-    """Runs spaCy on a provided text. This function uses a static instance of spaCy language, so it is
-    initialized only once.
+    """Runs spaCy on the provided text.
+
+    This function uses a static instance of spaCy language, so it is initialized only once.
 
     Args:
         text (str): Text to process
@@ -156,7 +157,10 @@ def sentence_segmentation(transcript: List[EditToken]) -> List[List[EditToken]]:
     return sentences
 
 
-def create_timeline(tokens: List[EditToken], duration_modifier: float = 1.0) -> FragmentedTimeline:
+def create_timeline(
+    tokens: List[EditToken],
+    duration_modifier: float = 1.0,
+) -> timeline.FragmentedTimeline:
     """Creates an instance of `FragmentedTimeline` from a list of tokens
 
     Args:
@@ -166,8 +170,10 @@ def create_timeline(tokens: List[EditToken], duration_modifier: float = 1.0) -> 
     Returns:
         FragmentedTimeline: A timeline containing only the given tokens
     """
-    timeline = FragmentedTimeline()
+    tl = timeline.FragmentedTimeline()
     for token in tokens:
         if token.label:
-            timeline.append_section(TMSection(token.start_time, token.end_time, duration_modifier))
-    return timeline
+            tl.append_section(
+                timeline.TMSection(token.start_time, token.end_time, duration_modifier)
+            )
+    return tl

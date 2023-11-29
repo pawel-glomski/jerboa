@@ -1,20 +1,19 @@
 import numpy as np
 
-from typing import List
 from logging import Logger
 from argparse import ArgumentParser
-from librosa import power_to_db
-from librosa.core import stft
-from librosa.feature import melspectrogram
+
+# from librosa import power_to_db
+# from librosa.feature import melspectrogram
 from scipy.signal import convolve2d as conv2d
 from scipy.stats import entropy as kl_div
 from scipy.special import softmax
 
-from .analysis import AnalysisMethod, ARG_PREPARE_ANALYSIS_METHOD_FN
-from jerboa.media.readers import AudioReader
+from jerboa.analysis.analysis import AnalysisMethod
+from jerboa.media.readers.audio import AudioReader
 from jerboa.core.timeline import FragmentedTimeline
 from jerboa.core.logger import NULL_LOGGER
-from jerboa.core.math import ranges_of_truth, kernel_2d_from_window
+from jerboa.core.jbmath import ranges_of_truth, kernel_2d_from_window
 
 SR = 16000
 NFFT = 256
@@ -30,9 +29,13 @@ MIN_SILENCE_LEN = int(0.1 * SR / HOP + 0.5)
 MIN_SOUND_LEN = MIN_SILENCE_LEN
 
 
-class SpectrogramAnalysis(AnalysisMethod):
+class Algorithm(AnalysisMethod):
     def __init__(
-        self, th_ratio: float, dur_multi: float, silence_len: int, logger: Logger = NULL_LOGGER
+        self,
+        th_ratio: float,
+        dur_multi: float,
+        silence_len: int,
+        logger: Logger = NULL_LOGGER,
     ):
         """Spectrogram based analysis method. This method looks at features of 2 adjacent timesteps and
         removes segments, for which the difference is small, thus reducing redundance in the signal.
@@ -59,7 +62,7 @@ class SpectrogramAnalysis(AnalysisMethod):
 
         changes = ranges_of_truth(cls_segments == False) * HOP / SR
         changes = np.concatenate([changes, np.ones((changes.shape[0], 1)) * self.dur_multi], axis=1)
-        return FragmentedTimeline(*changes)
+        return FragmentedTimeline(changes)
 
     def classify(self, is_sound: np.ndarray, redundancy: np.ndarray) -> np.ndarray:
         cls = redundancy >= REDUNDANCY_THRESHOLD * self.th_ratio
@@ -103,7 +106,8 @@ class SpectrogramAnalysis(AnalysisMethod):
     @staticmethod
     def make_spectrogram(signal: np.ndarray) -> np.ndarray:
         spec = power_to_db(
-            melspectrogram(y=signal, n_fft=NFFT, hop_length=HOP, sr=SR, n_mels=64), ref=np.max
+            melspectrogram(y=signal, n_fft=NFFT, hop_length=HOP, sr=SR, n_mels=64),
+            ref=np.max,
         )
         spec = (spec + 80.0) / 80.0
         spec[spec < 0.01] = 0.01
@@ -139,62 +143,3 @@ class SpectrogramAnalysis(AnalysisMethod):
         # redundancy[is_sound == False] = 1
         redundancy = np.convolve(redundancy, np.hanning(5), "same")
         return redundancy
-
-
-############################################### CLI ################################################
-
-
-class CLI:
-    COMMAND = "spectrogram"
-    DESCRIPTION = """
-    Looks at 2 adjacent timesteps of a spectrogram and removes segments, for which the difference
-    in features is small, thus reducing redundance in the signal. This method will remove silence
-    and prolongations of sounds, syllables, words, or phrases.""".replace(
-        "\n", " "
-    )
-    ARG_TH_RATIO = "th_ratio"
-    ARG_DUR_MULTI = "dur_multi"
-    ARG_SILENCE_LEN = "silence_len"
-    DEFAULT_ARGS = {ARG_TH_RATIO: 1.0, ARG_DUR_MULTI: 0, ARG_SILENCE_LEN: MIN_SILENCE_LEN}
-
-    @staticmethod
-    def prepare_method(args, logger) -> "SpectrogramAnalysis":
-        return SpectrogramAnalysis(
-            args.get(CLI.ARG_TH_RATIO, CLI.DEFAULT_ARGS[CLI.ARG_TH_RATIO]),
-            args.get(CLI.ARG_DUR_MULTI, CLI.DEFAULT_ARGS[CLI.ARG_DUR_MULTI]),
-            args.get(CLI.ARG_SILENCE_LEN, CLI.DEFAULT_ARGS[CLI.ARG_SILENCE_LEN]),
-            logger=logger,
-        )
-
-    @staticmethod
-    def setup_arg_parser(parser: ArgumentParser) -> ArgumentParser:
-        """Sets up a CLI argument parser for this submodule
-
-        Returns:
-            ArgumentParser: Configured parser
-        """
-        parser.add_argument(
-            "-tr",
-            f"--{CLI.ARG_TH_RATIO}",
-            help="Threshold ratio: greater value = more aggresive cuts",
-            type=float,
-            action="store",
-            default=CLI.DEFAULT_ARGS[CLI.ARG_TH_RATIO],
-        )
-        parser.add_argument(
-            "-m",
-            f"--{CLI.ARG_DUR_MULTI}",
-            help="Duration multiplier of segments selected for removal",
-            type=float,
-            action="store",
-            default=CLI.DEFAULT_ARGS[CLI.ARG_DUR_MULTI],
-        )
-        parser.add_argument(
-            "-s",
-            f"--{CLI.ARG_SILENCE_LEN}",
-            help="Desired length of silence as a number of segments",
-            type=int,
-            action="store",
-            default=CLI.DEFAULT_ARGS[CLI.ARG_SILENCE_LEN],
-        )
-        parser.set_defaults(**{ARG_PREPARE_ANALYSIS_METHOD_FN: CLI.prepare_method})

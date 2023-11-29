@@ -35,23 +35,26 @@ class FrameMappingContext:
         self._frame.unmap()
 
 
-class Canvas(QtMW.QVideoWidget):
-    def __init__(
-        self,
-        video_frame_update_signal: Signal,
-    ):
+class Canvas(QtW.QStackedWidget):
+    def __init__(self, video_frame_update_signal: Signal, no_video_text: str):
         super().__init__()
 
         self.setMinimumHeight(50)
         self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
-        # self.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # self.setFrameShape(QtW.QFrame.Shape.StyledPanel)
 
-        # self._canvas = QtMW.QVideoWidget()
+        self._frame_canvas = QtMW.QVideoWidget()
         self._frame_format = QtM.QVideoFrameFormat(
             QtC.QSize(0, 0),
             jb_to_qt_video_frame_pixel_format(VIDEO_FRAME_PIXEL_FORMAT),
         )
+
+        self._no_video_label = QtW.QLabel(no_video_text)
+        self._no_video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # self._no_video_label.setFrameShape(QtW.QFrame.Shape.StyledPanel)
+
+        self.addWidget(self._frame_canvas)
+        self.addWidget(self._no_video_label)
+        self.setCurrentWidget(self._no_video_label)
 
         video_frame_update_signal.connect(self._on_frame_update)
 
@@ -64,9 +67,10 @@ class Canvas(QtMW.QVideoWidget):
                 for plane_idx in range(frame_qt.planeCount()):
                     frame_qt.bits(plane_idx)[:] = frame.planes[plane_idx]
 
-            self.videoSink().setVideoFrame(frame_qt)
+            self._frame_canvas.videoSink().setVideoFrame(frame_qt)
+            self.setCurrentWidget(self._frame_canvas)
         else:
-            self.videoSink().setVideoFrame(QtM.QVideoFrame())
+            self.setCurrentWidget(self._no_video_label)
 
     def _assure_correct_frame_size(self, width: int, height: int) -> None:
         if width != self._frame_format.frameWidth() or height != self._frame_format.frameHeight():
@@ -87,8 +91,8 @@ class Timeline(QtW.QLabel):
         super().__init__()
 
         self.setText("timeline")
-        self.setFrameShape(QtW.QFrame.Shape.StyledPanel)
         self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
+        # self.setFrameShape(QtW.QFrame.Shape.StyledPanel)
         self.setMinimumHeight(50)
 
 
@@ -121,7 +125,7 @@ class PlayerView(QtW.QWidget):
             """
         )
 
-        self._add_widget_to_splitter(canvas, stretch_factor=3, collapsible=False)
+        self._add_widget_to_splitter(canvas, stretch_factor=10, collapsible=False)
         self._add_widget_to_splitter(timeline, stretch_factor=1, collapsible=True)
 
         layout = QtW.QVBoxLayout()

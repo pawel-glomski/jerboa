@@ -3,7 +3,7 @@ import webvtt
 from typing import Callable, List
 from pathlib import Path
 
-from jerboa.analysis.tokenization import EditToken
+from jerboa.analysis.utils.tokenization import EditToken
 
 REGISTERED_READERS: List[Callable[[str], List[EditToken]]] = []
 

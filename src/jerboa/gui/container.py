@@ -2,11 +2,13 @@ from dependency_injector import containers, providers
 from dependency_injector.wiring import Provide, inject
 
 import PySide6.QtWidgets as QtW
+import PySide6.QtGui as QtG
 
 from jerboa.core.file import PathProcessor, JbPath
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadPool
 from jerboa.media.recognizer import MediaSourceRecognizer
+from jerboa.analysis.registry import AlgorithmRegistry
 from .palette import Palette
 from .main_view_stack import MainViewStack
 from .status_bar import StatusBar
@@ -17,6 +19,7 @@ from . import menu_bar
 from . import player_view
 from . import resources
 from . import media_source_selection
+from . import analysis_algorithm_selection
 
 
 class Container(containers.DeclarativeContainer):
@@ -25,27 +28,29 @@ class Container(containers.DeclarativeContainer):
         modules=[__name__],
     )
 
-    # ------------------------------- Dependencies ------------------------------- #
+    # --------------------------------------- Dependencies --------------------------------------- #
 
     qt_app = providers.Dependency(QtW.QApplication)
     thread_pool = providers.Dependency(ThreadPool)
+
     media_source_selected_signal = providers.Dependency(Signal)
     ready_to_play_signal = providers.Dependency(Signal)
-
-    video_frame_update_signal = providers.Dependency(Signal)
-
     playback_toggle_signal = providers.Dependency(Signal)
     seek_backward_signal = providers.Dependency(Signal)
     seek_forward_signal = providers.Dependency(Signal)
+    video_frame_update_signal = providers.Dependency(Signal)
 
-    # ---------------------------------- Palette --------------------------------- #
+    analysis_algorithm_selected_signal = providers.Dependency(Signal)
+    algorithm_registry = providers.Dependency(AlgorithmRegistry)
 
-    palette = providers.Singleton(
-        Palette,
-        app=qt_app,
-    )
+    # ------------------------------------------ Palette ----------------------------------------- #
 
-    # --------------------------------- Resources -------------------------------- #
+    # palette = providers.Singleton(
+    #     Palette,
+    #     app=qt_app,
+    # )
+
+    # ----------------------------------------- Resources ---------------------------------------- #
 
     resource_loading_spinner = providers.Singleton(
         resources.common.LoadingSpinner,
@@ -53,7 +58,7 @@ class Container(containers.DeclarativeContainer):
         size=(30, 30),
     )
 
-    # --------------------------------- Menu bar --------------------------------- #
+    # ----------------------------------------- Menu bar ----------------------------------------- #
 
     menu_bar_file_open = providers.Singleton(
         menu_bar.MenuAction,
@@ -67,18 +72,29 @@ class Container(containers.DeclarativeContainer):
             menu_bar_file_open,
         ),
     )
+
+    menu_bar_analyze = providers.Singleton(
+        menu_bar.MenuAction,
+        name="Analyze",
+        signal=providers.Factory(core.signal.QtSignal),
+    )
+
     jb_menu_bar = providers.Singleton(
         menu_bar.MenuBar,
         menus=providers.List(
             menu_bar_file,
         ),
+        actions=providers.List(
+            menu_bar_analyze,
+        ),
     )
 
-    # -------------------------------- Player view ------------------------------- #
+    # ---------------------------------------- Player view --------------------------------------- #
 
     player_view_canvas = providers.Singleton(
         player_view.Canvas,
         video_frame_update_signal=video_frame_update_signal,
+        no_video_text="No video stream",
     )
     player_view_timeline = providers.Singleton(
         player_view.Timeline,
@@ -94,7 +110,7 @@ class Container(containers.DeclarativeContainer):
         seek_forward_signal=seek_forward_signal,
     )
 
-    # ----------------------------- Main view stack ---------------------------- #
+    # -------------------------------------- Main view stack ------------------------------------- #
 
     jb_main_view_stack = providers.Singleton(
         MainViewStack,
@@ -103,13 +119,13 @@ class Container(containers.DeclarativeContainer):
         # plugins_view=plugins_view,
     )
 
-    # -------------------------------- Status bar -------------------------------- #
+    # ---------------------------------------- Status bar ---------------------------------------- #
 
     jb_status_bar = providers.Singleton(
         StatusBar,
     )
 
-    # -------------------------------- Main Window ------------------------------- #
+    # ---------------------------------------- Main Window --------------------------------------- #
 
     jb_main_window = providers.Singleton(
         MainWindow,
@@ -120,13 +136,11 @@ class Container(containers.DeclarativeContainer):
         status_bar=jb_status_bar,
     )
 
-    # ----------------------- media source selection dialog ---------------------- #
+    # ------------------------------- Media source selection dialog ------------------------------ #
 
     media_source_selection_dialog = providers.Singleton(
         media_source_selection.dialog.Dialog,
         min_size=(800, 400),
-        hint_text="Select a local file or enter the URL of a recording",
-        loading_spinner_movie=resource_loading_spinner,
         path_selector=providers.Factory(
             common.file.PathSelector,
             path_processor=providers.Factory(
@@ -146,6 +160,15 @@ class Container(containers.DeclarativeContainer):
             path_selected_signal=providers.Factory(core.signal.QtSignal, "media_source_path"),
             path_modified_signal=providers.Factory(core.signal.QtSignal),
         ),
+        panel_stack=providers.Factory(common.panel_stack.PanelStack),
+        hint_panel=providers.Factory(
+            common.panel_stack.HintPanel,
+            text="Select a local file or enter an URL",
+        ),
+        loading_spinner_panel=providers.Factory(
+            common.panel_stack.LoadingSpinnerPanel,
+            loading_spinner_movie=resource_loading_spinner,
+        ),
         media_source_resolver=providers.Factory(
             media_source_selection.resolver.MediaSourceResolver,
             title_text="Title:",
@@ -159,11 +182,11 @@ class Container(containers.DeclarativeContainer):
             ),
         ),
         button_box=providers.Factory(
-            common.button_box.RejectAcceptDialogButtonBox,
-            reject_button="cancel",
-            accept_button="ok",
+            common.button_box.RejectAcceptButtonBox,
+            reject_button=common.button_box.ButtonType.Cancel,
+            accept_button=common.button_box.ButtonType.Ok,
             icons=False,
-            accept_disabled_by_default=True,
+            is_accept_button_disabled_by_default=True,
         ),
         recognizer=providers.Factory(
             MediaSourceRecognizer,
@@ -174,15 +197,52 @@ class Container(containers.DeclarativeContainer):
         parent=jb_main_window,
     )
 
+    # ---------------------------- Analysis algorithm selection dialog --------------------------- #
+
+    analysis_algorithm_selection_dialog = providers.Singleton(
+        analysis_algorithm_selection.dialog.Dialog,
+        min_size=(600, 400),
+        algorithm_selector=providers.Factory(
+            analysis_algorithm_selection.dialog.AlgorithmSelector,
+            algorithm_registry=algorithm_registry,
+            algorithm_changed_signal=providers.Factory(core.signal.QtSignal, "algorithm"),
+        ),
+        configurator=providers.Factory(
+            analysis_algorithm_selection.dialog.AlgorithmConfigurator,
+            properties_collection=providers.Factory(common.property.PropertiesCollection),
+        ),
+        button_box=providers.Factory(
+            common.button_box.RejectAcceptButtonBox,
+            reject_button=common.button_box.ButtonType.Cancel,
+            accept_button=common.button_box.ButtonType.Ok,
+            icons=False,
+            is_accept_button_disabled_by_default=False,
+        ),
+        analysis_algorithm_selected_signal=analysis_algorithm_selected_signal,
+        parent=jb_main_window,
+    )
+
 
 @inject
 def connect_signals(
     menu_bar_file_open: menu_bar.MenuAction = Provide[Container.menu_bar_file_open],
+    menu_bar_analyze: menu_bar.MenuAction = Provide[Container.menu_bar_analyze],
     media_source_selection_dialog: media_source_selection.dialog.Dialog = Provide[
         Container.media_source_selection_dialog
     ],
+    analysis_algorithm_selection_dialog: analysis_algorithm_selection.dialog.Dialog = Provide[
+        Container.analysis_algorithm_selection_dialog
+    ],
 ) -> None:
     menu_bar_file_open.signal.connect(media_source_selection_dialog.open_clean)
+    menu_bar_analyze.signal.connect(analysis_algorithm_selection_dialog.open_clean)
+
+
+@inject
+def fix_palette(qt_app: QtW.QApplication = Provide[Container.qt_app]) -> None:
+    palette = qt_app.palette()
+    palette.setColor(palette.ColorRole.ToolTipBase, palette.color(palette.ColorRole.Window))
+    qt_app.setPalette(palette)
 
 
 @inject
@@ -190,5 +250,8 @@ def run(
     qt_app: QtW.QApplication = Provide[Container.qt_app],
     jb_main_window: MainWindow = Provide[Container.jb_main_window],
 ) -> int:
+    connect_signals()
+    fix_palette()
+
     jb_main_window.show()
     return qt_app.exec()

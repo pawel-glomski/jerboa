@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt
 
 
 from jerboa.media.source import MediaSource, MediaStreamSource
-from jerboa.gui.common.property import LabelValuePair
+from jerboa.gui.common import property as gui_property
 
 
 class StreamVariantSelector(QtW.QWidget):
@@ -47,31 +47,37 @@ class MediaSourceResolver(QtW.QWidget):
     ):
         super().__init__()
 
-        self._title = LabelValuePair(title_text)
+        title_property = gui_property.String(
+            name=title_text, description="", init_value="", read_only=True
+        )
+        title_layout = QtW.QHBoxLayout()
+        title_layout.addWidget(title_property.label_widget)
+        title_layout.addWidget(title_property.input_widget)
+        self._title = title_property.input_widget
+
+        streams_selection_layout = QtW.QHBoxLayout()
+        streams_selection_layout.addWidget(audio_variant_selector)
+        streams_selection_layout.addWidget(video_variant_selector)
         self._audio_variant_selector = audio_variant_selector
         self._video_variant_selector = video_variant_selector
 
-        streams_selection_layout = QtW.QHBoxLayout()
-        streams_selection_layout.addWidget(self._audio_variant_selector)
-        streams_selection_layout.addWidget(self._video_variant_selector)
-
         main_layout = QtW.QVBoxLayout()
         main_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        main_layout.addWidget(self._title)
+        main_layout.addLayout(title_layout)
         main_layout.addLayout(streams_selection_layout)
         self.setLayout(main_layout)
 
     def reset(self) -> None:
         self._media_source = None
 
-        self._title.set_value("")
+        self._title.reset("")
         self._audio_variant_selector.reset()
         self._video_variant_selector.reset()
 
     def set_media_source(self, media_source: MediaSource):
         self._media_source = media_source
 
-        self._title.set_value(media_source.title)
+        self._title.reset(media_source.title)
         self._audio_variant_selector.set_stream_source(media_source.audio)
         self._video_variant_selector.set_stream_source(media_source.video)
 

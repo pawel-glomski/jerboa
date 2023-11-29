@@ -1,10 +1,14 @@
 from typing import Callable
-from concurrent import futures
 
 from PySide6 import QtCore as QtC
 
-from jerboa.core.logger import logger
-from jerboa.core.multithreading import ThreadPool, ThreadSpawner
+from jerboa.core.multithreading import (
+    ThreadPool,
+    ThreadSpawner,
+    FnTask,
+    Future,
+    do_job_with_exception_logging,
+)
 
 
 class QtThreadPool(ThreadPool):
@@ -14,24 +18,19 @@ class QtThreadPool(ThreadPool):
         if workers:
             self._thread_pool.setMaxThreadCount(workers)
 
-    def start(self, job: Callable, *args, **kwargs) -> futures.Future:
-        future = futures.Future()
+        self._running_tasks = set[FnTask]()
 
-        def worker():
+    def start(self, task: FnTask) -> Future:
+        self._running_tasks.add(task)
+
+        def job():
             try:
-                future.set_running_or_notify_cancel()
-                if not future.cancelled():
-                    future.set_result(job(*args, **kwargs))
-            except Exception as exception:
-                future.set_exception(exception)
-                logger.exception(exception)
-                raise
+                do_job_with_exception_logging(task.run_if_unresolved, args=[], kwargs={})
+            finally:
+                self._running_tasks.remove(task)
 
-        self._thread_pool.start(worker)
-        return future
-
-    def wait(self, timeout: int | None = None) -> bool:
-        return self._thread_pool.waitForDone(-1 if timeout is None else timeout)
+        self._thread_pool.start(job)
+        return task.future
 
 
 class QtThreadSpawner(ThreadSpawner):
@@ -52,10 +51,7 @@ class QtThreadSpawner(ThreadSpawner):
 
         def run(self) -> None:
             try:
-                self._job(*self._args, **self._kwargs)
-            except Exception as e:
-                logger.exception(e)
-                raise
+                do_job_with_exception_logging(self._job, self._args, self._kwargs)
             finally:
                 self.finished.emit()
 
@@ -77,7 +73,3 @@ class QtThreadSpawner(ThreadSpawner):
         thread.start()
 
         self._threads[thread] = worker
-
-    def wait(self, timeout: int | None = None) -> bool:
-        for thread in self._threads:
-            thread.wait(-1 if timeout is None else timeout)

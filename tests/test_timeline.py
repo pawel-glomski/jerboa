@@ -51,9 +51,10 @@ class TestTMSection:
             (TMSection(5, 10, 1.0), TMSection(5, 15, 1.0), TMSection(5, 15, 1.0)),
         ],
     )
-    def test_merged_should_extend_to_expected_section_when_is_direct_continuation(
+    def test_merged_should_extend_to_expected_section_when_can_be_merged(
         self, section1: TMSection, section2: TMSection, expected_section: TMSection
     ):
+        assert section1.can_be_merged(section2) == True
         assert section1.merged(section2) == expected_section
 
     @pytest.mark.parametrize(
@@ -62,12 +63,13 @@ class TestTMSection:
             (TMSection(6, 10, 0.5), TMSection(11, 15, 1.0)),
             (TMSection(7, 10, 2.0), TMSection(10, 15, 0.5)),
             (TMSection(8, 10, 1.0), TMSection(10, 15, 0.0)),
-            (TMSection(0, 10, 1.0), TMSection(-10, 0, 1.0)),
+            (TMSection(1, 10, 1.0), TMSection(-10, 0, 1.0)),
         ],
     )
-    def test_merged_should_return_false_when_is_not_direct_continuation(
+    def test_merged_should_return_None_when_cannot_be_merged(
         self, section1: TMSection, section2: TMSection
     ):
+        assert section1.can_be_merged(section2) == False
         assert section1.merged(section2) is None
 
     @pytest.mark.parametrize(

@@ -21,4 +21,4 @@ class MainWindow(QtW.QMainWindow):
 
         self.setMenuBar(menu_bar)
         self.setCentralWidget(main_widget)
-        self.setStatusBar(status_bar)
+        # self.setStatusBar(status_bar)
