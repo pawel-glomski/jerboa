@@ -107,11 +107,10 @@ class Decoder:
 
     def __thread__put_output_to_buffer(self, output: JbAudioFrame | JbVideoFrame) -> None:
         task_added = self._context.tasks.task_added
-        with task_added.notify_also(self._buffer_not_full, diffrent_locks=False) as safe_predicate:
+        with task_added.notify_also(self._buffer_not_full, different_locks=False):
             with self._buffer_not_full:
                 self._buffer_not_full.wait_for(
-                    lambda: not self._buffer.is_full()
-                    or not safe_predicate(self._context.tasks.is_empty)
+                    lambda: not self._buffer.is_full() or not self._context.tasks.is_empty()
                 )
                 if not self._buffer.is_full():
                     self._buffer.put(output)

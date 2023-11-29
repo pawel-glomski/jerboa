@@ -5,13 +5,12 @@ from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 import dataclasses as dclass
 import enum
-import traceback
 
 from .logger import logger
 
-
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
+
 
 # ------------------------------------------------------------------------------------------------ #
 #         RWLock from https://gist.github.com/tylerneylon/a7ff6017b7a1f9a506cf75aa23eacfd6         #
@@ -87,6 +86,7 @@ class MultiCondition:
             self,
             multi_condition: "MultiCondition",
             external_condition: "Condition | MultiCondition",
+            *,
             different_locks: bool,
         ):
             self._multi_condition = multi_condition
@@ -97,7 +97,7 @@ class MultiCondition:
                 diff_locks = external_condition._internal_lock != multi_condition._internal_lock
                 assert diff_locks == self._different_locks
 
-        def __enter__(self) -> Callable[[Callable[[], bool]], bool]:
+        def __enter__(self) -> None:
             with self._multi_condition._internal_lock:
                 info = self._multi_condition._external_conditions.setdefault(
                     self._external_condition, MultiCondition.ConditionInfo(self._different_locks)
@@ -113,14 +113,6 @@ class MultiCondition:
                     raise
 
                 info.waiters += 1
-
-            def safe_predicate(predicate: Callable[..., bool], *args, **kwargs):
-                if self._different_locks:
-                    with self._multi_condition._internal_lock:
-                        return predicate(*args, **kwargs)
-                return predicate(*args, **kwargs)
-
-            return safe_predicate
 
         def __exit__(self, *exc_args) -> bool:
             with self._multi_condition._internal_lock:
@@ -146,9 +138,10 @@ class MultiCondition:
     def notify_also(
         self,
         condition: "Condition | MultiCondition",
-        diffrent_locks: bool,
+        *,
+        different_locks: bool,
     ) -> NotifyAlsoContext:
-        return MultiCondition.NotifyAlsoContext(self, condition, diffrent_locks)
+        return MultiCondition.NotifyAlsoContext(self, condition, different_locks=different_locks)
 
     def wait(self, timeout: float | None) -> bool:
         """Must be locked"""
@@ -488,20 +481,17 @@ class Task(Exception, Generic[T1]):
             self,
             predicate: Callable[[], bool],
             condition: Condition,
+            *,
             different_locks: bool,
             timeout: float | None = None,
         ) -> bool:
             """This function locks this future's lock on its own"""
             assert self._active
 
-            state_changed = self._future.state_changed
-            with state_changed.notify_also(condition, different_locks) as safe_predicate:
+            with self._future.state_changed.notify_also(condition, different_locks=different_locks):
                 with condition:
                     return condition.wait_for(
-                        lambda: (
-                            predicate()
-                            or safe_predicate(self._future.is_finished, finishing_aborted=False)
-                        ),
+                        lambda: (predicate() or self._future.is_finished(finishing_aborted=False)),
                         timeout=timeout,
                     )
 
