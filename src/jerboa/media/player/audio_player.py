@@ -264,7 +264,6 @@ class AudioPlayer(PlaybackTimer):
         self._decoder: Decoder | None = None
         self._state = PlayerState.UNINITIALIZED
         self._time_offset = 0.0
-        self._clear_buffers_on_resume = False
 
         self._ignore_state_changes = Context()
 
@@ -427,7 +426,6 @@ class AudioPlayer(PlaybackTimer):
                 self._decoder.kill()  # we do not need to wait for it to finish
                 self._decoder = None
                 self._time_offset = 0.0
-                self._clear_buffers_on_resume = False
 
                 self._set_state_with_log(PlayerState.UNINITIALIZED)
 
@@ -463,16 +461,11 @@ class AudioPlayer(PlaybackTimer):
                 logger.debug("Not resuming (player not initialized)")
                 executor.abort()
 
-            if self.state == PlayerState.PLAYING:
-                logger.debug("Player is already playing")
-                executor.finish()
-            else:
-                with executor.finish_context:
+            with executor.finish_context:
+                if self.state == PlayerState.PLAYING:
+                    logger.debug("Player is already playing")
+                else:
                     logger.debug("Resuming...")
-                    if self._clear_buffers_on_resume:
-                        self._clear_buffers_on_resume = False
-                        with self._ignore_state_changes:
-                            self.__audio_thread__reset_audio_sink__locked(self._audio_sink.format())
 
                     self._audio_sink.resume()
                     if self.state != PlayerState.PLAYING:
@@ -522,9 +515,10 @@ class AudioPlayer(PlaybackTimer):
                 executor.abort()
 
             with executor.finish_context:
-                logger.debug("Seeking... Successful")
                 self._time_offset = new_timer_offset
-                self._clear_buffers_on_resume = True
+                with self._ignore_state_changes:
+                    self.__audio_thread__reset_audio_sink__locked(self._audio_sink.format())
+                logger.debug("Seeking... Successful")
 
     def current_timepoint(self) -> float | None:
         with self._rlock:
