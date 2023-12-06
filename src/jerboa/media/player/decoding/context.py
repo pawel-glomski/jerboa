@@ -1,8 +1,7 @@
 import av
 from dataclasses import dataclass, field
-from threading import Lock
-from gmpy2 import mpq as FastFraction
 
+from jerboa.core.jbmath import Fraction
 from jerboa.core.timeline import FragmentedTimeline
 from jerboa.media import av_to_jb, standardized_audio as std_audio
 from jerboa.media.core import (
@@ -55,16 +54,16 @@ class AVContext:
 
 @dataclass(frozen=True, init=False)
 class MediaContext:
-    av: AVContext
+    avc: AVContext
     intermediate_config: AudioConfig | VideoConfig
     presentation_config: AudioConfig | VideoConfig
 
-    def __init__(self, av: AVContext, media_constraints: AudioConstraints | None):
-        super().__setattr__("av", av)
+    def __init__(self, avc: AVContext, media_constraints: AudioConstraints | None):
+        super().__setattr__("avc", avc)
         super().__setattr__(
             "presentation_config",
             MediaContext.create_presentation_media_config(
-                stream=av.stream,
+                stream=avc.stream,
                 constraints=media_constraints,
             ),
         )
@@ -109,7 +108,7 @@ class MediaContext:
             )
         return VideoConfig(
             pixel_format=VIDEO_FRAME_PIXEL_FORMAT,
-            sample_aspect_ratio=stream.sample_aspect_ratio or FastFraction(1, 1),
+            sample_aspect_ratio=stream.sample_aspect_ratio or Fraction(1, 1),
         )
 
     @staticmethod
@@ -151,9 +150,9 @@ class DecodingContext:
     def seek(self, timepoint: float) -> None:
         assert timepoint >= 0
 
-        self.media.av.container.seek(
-            round(timepoint / self.media.av.stream.time_base),
-            stream=self.media.av.stream,
+        self.media.avc.container.seek(
+            round(timepoint / self.media.avc.stream.time_base),
+            stream=self.media.avc.stream,
         )
         self.last_seek_timepoint = timepoint
         self.min_timepoint = timepoint

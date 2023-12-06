@@ -4,7 +4,7 @@ from PySide6.QtCore import Qt
 
 from jerboa.core.signal import Signal
 from jerboa.core.file import JbPath
-from jerboa.core.multithreading import Future
+from jerboa.core.multithreading import Task
 from jerboa.media.source import MediaSource
 from jerboa.media.recognizer import MediaSourceRecognizer
 from jerboa.gui.common.file import PathSelector
@@ -49,7 +49,7 @@ class Dialog(QtW.QDialog):
         self._button_box.rejected.connect(self.reject)
 
         self._recognizer = recognizer
-        self._recognizer_task_future: Future | None = None
+        self._recognizer_task_future: Task.Future | None = None
 
         self._error_dialog = QtW.QErrorMessage(parent=self)
         self._error_dialog.accepted.connect(self.reset)

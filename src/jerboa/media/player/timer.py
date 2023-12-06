@@ -12,7 +12,7 @@ class ClockPlaybackTimer(PlaybackTimer):
     def __init__(self) -> None:
         super().__init__()
         self._time_now_ns = time.perf_counter_ns
-        self.deinitialize()
+        self.uninitialize()
 
     @property
     def is_initialized(self) -> bool:
@@ -22,7 +22,7 @@ class ClockPlaybackTimer(PlaybackTimer):
     def is_running(self) -> bool:
         return self._last_time_ns is not None
 
-    def deinitialize(self) -> None:
+    def uninitialize(self) -> None:
         self._cumulative_time_ns: int | None = None
         self._last_time_ns: int | None = None
 

@@ -1,6 +1,6 @@
 from typing import Any, Callable, Generic, TypeVar
 from abc import ABC, abstractmethod
-from threading import Thread, Lock, RLock, Condition
+from threading import Thread, Lock, Condition
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
 import dataclasses as dclass
@@ -71,245 +71,123 @@ class RWLock:
 
 
 # ------------------------------------------------------------------------------------------------ #
-#                                          MultiCondition                                          #
+#                                               Event                                              #
 # ------------------------------------------------------------------------------------------------ #
 
 
-class MultiCondition:
-    @dclass.dataclass
-    class ConditionInfo:
-        different_locks: bool
-        waiters: int = 0
-
-    class NotifyAlsoContext:
-        def __init__(
-            self,
-            multi_condition: "MultiCondition",
-            external_condition: "Condition | MultiCondition",
-            *,
-            different_locks: bool,
-        ):
-            self._multi_condition = multi_condition
-            self._external_condition = external_condition
-            self._different_locks = different_locks
-
-            if isinstance(external_condition, MultiCondition):
-                diff_locks = external_condition._internal_lock != multi_condition._internal_lock
-                assert diff_locks == self._different_locks
-
-        def __enter__(self) -> None:
-            with self._multi_condition._internal_lock:
-                info = self._multi_condition._external_conditions.setdefault(
-                    self._external_condition, MultiCondition.ConditionInfo(self._different_locks)
-                )
-                try:
-                    assert info.different_locks == self._different_locks, (
-                        f"MultiCondition: The same conditon ({repr(self._external_condition)}), "
-                        "added multiple times, has conflicting values for `different_locks`",
-                    )
-                except AssertionError as exception:
-                    info.different_locks = False  # avoid deadlock, assume a shared lock
-                    logger.exception(exception)
-                    raise
-
-                info.waiters += 1
-
-        def __exit__(self, *exc_args) -> bool:
-            with self._multi_condition._internal_lock:
-                info = self._multi_condition._external_conditions[self._external_condition]
-                info.waiters -= 1
-                if info.waiters == 0:
-                    self._multi_condition._external_conditions.pop(self._external_condition)
-
-    def __init__(self, lock: "Lock | RLock | RWLock") -> None:
-        self._internal_lock = lock
-        self._internal_condition = Condition(lock=lock)
-        self._external_conditions = dict[Condition, MultiCondition.ConditionInfo]()
-
-    def __hash__(self) -> int:
-        return hash(self._internal_condition)
-
-    def __enter__(self):
-        return self._internal_lock.__enter__()
-
-    def __exit__(self, *args):
-        return self._internal_lock.__exit__(*args)
-
-    def notify_also(
-        self,
-        condition: "Condition | MultiCondition",
-        *,
-        different_locks: bool,
-    ) -> NotifyAlsoContext:
-        return MultiCondition.NotifyAlsoContext(self, condition, different_locks=different_locks)
-
-    def wait(self, timeout: float | None) -> bool:
-        """Must be locked"""
-        return self._internal_condition.wait(timeout=timeout)
-
-    def wait_for(self, predicate: Callable[[], bool], timeout: float | None) -> bool:
-        """Must be locked"""
-        return self._internal_condition.wait_for(predicate, timeout=timeout)
-
-    def notify(self, n: int = 1) -> None:
-        """Must be locked"""
-
-        self._internal_condition.notify(n)
-
-        # to ensure correct iteration, capture the current state with a list
-        for external_condition, info in list(self._external_conditions.items()):
-            if info.different_locks:
-                with external_condition:
-                    external_condition.notify(n)
-            else:
-                external_condition.notify(n)
-
-    def notify_all(self) -> None:
-        """Must be locked"""
-
-        self._internal_condition.notify_all()
-
-        # to ensure correct iteration, capture the current state with a list
-        for external_condition, info in list(self._external_conditions.items()):
-            if info.different_locks:
-                with external_condition:
-                    external_condition.notify_all()
-            else:
-                external_condition.notify_all()
-
-    def notifyAll(self) -> None:
-        """Must be locked"""
-
-        self.notify_all()
-
-
-# ------------------------------------------------------------------------------------------------ #
-#                                              Future                                              #
-# ------------------------------------------------------------------------------------------------ #
-
-
-class Future(Generic[T1]):
+class Event:
     class State(enum.Enum):
         PENDING = enum.auto()
-        IN_PROGRESS = enum.auto()
-        IN_PROGRESS_ABORT = enum.auto()
-        FINISHED_CLEAN = enum.auto()
-        FINISHED_BY_EXCEPTION = enum.auto()
-        FINISHED_BY_ABORT = enum.auto()
+        EMITTED = enum.auto()
+        ABORTED = enum.auto()
 
-    class AbortedError(Exception):
-        ...
+    def __init__(self):
+        self._cond = Condition()
+        self._state = Event.State.PENDING
 
-    def __init__(self, task: "Task[T1]"):
-        self._task = task
-
-        self._mutex = Lock()
-        self._state = Future.State.PENDING
-        self._state_changed = MultiCondition(lock=self._mutex)
-
-        self._result: T1 | None = None
-        self._exception: Exception | None = None
+    def __del__(self):
+        assert self._state != Event.State.PENDING
 
     @property
-    def state(self) -> State:
-        return self._state
+    def is_pending(self) -> bool:
+        return self._state == Event.State.PENDING
 
     @property
-    def state_changed(self) -> MultiCondition:
-        return self._state_changed
+    def is_emitted(self) -> bool:
+        return self._state == Event.State.EMITTED
 
-    def is_in_progress(self) -> bool:
-        return self._state in [
-            Future.State.IN_PROGRESS,
-            Future.State.IN_PROGRESS_ABORT,
-        ]
-
-    def is_finished(self, finishing_aborted: bool) -> bool:
-        return self._state in [
-            Future.State.FINISHED_CLEAN,
-            Future.State.FINISHED_BY_EXCEPTION,
-            Future.State.FINISHED_BY_ABORT,
-        ] or (not finishing_aborted and self._state == Future.State.IN_PROGRESS_ABORT)
-
+    @property
     def is_aborted(self) -> bool:
-        return self._state in [Future.State.IN_PROGRESS_ABORT, Future.State.FINISHED_BY_ABORT]
+        return self._state == Event.State.ABORTED
 
-    def abort(self) -> bool:
-        with self._mutex:
-            if self._state == Future.State.PENDING:
-                self._set_state__locked(Future.State.IN_PROGRESS_ABORT)
-                self._set_state__locked(Future.State.FINISHED_BY_ABORT)
-                logger.debug(f"Aborting a pending task ({repr(self._task)})")
+    def emit(self) -> bool:
+        assert not self.is_emitted
 
-            elif not self.is_finished(finishing_aborted=False):
-                self._set_state__locked(Future.State.IN_PROGRESS_ABORT)
-                logger.debug(f"Aborting a running task ({repr(self._task)})")
-        return self.is_aborted()
+        with self._cond:
+            if self.is_pending:
+                self._state = Event.State.EMITTED
+            self._cond.notify_all()
+        return self.is_emitted
 
-    def _abort__locked(self) -> bool:
-        assert self._mutex.locked()
+    def abort(self) -> None:
+        with self._cond:
+            if self.is_pending:
+                self._state = Event.State.ABORTED
+                self._cond.notify_all()
 
-    def result(self, timeout: float | None = 0) -> T1:
-        if self.exception(timeout) is not None:
-            raise self._exception
+    def wait(self, timeout: float | None = None) -> bool:
+        with self._cond:
+            return self._cond.wait_for(lambda: not self.is_pending, timeout=timeout)
 
-        if self.is_aborted():
-            raise Future.AbortedError(f"Task ({repr(self._task)}) aborted")
 
-        return self._result
+# ------------------------------------------------------------------------------------------------ #
+#                                         PredicateEmitter                                         #
+# ------------------------------------------------------------------------------------------------ #
 
-    def exception(self, timeout: float | None = 0) -> Exception | None:
-        # exception can be set only on non-aborted tasks
-        if (
-            timeout is not None and timeout <= 0 and not self.is_finished(finishing_aborted=False)
-        ) or (
-            (timeout is None or timeout > 0) and self.wait(finishing_aborted=False, timeout=timeout)
-        ):
-            raise TimeoutError(f"Task ({repr(self._task)}) not resolved in time")
-        return self._exception
 
-    def wait(self, finishing_aborted: bool, timeout: float | None = None) -> bool:
-        with self._state_changed:
-            return self._state_changed.wait_for(
-                lambda: self.is_finished(finishing_aborted=finishing_aborted),
-                timeout=timeout,
+class PredicateEmitter:
+    @dclass.dataclass(frozen=True)
+    class Case:
+        event: Event = dclass.field(kw_only=True)
+        predicate_kwargs: dict[str, Any] = dclass.field(kw_only=True)
+        aborts: bool = dclass.field(kw_only=True)
+
+        def finish(self) -> None:
+            if self.aborts:
+                self.event.abort()
+            else:
+                self.event.emit()
+
+    def __init__(self, predicate: Callable[..., bool]) -> None:
+        self._predicate = predicate
+        self._cases = list[PredicateEmitter.Case]()
+
+    def create_emit_event__locked(self, **predicate_kwargs) -> Event:
+        return self._add_case__locked(
+            PredicateEmitter.Case(
+                event=Event(),
+                predicate_kwargs=predicate_kwargs,
+                aborts=False,
             )
+        )
 
-    def _set_exception__locked(self, exception: Exception, raise_now: bool) -> None:
-        assert self._mutex.locked()
-
-        self._exception = exception
-        self._set_state__locked(Future.State.FINISHED_BY_EXCEPTION)
-        if raise_now:
-            raise exception
-
-    def _set_state__locked(self, new_state: "Future.State") -> None:
-        assert self._mutex.locked()
-
-        if (
-            (
-                self._state == Future.State.PENDING
-                and new_state not in [Future.State.IN_PROGRESS, Future.State.IN_PROGRESS_ABORT]
+    def add_event_to_abort__locked(self, event: Event, **predicate_kwargs) -> None:
+        self._add_case__locked(
+            PredicateEmitter.Case(
+                event=event,
+                predicate_kwargs=predicate_kwargs,
+                aborts=True,
             )
-            or (
-                self._state == Future.State.IN_PROGRESS
-                and new_state
-                not in [
-                    Future.State.IN_PROGRESS_ABORT,
-                    Future.State.FINISHED_CLEAN,
-                    Future.State.FINISHED_BY_ABORT,
-                    Future.State.FINISHED_BY_EXCEPTION,
-                ]
-            )
-            or self.is_finished(finishing_aborted=True)
-        ):
-            logger.error(
-                f"Invalid task ({repr(self._task)}) state transition: {self._state} -> {new_state} "
-                "- this should never happen, please report this error"
-            )
+        )
 
-        self._state = new_state
-        self._state_changed.notify_all()
+    def _add_case__locked(self, case: "PredicateEmitter.Case") -> Event:
+        self._remove_expiried_cases__locked()
+
+        if case.event.is_pending:
+            if self._predicate(**case.predicate_kwargs):
+                case.finish()
+            else:
+                self._cases.append(case)
+        return case.event
+
+    def _remove_expiried_cases__locked(self) -> None:
+        cases_left = []
+        for case in self._cases:
+            assert not case.event.is_emitted or case.aborts
+
+            if case.event.is_pending:
+                cases_left.append(case)
+        self._cases = cases_left
+
+    def evaluate_and_emit__locked(self) -> None:
+        cases_left = []
+        for case in self._cases:
+            if case.event.is_pending:
+                if self._predicate(**case.predicate_kwargs):
+                    case.finish()
+                else:
+                    cases_left.append(case)
+        self._cases = cases_left
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -319,32 +197,231 @@ class Future(Generic[T1]):
 
 @dclass.dataclass(frozen=True)
 class Task(Exception, Generic[T1]):
-    class UnexpectedStateError(Exception):
-        def __init__(self, expected_state: str, observed_state: Future.State) -> None:
-            super().__init__(f"{expected_state}, state={observed_state}")
-
     class Abort(Exception):
         def __init__(self):
             super().__init__("`Task.Abort` not caught, please report this error")
 
+    # ------------------------------------------- Stage ------------------------------------------ #
+
+    class Stage(enum.Enum):
+        class InvalidTransitionError(Exception):
+            ...
+
+        PENDING = enum.auto()
+        IN_PROGRESS = enum.auto()
+        IN_PROGRESS_ABORT = enum.auto()
+        FINISHED_CLEAN = enum.auto()
+        FINISHED_BY_ABORT = enum.auto()
+        FINISHED_BY_EXCEPTION = enum.auto()
+
+        def __bool__(self) -> bool:
+            return self == Task.Stage.FINISHED_CLEAN
+
+        def is_in_progress(self) -> bool:
+            return self in [
+                Task.Stage.IN_PROGRESS,
+                Task.Stage.IN_PROGRESS_ABORT,
+            ]
+
+        def is_aborted(self) -> bool:
+            return self in [
+                Task.Stage.IN_PROGRESS_ABORT,
+                Task.Stage.FINISHED_BY_ABORT,
+            ]
+
+        def is_finished(self, *, finishing_aborted: bool) -> bool:
+            return self in [
+                Task.Stage.FINISHED_CLEAN,
+                Task.Stage.FINISHED_BY_EXCEPTION,
+                Task.Stage.FINISHED_BY_ABORT,
+            ] or (not finishing_aborted and self == Task.Stage.IN_PROGRESS_ABORT)
+
+        @staticmethod
+        def validate_transition(stage: "Task.Stage", next_stage: "Task.Stage") -> Exception | None:
+            if (
+                (
+                    stage == Task.Stage.PENDING
+                    and next_stage
+                    not in [
+                        Task.Stage.IN_PROGRESS,
+                        Task.Stage.IN_PROGRESS_ABORT,
+                    ]
+                )
+                or (
+                    stage == Task.Stage.IN_PROGRESS
+                    and next_stage
+                    not in [
+                        Task.Stage.IN_PROGRESS_ABORT,
+                        Task.Stage.FINISHED_CLEAN,
+                        Task.Stage.FINISHED_BY_ABORT,
+                        Task.Stage.FINISHED_BY_EXCEPTION,
+                    ]
+                )
+                or (
+                    stage == Task.Stage.IN_PROGRESS_ABORT
+                    and next_stage
+                    not in [
+                        Task.Stage.FINISHED_BY_ABORT,
+                        Task.Stage.FINISHED_BY_EXCEPTION,
+                    ]
+                )
+                or stage.is_finished(finishing_aborted=True)
+            ):
+                return Task.Stage.InvalidTransitionError(
+                    f"Invalid task stage transition: {stage} -> {next_stage} "
+                    "- this should never happen, please report this error"
+                )
+            return None
+
+    # ------------------------------------------- State ------------------------------------------ #
+
+    @dclass.dataclass
+    class State(Generic[T2]):
+        _task: "Task" = dclass.field(repr=False)
+        _stage: "Task.Stage"
+        result: T2 | None = None
+        exception: Exception | None = None
+        mutex: Lock = dclass.field(default_factory=Lock)
+
+        def __post_init__(self):
+            self._is_finished = PredicateEmitter(
+                # stage has value semantics, so we have to use a lambda here
+                lambda finishing_aborted: self.stage.is_finished(
+                    finishing_aborted=finishing_aborted
+                )
+            )
+
+        @property
+        def task(self) -> "Task.Stage":
+            return self._task
+
+        @property
+        def stage(self) -> "Task.Stage":
+            return self._stage
+
+        def set_stage__locked(self, new_stage: "Task.Stage") -> None:
+            assert self.mutex.locked()
+
+            transition_exception = Task.Stage.validate_transition(self._stage, new_stage)
+            if transition_exception is not None:
+                transition_exception.add_note(f"({self.task})")
+                # this exception should be caught by an executor
+                raise transition_exception
+
+            self._stage = new_stage
+            self._is_finished.evaluate_and_emit__locked()
+
+        def create_finished_event__locked(self, *, finishing_aborted: bool) -> Event:
+            assert self.mutex.locked()
+
+            return self._is_finished.create_emit_event__locked(finishing_aborted=finishing_aborted)
+
+        def add_event_to_abort_on_finish__locked(
+            self,
+            event: Event,
+            *,
+            finishing_aborted: bool,
+        ) -> None:
+            assert self.mutex.locked()
+
+            self._is_finished.add_event_to_abort__locked(event, finishing_aborted=finishing_aborted)
+
+        def finish_with_exception__locked(self, exception: Exception, *, raise_now: bool) -> None:
+            assert self.mutex.locked()
+            assert not self.stage.is_finished(finishing_aborted=True)
+
+            if self.stage == Task.Stage.PENDING:
+                self.set_stage__locked(Task.Stage.IN_PROGRESS_ABORT)
+
+            self._exception = exception
+            self.set_stage__locked(Task.Stage.FINISHED_BY_EXCEPTION)
+            if raise_now:
+                raise exception
+
+        def finish_without_running__locked(self) -> None:
+            assert self.mutex.locked()
+            assert self._stage == Task.Stage.PENDING
+
+            self.set_stage__locked(Task.Stage.IN_PROGRESS)
+            self.set_stage__locked(Task.Stage.FINISHED_CLEAN)
+
+    # ------------------------------------------ Future ------------------------------------------ #
+
+    class Future(Generic[T2]):
+        class AbortedError(Exception):
+            ...
+
+        def __init__(self, state: "Task.State[T2]"):
+            self._state = state
+
+        @property
+        def stage(self) -> "Task.Stage":
+            return self._state.stage
+
+        def abort(self) -> bool:
+            with self._state.mutex:
+                if self.stage == Task.Stage.PENDING:
+                    logger.debug("Aborting a pending task", details=self._state.task)
+                    self._state.set_stage__locked(Task.Stage.IN_PROGRESS_ABORT)
+                    self._state.set_stage__locked(Task.Stage.FINISHED_BY_ABORT)
+                elif not self.stage.is_finished(finishing_aborted=False):
+                    logger.debug("Aborting a running task", details=self._state.task)
+                    self._state.set_stage__locked(Task.Stage.IN_PROGRESS_ABORT)
+            return self.stage.is_aborted()
+
+        def result(self, timeout: float | None = 0) -> T2:
+            # finishing_aborted=False - result can be set only on non-aborted tasks
+            if (
+                timeout is not None
+                and timeout <= 0
+                and not self.stage.is_finished(finishing_aborted=False)
+            ) or (
+                (timeout is None or timeout > 0)
+                and not self.wait(finishing_aborted=False, timeout=timeout)
+            ):
+                raise TimeoutError("Task not finished in time", details=self._task)
+
+            if self._state.exception is not None:
+                raise self._state.exception
+
+            if self.stage.is_aborted():
+                raise Task.Future.AbortedError("Task was aborted", details=self._task)
+
+            return self._state.result
+
+        def wait(self, finishing_aborted: bool, timeout: float | None = None) -> bool:
+            return self.create_finished_event(finishing_aborted=finishing_aborted).wait(
+                timeout=timeout
+            )
+
+        def create_finished_event(self, *, finishing_aborted: bool) -> Event:
+            with self._state.mutex:
+                return self._state.create_finished_event__locked(
+                    finishing_aborted=finishing_aborted
+                )
+
+    # --------------------------------------- FinishContext -------------------------------------- #
+
+    class UnexpectedStageError(Exception):
+        def __init__(self, expected_stage: str, state: "Task.State"):
+            super().__init__(f"{expected_stage}, stage={state.stage} ({state.task})")
+
     class FinishContext(Generic[T2]):
-        def __init__(self, future: Future[T2]) -> None:
-            self._future = future
+        def __init__(self, state: "Task.State[T2]"):
+            self._state = state
             self._active = False
 
         def __enter__(self) -> "Task.FinishContext[T2]":
-            self._future._mutex.acquire()
+            self._state.mutex.acquire()
             try:
                 assert not self._active
 
-                if self._future.is_aborted():
+                if not self._state.stage.is_in_progress():
+                    raise Task.UnexpectedStageError("Task not in-progress", self._state)
+                if self._state.stage.is_aborted():
                     raise Task.Abort()
-                if not self._future.is_in_progress():
-                    raise Task.UnexpectedStateError(
-                        f"Task ({repr(self._future._task)}) not in-progress", self._future.state
-                    )
             except:
-                self._future._mutex.release()
+                self._state.mutex.release()
                 raise
 
             self._active = True
@@ -352,45 +429,41 @@ class Task(Exception, Generic[T1]):
 
         def __exit__(self, exc_type: type[Exception] | None, exc: Exception, traceback) -> bool:
             try:
-                if self._future.is_finished(finishing_aborted=True):
-                    raise RuntimeError(
-                        "Task already finished. Only Task.Executor and Task.FinishContext "
-                        "can finish tasks"
-                    )
+                if self._state.stage.is_finished(finishing_aborted=True):
+                    # Only `Task.Executor` and `Task.FinishContext` can finish tasks
+                    raise Task.UnexpectedStageError("Task already finished", self._state)
 
                 if exc_type is None:
-                    self._future._set_state__locked(Future.State.FINISHED_CLEAN)
+                    self._state.set_stage__locked(Task.Stage.FINISHED_CLEAN)
                 assert self._active
 
                 return False
             finally:
                 self._active = False
-                self._future._mutex.__exit__(exc_type, exc, traceback)
+                self._state.mutex.release()
 
-        def set_result(self, result: T2) -> None:
-            assert self._active
-            assert self._future._mutex.locked()
-            assert self._future.is_in_progress()
-            self._future._result = result
-
-        def abort(self) -> None:
-            assert self._active
-            assert self._future._mutex.locked()
-            assert self._future.is_in_progress()
-
-            raise Task.Abort()
+        @property
+        def active(self) -> bool:
+            return self._active
 
     class Executor(Generic[T2]):
-        def __init__(self, future: Future[T2]) -> None:
-            self._future = future
-            self._finish_context = Task.FinishContext[T2](self._future)
+        def __init__(self, state: "Task.State[T2]") -> None:
+            self._state = state
+            self._finish_context = Task.FinishContext[T2](state)
             self._active = False
 
         def __enter__(self) -> "Task.Executor[T2]":
-            if not self._future.is_in_progress():
-                raise Task.UnexpectedStateError(
-                    f"Task ({repr(self._future._task)}) not in-progress", self._future.state
-                )
+            with self._state.mutex:
+                try:
+                    assert not self._active
+
+                    if self._state.stage.is_aborted():
+                        raise Task.Abort()
+                    if self._state.stage != Task.Stage.IN_PROGRESS:
+                        raise Task.UnexpectedStageError("Task not in-progress", self._state)
+                except Exception as exception:
+                    if not self._state.stage.is_finished(finishing_aborted=True):
+                        self._state.finish_with_exception__locked(exception, raise_now=True)
 
             self._active = True
             return self
@@ -398,111 +471,118 @@ class Task(Exception, Generic[T1]):
         def __exit__(self, exc_type: type[Exception] | None, exc: Exception, traceback) -> bool:
             exception_handled = False
 
-            with self._future._mutex:
+            with self._state.mutex:
                 if (
-                    self._future.is_finished(finishing_aborted=True)
-                    and self._future.state != Future.State.FINISHED_CLEAN
+                    self._state.stage.is_finished(finishing_aborted=True)
+                    and self._state.stage != Task.Stage.FINISHED_CLEAN
                 ):
-                    raise RuntimeError(
-                        "Task already finished. Only Task.Executor and Task.FinishContext "
-                        "can finish tasks"
-                    )
+                    # Only `Task.Executor` and `Task.FinishContext` can finish tasks
+                    raise Task.UnexpectedStageError("Task already finished", self._state)
 
-                if not self._future.is_finished(finishing_aborted=True):
+                if not self._state.stage.is_finished(finishing_aborted=True):
                     if exc_type == Task.Abort:
-                        self._future._set_state__locked(Future.State.FINISHED_BY_ABORT)
+                        logger.debug("Task self-aborted", details=self._state.task)
+                        self._state.set_stage__locked(Task.Stage.FINISHED_BY_ABORT)
                         exception_handled = True
                     elif exc_type is not None:
-                        self._future._set_exception__locked(exc, raise_now=False)
+                        logger.error("Task crashed", details=self._state.task)
+                        self._state.finish_with_exception__locked(exc, raise_now=False)
                         exception_handled = False
                     else:
-                        self._future._set_exception__locked(
-                            Task.UnexpectedStateError(
-                                f"Task ({repr(self._future._task)}) finished running but did not "
-                                "mark itself as finished",
-                                self._future.state,
+                        logger.error("Task implementaion error", details=self._state.task)
+                        self._state.finish_with_exception__locked(
+                            Task.UnexpectedStageError(
+                                "Task finished running but did not mark itself as finished",
+                                self._state,
                             ).with_traceback(traceback),
                             raise_now=True,
                         )
+                else:
+                    assert exc_type != Task.Abort
 
             assert self._active
             return exception_handled
 
         @property
-        def is_aborted(self) -> bool:
+        def stage(self) -> "Task.Stage":
             assert self._active
 
-            return self._future.is_aborted()
+            return self._state.stage
 
-        def abort(self) -> None:
-            assert self._active
-
-            if self._finish_context._active:
-                self._finish_context.abort()
-            else:
-                self._future.abort()
-            raise Task.Abort()
-
-        def finish(self, result: T2 = None) -> None:
-            assert self._active
-
-            with self._finish_context:
-                self._finish_context.set_result(result)
-
-        def finish_with(self, fn: Callable[[], T2], /, *args, **kwargs) -> None:
-            assert self._active
-
-            with self._finish_context:
-                self._finish_context.set_result(fn(*args, **kwargs))
-
+        @property
         def finish_context(self) -> "Task.FinishContext[T2]":
             assert self._active
 
             return self._finish_context
 
+        def set_result(self, result: T2) -> None:
+            assert self._active
+            assert self.finish_context.active
+            assert self._state.mutex.locked()
+            assert self._state.stage.is_in_progress()
+            self._state.result = result
+
+        def exit_if_aborted(self) -> None:
+            if self.stage.is_aborted():
+                self.abort()
+
+        def abort(self) -> None:
+            assert self._active
+
+            raise Task.Abort()
+
+        def finish(self, result: T2 = None) -> None:
+            assert self._active
+            assert not self.finish_context.active
+
+            with self.finish_context:
+                self.set_result(result)
+
+        def finish_with(self, fn: Callable[..., T2], /, *args, **kwargs) -> None:
+            assert self._active
+            assert not self.finish_context.active
+
+            with self.finish_context:
+                self.set_result(fn(*args, **kwargs))
+
         def abort_aware_wait_for_future(
             self,
-            future: Future,
+            future: "Task.Future",
+            *,
             finishing_aborted: bool = False,
             timeout: float | None = None,
         ) -> bool:
-            """This function locks this future's lock on its own"""
             assert self._active
-            assert future is not self._future
+            assert future._state.task is not self._state.task
 
+            is_finished_event = future.create_finished_event(finishing_aborted=finishing_aborted)
             return self.abort_aware_wait(
-                predicate=lambda: future.is_finished(finishing_aborted=finishing_aborted),
-                condition=future.state_changed,
-                different_locks=True,  # every future has a unique lock
+                event=is_finished_event,
+                finishing_aborted=finishing_aborted,
                 timeout=timeout,
             )
 
         def abort_aware_wait(
             self,
-            predicate: Callable[[], bool],
-            condition: Condition,
+            event: Event,
             *,
-            different_locks: bool,
+            finishing_aborted: bool = False,
             timeout: float | None = None,
         ) -> bool:
-            """This function locks this future's lock on its own"""
             assert self._active
 
-            with self._future.state_changed.notify_also(condition, different_locks=different_locks):
-                with condition:
-                    return condition.wait_for(
-                        lambda: (predicate() or self._future.is_finished(finishing_aborted=False)),
-                        timeout=timeout,
-                    )
+            with self._state.mutex:
+                self._state.add_event_to_abort_on_finish__locked(
+                    event, finishing_aborted=finishing_aborted
+                )
+            result = event.wait(timeout=timeout)
+            self.exit_if_aborted()
+            return result
 
     id: Any = dclass.field(default=None, kw_only=True)
-    future: Future[T1] = dclass.field(init=False, compare=False, repr=False)
     already_finished: dclass.InitVar[bool] = dclass.field(default=False, kw_only=True)
-
-    def __post_init__(self, already_finished: bool):
-        super().__setattr__("future", Future(task=self))
-        if already_finished:
-            self.finish_without_running()
+    future: "Task.Future[T1]" = dclass.field(init=False, repr=False)
+    _state: "Task.State[T1]" = dclass.field(init=False)
 
     def __hash__(self) -> int:
         return id(self)
@@ -510,46 +590,51 @@ class Task(Exception, Generic[T1]):
     def __eq__(self, other: Any) -> bool:
         return other is self
 
+    def __post_init__(self, already_finished: bool):
+        init_stage = Task.Stage.FINISHED_CLEAN if already_finished else Task.Stage.PENDING
+        super().__setattr__("_state", Task.State[T1](self, init_stage))
+        super().__setattr__("future", Task.Future[T1](state=self._state))
+
     def __del__(self):
-        with self.future._mutex:
-            if not self.future.is_finished(finishing_aborted=True):
-                if not self.future.is_in_progress():
-                    self.future._set_state__locked(Future.State.IN_PROGRESS)
-                self.future._set_exception__locked(
-                    Task.UnexpectedStateError(
-                        f"Task ({repr(self)}) never finished", self.future.state
-                    ),
+        with self._state.mutex:
+            if not self._state.stage.is_finished(finishing_aborted=True):
+                self._state.finish_with_exception__locked(
+                    Task.UnexpectedStageError("Task never finished", self._state),
                     raise_now=True,
                 )
 
+    def __str__(self) -> str:
+        return repr(self)
+
     def finish_without_running(self) -> None:
-        with self.future._mutex:
-            if self.future.state == Future.State.PENDING:
-                self.future._set_state__locked(Future.State.IN_PROGRESS)
-                self.future._set_state__locked(Future.State.FINISHED_CLEAN)
-            else:
-                exception = Task.UnexpectedStateError("Should be pending", self.future.state)
-                if not self.future.is_finished(finishing_aborted=True):
-                    self.future._set_exception__locked(exception, raise_now=False)
-                raise exception
+        with self._state.mutex:
+            self._state.finish_without_running__locked()
 
-    def execute(self) -> "Task.Executor":
-        return Task.Executor(self.future)
+    def execute_and_finish(self, fn: Callable, /, *args, **kwargs) -> "Task.Stage":
+        def job(executor: Task.Executor):
+            with executor.finish_context:
+                executor.set_result(fn(*args, **kwargs))
 
-    def execute_and_finish_with(self, fn: Callable, /, *args, **kwargs) -> None:
-        with self.execute() as executor:
-            executor.finish_with(fn, *args, **kwargs)
+        return self.execute(job)
 
-    def run_if_unresolved(self) -> None:
+    def execute(self, fn: Callable[["Task.Executor"], None]) -> "Task.Stage":
+        try:
+            with Task.Executor(self._state) as executor:
+                fn(executor)
+        except Task.Abort:
+            assert self._state.stage.is_finished()
+        return self._state.stage
+
+    def run_pending(self) -> None:
         can_run = False
-        with self.future._mutex:
-            if not self.future.is_in_progress():
-                self.future._set_state__locked(Future.State.IN_PROGRESS)
+        with self._state.mutex:
+            if self._state.stage == Task.Stage.PENDING:
+                self._state.set_stage__locked(Task.Stage.IN_PROGRESS)
                 can_run = True
         if can_run:
-            logger.debug(f"Running a task: {repr(self)}")
+            logger.debug("Running a task", details=self)
             self.run_impl()
-            logger.debug(f"Finished a task: {repr(self)}")
+            logger.debug("Finished a task", details=self)
 
     def run_impl(self) -> None:
         """Task implementation
@@ -572,14 +657,10 @@ class Task(Exception, Generic[T1]):
 class FnTask(Task[T1]):
     fn: Callable[[Task.Executor[T1]], T1]
 
-    def run_impl(self) -> None:
-        # finish early if aborted
-        with self.future._mutex:
-            if self.future.is_aborted():
-                self.future._set_state__locked(Future.State.FINISHED_BY_ABORT)
+    __hash__ = Task[T1].__hash__
 
-        with self.execute() as executor:
-            self.fn(executor)
+    def run_impl(self) -> None:
+        self.execute(self.fn)
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -591,7 +672,7 @@ class TaskQueue:
     def __init__(self, mutex: Lock = None) -> None:
         self._mutex = mutex or Lock()
         self._tasks = deque[Task]()
-        self._task_added = MultiCondition(lock=self._mutex)
+        self._task_added = PredicateEmitter(predicate=lambda: not self.is_empty())
 
         self._current_task = Task(already_finished=True, id="DUMMY_INIT_TASK")
 
@@ -599,18 +680,14 @@ class TaskQueue:
     def mutex(self) -> Lock:
         return self._mutex
 
-    @property
-    def task_added(self) -> MultiCondition:
-        return self._task_added
-
     def is_empty(self) -> bool:
         return len(self._tasks) == 0
 
-    def clear(self, abort_current_task: bool = True) -> None:
+    def clear(self, *, abort_current_task: bool = True) -> None:
         with self.mutex:
-            self.clear__locked(abort_current_task)
+            self.clear__locked(abort_current_task=abort_current_task)
 
-    def clear__locked(self, abort_current_task: bool) -> None:
+    def clear__locked(self, *, abort_current_task: bool) -> None:
         assert self.mutex.locked()
 
         if abort_current_task:
@@ -619,25 +696,11 @@ class TaskQueue:
             task.future.abort()
         self._tasks.clear()
 
-    def run_all(self, timeout: float | None = 0) -> None:
-        assert self._current_task.future.is_finished(
-            finishing_aborted=True
-        ), f"{self._current_task} should be already finished"
-
-        if timeout is None or timeout > 0:
-            with self.task_added:
-                self.task_added.wait_for(lambda: not self.is_empty(), timeout=timeout)
-
-        while not self.is_empty():
-            with self.mutex:
-                self._current_task = self._tasks.popleft()
-            self._current_task.run_if_unresolved()  # this should usually raise a task exception
-
-    def add_task(self, task: Task, apply_invalidation_rules: bool = False) -> None:
+    def add_task(self, task: Task, *, apply_invalidation_rules: bool = False) -> None:
         with self.mutex:
-            self.add_task__locked(task, apply_invalidation_rules)
+            self.add_task__locked(task, apply_invalidation_rules=apply_invalidation_rules)
 
-    def add_task__locked(self, task: Task, apply_invalidation_rules: bool = False) -> None:
+    def add_task__locked(self, task: Task, *, apply_invalidation_rules: bool = False) -> None:
         assert self.mutex.locked()
 
         if apply_invalidation_rules:
@@ -653,7 +716,28 @@ class TaskQueue:
             self._tasks = valid_tasks
 
         self._tasks.append(task)
-        self.task_added.notify_all()
+        self._task_added.evaluate_and_emit__locked()
+
+    def run_all(self, timeout: float | None = 0) -> None:
+        assert self._current_task.future.stage.is_finished(
+            finishing_aborted=True
+        ), f"Previous task should be already finished ({self._current_task})"
+
+        if timeout is None or timeout > 0:
+            self.create_task_added_event().wait(timeout=timeout)
+
+        while not self.is_empty():
+            with self.mutex:
+                self._current_task = self._tasks.popleft()
+            self._current_task.run_pending()  # this can raise a task exception
+
+    def create_task_added_event(self) -> Event:
+        with self.mutex:
+            return self._task_added.create_emit_event__locked()
+
+    def add_event_to_abort_on_task_added(self, event: Event) -> None:
+        with self.mutex:
+            self._task_added.add_event_to_abort__locked(event)
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -663,7 +747,7 @@ class TaskQueue:
 
 class ThreadPool(ABC):
     @abstractmethod
-    def start(self, task: FnTask) -> Future:
+    def start(self, task: FnTask[T1]) -> Task.Future[T1]:
         raise NotImplementedError()
 
 
@@ -684,22 +768,17 @@ class PyThreadPool(ThreadPool):
         self._thread_pool = ThreadPoolExecutor(workers)
         self._running_tasks = set[FnTask]()
 
-    def start(self, task: FnTask) -> Future:
+    def start(self, task: FnTask[T1]) -> Task.Future[T1]:
         self._running_tasks.add(task)
 
         def job():
             try:
-                do_job_with_exception_logging(task.run_if_unresolved, args=[], kwargs={})
+                do_job_with_exception_logging(task.run_pending, args=[], kwargs={})
             finally:
                 self._running_tasks.remove(task)
 
         self._thread_pool.submit(job)
         return task.future
-        # try:
-        #     future = self._thread_pool.submit(do_job_with_exception_logging, job, args, kwargs)
-        #     future.result(timeout=0)
-        # except futures.TimeoutErrorTPE:
-        #     pass
 
 
 # ------------------------------------------------------------------------------------------------ #
@@ -712,9 +791,6 @@ class PyThreadSpawner(ThreadSpawner):
         Thread(target=do_job_with_exception_logging, args=[job, args, kwargs], daemon=True).start()
 
 
-def do_job_with_exception_logging(job: Callable, args: tuple = tuple(), kwargs: dict = {}) -> None:
-    try:
-        return job(*args, **kwargs)
-    except Exception as e:
-        logger.exception(e)
-        raise
+@logger.catch
+def do_job_with_exception_logging(job: Callable, args: tuple, kwargs: dict) -> None:
+    return job(*args, **kwargs)

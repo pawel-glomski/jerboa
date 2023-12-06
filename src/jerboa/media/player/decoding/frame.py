@@ -27,7 +27,7 @@ class PreMappedFrame(TimedAVFrame):
 
 @dataclass
 class MappedAudioFrame(TimedFrame):
-    audio_signal: np.ndarray
+    audio_signal: np.ndarray = field(repr=False)
 
 
 @dataclass
@@ -42,4 +42,4 @@ JbAudioFrame = MappedAudioFrame
 class JbVideoFrame(TimedFrame):
     width: int
     height: int
-    planes: list[np.ndarray[np.ubyte]]
+    planes: list[np.ndarray[np.ubyte]] = field(repr=False)

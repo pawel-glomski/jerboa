@@ -48,7 +48,7 @@ class Signal(ABC):
     class TooManySubscribers(Exception):
         pass
 
-    def __init__(self, /, *arg_names: str, max_subscribers: float = float("inf")):
+    def __init__(self, *arg_names: str, max_subscribers: float = float("inf")):
         self._arg_names = arg_names
         self._arg_names_set = set(arg_names)
         self._subscribers = list[Callable[[Signal.EmitArg], None]]()
@@ -92,9 +92,8 @@ class Signal(ABC):
                 )
             self._subscribers.append(_worker)
 
-    # TODO: remove these args after a commit
     @abstractmethod
-    def emit(self, /, **kwargs) -> Promise:
+    def emit(self, **kwargs) -> Promise:
         with self._mutex:
             emit_arg = Signal.EmitArg(
                 slot_kwargs=kwargs,

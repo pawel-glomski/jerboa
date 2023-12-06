@@ -1,10 +1,8 @@
 import math
-from typing import Callable
-from threading import Condition
 from bisect import bisect_left
 from dataclasses import dataclass, field
 
-from jerboa.core.multithreading import RWLock
+from jerboa.core.multithreading import RWLock, PredicateEmitter, Event
 
 
 @dataclass(frozen=True, slots=True)
@@ -104,7 +102,9 @@ class FragmentedTimeline:
         self._time_scope = -math.inf
 
         self._mutex = mutex or RWLock()
-        self._scope_extended__for_readers = Condition(lock=self._mutex.as_reader())
+        self._scope_extended = PredicateEmitter(
+            lambda target_scope: self.time_scope >= target_scope
+        )
 
         for section in init_sections or []:
             self.append_section(section)
@@ -123,10 +123,6 @@ class FragmentedTimeline:
 
         return self._time_scope
 
-    @property
-    def scope_extended__for_readers(self) -> Condition:
-        return self._scope_extended__for_readers
-
     def extend_time_scope(self, new_value: float):
         with self._mutex.as_writer():
             self._extend_time_scope__locked(new_value)
@@ -144,7 +140,7 @@ class FragmentedTimeline:
             raise ValueError(f"Scope cannot decrease: {self._time_scope=}, {extended_scope=}")
         if extended_scope > self._time_scope:
             self._time_scope = extended_scope
-            self._scope_extended__for_readers.notify_all()
+            self._scope_extended.evaluate_and_emit__locked()
 
     def get_sections(self) -> list[tuple[TMSection, float]]:
         with self._mutex.as_reader():
@@ -192,14 +188,6 @@ class FragmentedTimeline:
 
         Args:
             mapped_timepoint: The timepoint to be unmapped.
-
-            interrupt_condition: Condition that will be used to wait unit the scope covers the
-            requested timepoint. It must be locked before calling this function. When None, the wait
-            will be omitted.
-
-            interrupt_predicate: Callable that returns whether the wait should be interrupted.
-
-            timeout: How long to wait at most.
 
         Returns:
             If the timepoint is in scope:
@@ -269,7 +257,7 @@ class FragmentedTimeline:
                         involved_sections.append(overlap_section)
                     idx += 1
 
-                if end < self._sections[idx - 1].end:
+                if idx > 0 and end < self._sections[idx - 1].end:
                     next_timepoint = end
                 elif idx < len(self._sections):
                     next_timepoint = self._sections[idx].beg
@@ -277,3 +265,7 @@ class FragmentedTimeline:
                     next_timepoint = self._time_scope
 
             return (RangeMappingResult(mapped_beg, mapped_end, involved_sections), next_timepoint)
+
+    def create_scope_extended_event(self, target_scope: float) -> Event:
+        with self._mutex.as_writer():
+            return self._scope_extended.create_emit_event__locked(target_scope=target_scope)

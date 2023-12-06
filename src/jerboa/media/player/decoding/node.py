@@ -1,11 +1,12 @@
 import av
+import enum
 import numpy as np
 from collections import deque
 from collections.abc import Iterable
 from typing import Any, Callable, Optional
 from abc import ABC, abstractmethod
-from gmpy2 import mpq as FastFraction
 
+from jerboa.core.jbmath import Fraction
 from jerboa.core.timeline import FragmentedTimeline
 from jerboa.media import standardized_audio as std_audio
 from jerboa.media.core import MediaType
@@ -25,6 +26,11 @@ DEFAULT_MEAN_KEYFRAME_INTERVAL_SAMPLE_SIZE = 8
 
 
 class Node(ABC):
+    class ResetReason(enum.Enum):
+        NEW_CONTEXT = enum.auto()
+        HARD_DISCONTINUITY = enum.auto()  # seek
+        SOFT_DISCONTINUITY = enum.auto()  # skip
+
     class Discontinuity(Exception):
         ...
 
@@ -33,6 +39,7 @@ class Node(ABC):
 
     def __init__(
         self,
+        *,
         input_types: set[type],
         output_types: set[type],
         breaks_on_discontinuity: bool,
@@ -81,21 +88,24 @@ class Node(ABC):
             root_node = root_node.parent
         return root_node
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
+    def reset(self, context: DecodingContext, reason: ResetReason, *, recursive: bool) -> None:
         if recursive and self.child is not None:
-            self.child.reset(context, hard, recursive)
+            self.child.reset(context, reason, recursive=recursive)
 
-    def raise_discontinuity(self, context: DecodingContext) -> None:
-        """Soft-resets this node and its descendants. Resets execution if this node or any of its
+    def raise_discontinuity(self, context: DecodingContext, *, hard: bool) -> None:
+        """Resets this node and its descendants. Resets execution if this node or any of its
         descendants "breaks_on_discontinuity".
 
         This method introduces side-effects that may lead to unexpected node state of descendant
         nodes when execution eventually returns (from a `parent.pull()` call) to the descendant's
         `pull()` method. In such a case, the execution should be reset, which is signaled by the
-        `breaks_on_discontinuity` property.
-
+        `breaks_on_discontinuity` attribute of a node.
         """
-        self.reset(context, hard=False, recursive=True)
+        self.reset(
+            context,
+            Node.ResetReason.HARD_DISCONTINUITY if hard else Node.ResetReason.SOFT_DISCONTINUITY,
+            recursive=True,
+        )
 
         node = self
         while node is not None:
@@ -112,15 +122,15 @@ class Node(ABC):
                 node_output = self.pull(context)
                 repeats = 10
                 return node_output
+            except SkipDiscardedFramesSeekTask as skip_task:
+                skip_task.execute_and_finish(self._skip, context, skip_task.timepoint)
             except Node.Discontinuity:
                 repeats -= 1
-            except SkipDiscardedFramesSeekTask as skip_task:
-                with skip_task.execute() as executor:
-                    root_node = self.find_root_node()
-                    with executor.finish_context():
-                        context.seek(skip_task.timepoint)
-                        root_node.reset(context, hard=False, recursive=True)
         raise Node.DiscontinuitiesLimitExcededError()
+
+    def _skip(self, context: DecodingContext, timepoint: float) -> None:
+        context.seek(timepoint)
+        self.find_root_node().reset(context, Node.ResetReason.SOFT_DISCONTINUITY, recursive=True)
 
     @abstractmethod
     def pull(self, context: DecodingContext) -> Any | None:
@@ -137,9 +147,9 @@ class DemuxingNode(Node):
         )
         self._demuxer: Iterable[av.Packet] = None
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
-        self._demuxer = context.media.av.container.demux(context.media.av.stream)
-        super().reset(context, hard, recursive)
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
+        self._demuxer = context.media.avc.container.demux(context.media.avc.stream)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, _) -> av.Packet | None:
         try:
@@ -165,10 +175,10 @@ class KeyframeIntervalWatcherNode(Node):
         self._sample_size: int = 0
         self._last_keyframe_timepoint: float | None = None
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
         self._sample_size = 0
         self._last_keyframe_timepoint = None
-        super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> av.Packet | None:
         packet: av.Packet = self.parent.pull(context)
@@ -195,9 +205,9 @@ class DecodingNode(Node):
         )
         self._decoded_frames: deque[av.AudioFrame] | deque[av.VideoFrame] = deque()
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
         self._decoded_frames.clear()
-        super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> av.AudioFrame | av.VideoFrame | None:
         while True:
@@ -223,14 +233,14 @@ class AudioFrameTimingCorrectionNode(Node):
         self._last_frame_end_pts: int | None = None
         self._frame_time_base_standardizer: Callable[[av.AudioFrame], None] | None = None
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
         self._last_frame_end_pts = None
-        if hard:
+        if reason == Node.ResetReason.NEW_CONTEXT:
             self._frame_time_base_standardizer = lambda _: None  # do nothing by default
 
-            std_time_base = FastFraction(1, context.media.av.stream.sample_rate)
+            std_time_base = Fraction(1, context.media.avc.stream.sample_rate)
             frame_time_base_to_std_time_base = (
-                FastFraction(context.media.av.stream.time_base) / std_time_base
+                Fraction(context.media.avc.stream.time_base) / std_time_base
             )
             if frame_time_base_to_std_time_base != 1:
 
@@ -240,7 +250,7 @@ class AudioFrameTimingCorrectionNode(Node):
 
                 self._frame_time_base_standardizer = time_base_standardizer
 
-        super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> av.AudioFrame | None:
         frame = self.parent.pull(context)
@@ -291,9 +301,9 @@ class TimedVideoFrameCreationNode(Node):
         )
         self._frame: av.VideoFrame | None = None
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
         self._frame = None
-        super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> TimedAVFrame | None:
         if self._frame is None:
@@ -323,9 +333,9 @@ class AccurateSeekNode(Node):
         )
         self._returned_frame = False
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
         self._returned_frame = False
-        super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> TimedAVFrame | None:
         while True:
@@ -335,14 +345,14 @@ class AccurateSeekNode(Node):
                 context.min_timepoint - frame.end_timepoint >= context.mean_keyframe_interval
             ):
                 if context.last_seek_timepoint != context.min_timepoint:
-                    SkipDiscardedFramesSeekTask(context.min_timepoint).run_if_unresolved()
+                    SkipDiscardedFramesSeekTask(context.min_timepoint).run_pending()
 
                 # we cannot get any closer using "seek", so we drop all the frames until we get to
                 # the "min_timepoint"
 
                 # we have to signalize when the continuity has been broken
                 if self._returned_frame:
-                    self.raise_discontinuity(context)
+                    self.raise_discontinuity(context, hard=False)
 
                 continue  # drop the frame
 
@@ -361,13 +371,13 @@ class AudioIntermediateReformattingNode(Node):
         self._reformatter: AudioReformatter | None = None
         self._reformatted_frames = deque[av.AudioFrame]()
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
-        if hard:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
+        if reason == Node.ResetReason.NEW_CONTEXT:
             self._reformatter = AudioReformatter(context.media.intermediate_config)
         else:
             self._reformatter.reset()
         self._reformatted_frames.clear()
-        super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> av.AudioFrame | None:
         while True:
@@ -397,10 +407,10 @@ class FrameMappingPreparationNode(Node):
         self._timeline: FragmentedTimeline | None = None
         self._returned_frame = False
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
         self._returned_frame = False
         self._timeline = context.timeline
-        return super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> PreMappedFrame | None:
         while True:
@@ -408,17 +418,13 @@ class FrameMappingPreparationNode(Node):
 
             if frame is not None:
                 if frame.end_timepoint >= context.min_timepoint:
-                    # Wait for the frame to be in the timeline's scope.
-                    # This is kind of unintuitive, but instead of waiting for the timeline to be
-                    # updated, we wait for a task to be added, and treat timeline updates as
-                    # "interrupts". This way this thread can still be responsive.
-                    frame_in_scope = lambda: context.timeline.time_scope >= frame.end_timepoint
-                    while not frame_in_scope():
-                        context.tasks.run_all(
-                            wait_when_empty=True,
-                            interrupt_condition=self._timeline.scope_extended__for_readers,
-                            interrupt_predicate=frame_in_scope,
+                    while context.timeline.time_scope < frame.end_timepoint:
+                        scope_extended_event = context.timeline.create_scope_extended_event(
+                            frame.end_timepoint
                         )
+                        context.tasks.add_event_to_abort_on_task_added(scope_extended_event)
+                        scope_extended_event.wait()
+                        context.tasks.run_all()
 
                     # note the value of `beg` is `max(beg_timepoint, min_timepoint)`
                     # this assures the mapped frame will start exactly where it should
@@ -437,7 +443,7 @@ class FrameMappingPreparationNode(Node):
 
                 # dropping a frame
                 if self._returned_frame:
-                    self.raise_discontinuity(context)
+                    self.raise_discontinuity(context, hard=False)
 
                 continue  # try next frame
             return None  # no more frames
@@ -453,15 +459,15 @@ class FrameMappingNode(Node):
         )
         self._mapper: AudioMapper | VideoMapper = None
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
-        if hard:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
+        if reason == Node.ResetReason.NEW_CONTEXT:
             if context.media.intermediate_config.media_type == MediaType.AUDIO:
                 self._mapper = AudioMapper(context.media.intermediate_config)
             else:
                 self._mapper = VideoMapper()
-        else:
+        elif reason == Node.ResetReason.HARD_DISCONTINUITY:
             self._mapper.reset()
-        return super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> MappedAudioFrame | MappedVideoFrame | None:
         while True:
@@ -483,11 +489,11 @@ class AudioPresentationReformattingNode(Node):
         )
         self._wanted_dtype: np.dtype | None = None
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
         assert context.media.intermediate_config.sample_format == std_audio.SAMPLE_FORMAT_JB
         self._wanted_dtype = context.media.presentation_config.sample_format.dtype
 
-        return super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> JbAudioFrame | None:
         frame: MappedAudioFrame = self.parent.pull(context)
@@ -510,12 +516,12 @@ class VideoPresentationReformattingNode(Node):
         )
         self._reformatter: VideoReformatter | None = None
 
-    def reset(self, context: DecodingContext, hard: bool, recursive: bool) -> None:
-        if hard:
+    def reset(self, context: DecodingContext, reason: Node.ResetReason, *, recursive: bool) -> None:
+        if reason == Node.ResetReason.NEW_CONTEXT:
             self._reformatter = VideoReformatter(context.media.presentation_config)
         else:
             self._reformatter.reset()
-        super().reset(context, hard, recursive)
+        super().reset(context, reason, recursive=recursive)
 
     def pull(self, context: DecodingContext) -> JbVideoFrame | None:
         frame: MappedVideoFrame = self.parent.pull(context)

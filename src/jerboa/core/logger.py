@@ -1,20 +1,34 @@
-import logging
+import sys
+from loguru import logger
 from functools import lru_cache
 from typing import Callable
 
-NULL_LOGGER = logging.getLogger("jerboa_null")
-NULL_LOGGER.handlers = [logging.NullHandler()]
-NULL_LOGGER.propagate = False
 
-formatter = logging.Formatter("%(asctime)s - %(levelname)s - %(message)s")
+def _patch_extra(record) -> None:
+    if context := record["extra"]["context"]:
+        record["extra"]["context"] = f"<{context}> "
+    if details := record["extra"]["details"]:
+        record["extra"]["details"] = f"\n ↳ {details}"
 
-handler = logging.StreamHandler()
-handler.setFormatter(formatter)
 
-logger = logging.getLogger("jerboa")
-logger.addHandler(handler)
-# logger.setLevel(logging.WARNING)
-logger.setLevel(logging.DEBUG)
+logger.remove()
+logger.add(
+    sys.stderr,
+    format=(
+        "<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
+        "<level>{level: <8}</level> | "
+        "<cyan>{name}:{line}</cyan> | "
+        "<level>{extra[context]}{message}</level>"
+        "<light-black>{extra[details]}</light-black>"
+    ),
+)
+logger.configure(
+    extra={
+        "context": "",
+        "details": "",
+    }
+)
+logger = logger.patch(_patch_extra)
 
 
 @lru_cache(5)

@@ -3,7 +3,7 @@ from threading import Lock
 
 from jerboa.core.logger import logger
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask, Future
+from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask
 from jerboa.media.core import MediaType
 from .decoding.decoder import Decoder
 from .decoding.frame import JbVideoFrame
@@ -19,7 +19,7 @@ FRAME_RETRIES_MAX = 128  # at the start of playback usually ~32, but let's be sa
 
 
 class VideoPlayer:
-    class DeinitializeTask(Task):
+    class UninitializeTask(Task):
         ...
 
     @dataclass(frozen=True)
@@ -51,7 +51,7 @@ class VideoPlayer:
         self._timer: PlaybackTimer | None = None
 
     def __del__(self):
-        self.deinitialize(wait=True)
+        self.uninitialize()
 
     @property
     def fatal_error_signal(self) -> Signal:
@@ -77,73 +77,70 @@ class VideoPlayer:
     def is_initialized(self) -> bool:
         return self._state != PlayerState.UNINITIALIZED
 
-    def deinitialize(self) -> Future:
-        with self._mutex:
-            return self._deinitialize__locked()
+    @property
+    def reached_eof(self) -> bool:
+        return (
+            self._state != PlayerState.UNINITIALIZED
+            and self._decoder.is_done
+            and self._decoder.buffered_duration <= 0
+        )
 
-    def _deinitialize__locked(self) -> Future:
+    def uninitialize(self) -> Task.Future:
+        with self._mutex:
+            return self._uninitialize__locked()
+
+    def _uninitialize__locked(self) -> Task.Future:
         assert self._mutex.locked()
 
-        deinit_task = VideoPlayer.DeinitializeTask()
+        uninit_task = VideoPlayer.UninitializeTask()
         if self.state == PlayerState.UNINITIALIZED:
-            logger.debug("VideoPlayer: Player is already uninitialized")
-            deinit_task.finish_without_running()
+            logger.debug("Player is already uninitialized")
+            uninit_task.finish_without_running()
         else:
-            self._tasks.clear()  # aborts current task (if any is running)
-            self._tasks.add_task(deinit_task)
-        return deinit_task.future
+            self._tasks.clear(abort_current_task=True)
+            self._tasks.add_task(uninit_task)
+        return uninit_task.future
 
-    def initialize(self, decoder: Decoder, timer: PlaybackTimer) -> Future:
+    def initialize(self, decoder: Decoder, timer: PlaybackTimer) -> Task.Future:
         assert decoder.media_type == MediaType.VIDEO
 
         def _initialize(executor: Task.Executor):
-            logger.debug("VideoPlayer: Initializing...")
+            logger.debug("Initializing...")
             with self._mutex:
                 assert self._state == PlayerState.UNINITIALIZED
 
-                deinitialize_future = self._deinitialize__locked()
-                executor.abort_aware_wait_for_future(deinitialize_future, finishing_aborted=True)
-                if deinitialize_future.state != Future.State.FINISHED_CLEAN:
-                    logger.debug("VideoPlayer: Initializing... Failed (Deinitializing failed)")
-                    executor.abort()
-
-                with executor.finish_context():
-                    self._tasks.clear(abort_current_task=True)  # this task is not in _tasks
+                with executor.finish_context:
                     self._timer = timer
                     self._decoder = decoder
                     self.__thread__set_state__locked(PlayerState.SUSPENDED)
-                    logger.debug("VideoPlayer: Initializing... Successful")
+                    logger.debug("Initializing... Successful")
 
         task = FnTask(_initialize)
         self._thread_spawner.start(self.__thread, task)
         return task.future
 
     def __thread(self, init_task: Task) -> None:
-        init_task.run_if_unresolved()
+        init_task.run_pending()
         if self.state == PlayerState.UNINITIALIZED:
-            logger.debug("VideoPlayer: Initializing... Failed")
+            logger.debug("Initializing... Failed")
             return
         try:
             self.__thread__playback_loop()
-        except VideoPlayer.DeinitializeTask as deinit_task:
-            with deinit_task.execute() as executor:
-                logger.debug("VideoPlayer: Deinitializing...")
-                with executor.finish_context():
-                    with self._mutex:
-                        self._tasks.clear(abort_current_task=False)
-                        self._decoder.kill()
-                        self._decoder = None
-                        self.__thread__set_state__locked(PlayerState.UNINITIALIZED)
-                        logger.debug("VideoPlayer: Deinitializing... Successful")
+        except VideoPlayer.UninitializeTask as uninit_task:
+            uninit_task.execute_and_finish(self.__thread__uninitialize, crashed=False)
         except:
-            with self._mutex:
-                logger.error("VideoPlayer: Crashed by an error")
-                self._tasks.clear(abort_current_task=True)
-                self._fatal_error_signal.emit()
-                self._decoder.kill()
-                self._decoder = None
-                self.__thread__set_state__locked(PlayerState.UNINITIALIZED)
+            logger.error("Crashed by an error")
+            self.__thread__uninitialize(crashed=True)
             raise
+
+    def __thread__uninitialize(self, *, crashed: bool) -> None:
+        logger.debug("Uninitializing...")
+        with self._mutex:
+            self._tasks.clear(abort_current_task=crashed)
+            self._decoder.kill()
+            self._decoder = None
+            self.__thread__set_state__locked(PlayerState.UNINITIALIZED)
+            logger.debug("Uninitializing... Successful")
 
     def __thread__playback_loop(self) -> None:
         frame: JbVideoFrame | None = None
@@ -152,8 +149,8 @@ class VideoPlayer:
         self.__thread__emit_first_frame()
         while True:
             try:
-                self._tasks.run_all(None if self.state.is_suspended else 0)
-                if self.state.is_suspended:
+                self._tasks.run_all(None if self.state == PlayerState.SUSPENDED else 0)
+                if self.state == PlayerState.SUSPENDED:
                     continue
 
                 if frame is None:
@@ -167,7 +164,7 @@ class VideoPlayer:
                     frame_retries = 0
                 elif frame_retries >= FRAME_RETRIES_MAX:
                     logger.error(
-                        "VideoPlayer: The timer is not progressing... This player will be "
+                        "The timer is not progressing... This player will be "
                         "suspended and a buffer underrun signal will be emitted..."
                     )
                     frame_retries = 0
@@ -175,30 +172,34 @@ class VideoPlayer:
                     self.buffer_underrun_signal.emit()
 
             except VideoPlayer.SeekTask as seek_task:
-                with seek_task.execute() as executor:
-                    logger.debug("VideoPlayer: Seeking...")
+                if seek_task.execute(
+                    lambda executor: self.__thread__seek(executor, seek_task.timepoint)
+                ):
+                    frame = None
+                    frame_retries = 0
 
-                    seek_future = self._decoder.seek(seek_task.timepoint)
-                    executor.abort_aware_wait_for_future(seek_future)
-                    if seek_future.state != Future.State.FINISHED_CLEAN:
-                        logger.debug("VideoPlayer: Seeking... Failed (Decoder seek error)")
-                        executor.abort()
+    def __thread__seek(self, executor: Task.Executor, timepoint: float) -> None:
+        logger.debug("Seeking...")
 
-                    prefill_future = self._decoder.prefill()
-                    executor.abort_aware_wait_for_future(prefill_future)
-                    if prefill_future.state != Future.State.FINISHED_CLEAN:
-                        if self._decoder.is_done and self._decoder.buffered_duration <= 0:
-                            logger.debug("VideoPlayer: Seeking... Failed (EOF)")
-                            self._state = PlayerState.SUSPENDED_EOF
-                            self.eof_signal.emit()
-                        else:
-                            logger.debug("VideoPlayer: Seeking... Failed (Decoder prefill error)")
-                        executor.abort()
+        seek_future = self._decoder.seek(timepoint)
+        executor.abort_aware_wait_for_future(seek_future)
+        if seek_future.stage != Task.Stage.FINISHED_CLEAN:
+            logger.debug("Seeking... Failed (Decoder seek error)")
+            executor.abort()
 
-                    with executor.finish_context():
-                        self.__thread__emit_first_frame()
-                        frame = None
-                        frame_retries = 0
+        prefill_future = self._decoder.prefill()
+        executor.abort_aware_wait_for_future(prefill_future)
+        if prefill_future.stage != Task.Stage.FINISHED_CLEAN:
+            if self._decoder.is_done and self._decoder.buffered_duration <= 0:
+                logger.debug("Seeking... Failed (EOF)")
+                self._state = PlayerState.SUSPENDED
+                self.eof_signal.emit()
+            else:
+                logger.debug("Seeking... Failed (Decoder prefill error)")
+            executor.abort()
+
+        with executor.finish_context:
+            self.__thread__emit_first_frame()
 
     def __thread__emit_first_frame(self) -> None:
         self.video_frame_update_signal.emit(frame=self.__thread__get_frame())
@@ -207,12 +208,12 @@ class VideoPlayer:
         try:
             frame = self._decoder.pop(timeout=0)
             if frame is None:
-                logger.debug("VideoPlayer: Suspended by EOF")
-                self.__thread__set_state(PlayerState.SUSPENDED_EOF)
+                logger.debug("Suspended by EOF")
+                self.__thread__set_state(PlayerState.SUSPENDED)
                 self.eof_signal.emit()
             return frame
         except TimeoutError:
-            logger.warning("VideoPlayer: Suspended by buffer underrun")
+            logger.warning("Suspended by buffer underrun")
             self.__thread__set_state(PlayerState.SUSPENDED)
             self.buffer_underrun_signal.emit()
         return None
@@ -227,8 +228,7 @@ class VideoPlayer:
         sleep_time = frame.beg_timepoint - current_timepoint
         if sleep_time > sleep_threshold:
             # wait for the timer to catch up
-            with self._tasks.task_added:
-                self._tasks.task_added.wait(timeout=min(SLEEP_TIME_MAX, sleep_time))
+            self._tasks.create_task_added_event().wait(timeout=min(SLEEP_TIME_MAX, sleep_time))
 
             current_timepoint = self._timer.current_timepoint()
             if current_timepoint is None:
@@ -248,12 +248,12 @@ class VideoPlayer:
         assert self._mutex.locked()
 
         if state != self._state:
-            logger.debug(f"VideoPlayer: Changing the state ({self.state} -> {state})")
+            logger.debug(f"Changing the state ({self.state} -> {state})")
             self._state = state
         else:
-            logger.debug(f"VideoPlayer: Player already has state '{state}'")
+            logger.debug(f"Player already has state '{state}'")
 
-    def suspend(self) -> Future:
+    def suspend(self) -> Task.Future:
         return self._add_task(
             FnTask(
                 lambda executor: executor.finish_with(
@@ -262,22 +262,22 @@ class VideoPlayer:
             )
         )
 
-    def resume(self) -> Future:
+    def resume(self) -> Task.Future:
         return self._add_task(
             FnTask(
                 lambda executor: executor.finish_with(self.__thread__set_state, PlayerState.PLAYING)
             )
         )
 
-    def seek(self, source_timepoint: float) -> Future:
+    def seek(self, source_timepoint: float) -> Task.Future:
         assert source_timepoint >= 0
 
         return self._add_task(VideoPlayer.SeekTask(timepoint=source_timepoint))
 
-    def _add_task(self, task: Task) -> Future:
+    def _add_task(self, task: Task) -> Task.Future:
         with self._mutex:
             if self.state == PlayerState.UNINITIALIZED:
-                logger.debug(f"VideoPlayer: Player is uninitialized, aborting a task: {repr(task)}")
+                logger.debug("Player is uninitialized, aborting a task", details=task)
                 task.future.abort()
             else:
                 self._tasks.add_task(task)

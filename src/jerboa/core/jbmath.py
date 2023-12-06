@@ -1,6 +1,12 @@
 import numpy as np
 from typing import Callable, Tuple
 
+try:
+    from gmpy2 import mpq as Fraction
+except ImportError:
+    from fractions import Fraction
+
+
 Real = np.double
 
 

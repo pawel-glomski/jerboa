@@ -6,7 +6,6 @@ from jerboa.core.multithreading import (
     ThreadPool,
     ThreadSpawner,
     FnTask,
-    Future,
     do_job_with_exception_logging,
 )
 
@@ -20,12 +19,12 @@ class QtThreadPool(ThreadPool):
 
         self._running_tasks = set[FnTask]()
 
-    def start(self, task: FnTask) -> Future:
+    def start(self, task: FnTask) -> FnTask.Future:
         self._running_tasks.add(task)
 
         def job():
             try:
-                do_job_with_exception_logging(task.run_if_unresolved, args=[], kwargs={})
+                do_job_with_exception_logging(task.run_pending, args=[], kwargs={})
             finally:
                 self._running_tasks.remove(task)
 
@@ -37,17 +36,12 @@ class QtThreadSpawner(ThreadSpawner):
     class Worker(QtC.QObject):
         finished = QtC.Signal()
 
-        def __init__(
-            self,
-            job: Callable,
-            args: tuple | None = None,
-            kwargs: dict | None = None,
-        ):
+        def __init__(self, job: Callable, args: tuple, kwargs: dict):
             super().__init__()
 
             self._job = job
-            self._args = args or tuple()
-            self._kwargs = kwargs or {}
+            self._args = args
+            self._kwargs = kwargs
 
         def run(self) -> None:
             try:

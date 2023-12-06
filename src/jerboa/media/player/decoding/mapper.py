@@ -40,21 +40,19 @@ class AudioMapper:
         self._stretcher.set_max_process_size(self._audio.max_size)
 
         self._thread_pool = futures.ThreadPoolExecutor(1)
+        self._future = self._thread_pool.submit(lambda: None)
 
         self.reset()
 
     def reset(self) -> None:
-        if hasattr(self, "_future"):
-            self._future.cancel()
-            futures.wait([self._future])
+        self._future.cancel()
+        futures.wait([self._future])
 
         self._audio.clear()
         self._stretcher.reset()
         self._next_frame_beg_timepoint: float | None = None
         self._flushed = False
         self._drift = 0
-
-        self._future = self._thread_pool.submit(lambda: None)
 
     def map(self, frame: PreMappedFrame | None) -> MappedAudioFrame | None:
         if self._flushed:
@@ -75,14 +73,13 @@ class AudioMapper:
         else:
 
             def map_frame():
+                drift_fix_modifier = 1.0
                 if abs(self._drift) > DRIFT_FIX_THRESHOLD:
                     frame_duration = frame.mapping_scheme.end - frame.mapping_scheme.beg
                     fixed_duration = frame_duration + self._drift
                     fixed_duration = min(fixed_duration, frame_duration * (1 + MAX_DRIFT_FIX))
                     fixed_duration = max(fixed_duration, frame_duration * (1 - MAX_DRIFT_FIX))
                     drift_fix_modifier = fixed_duration / frame_duration
-                else:
-                    drift_fix_modifier = 1.0
 
                 # audio_data = std_audio.signal_from_av_frame(frame.av_frame)
                 # self._stretcher.process(audio_data)

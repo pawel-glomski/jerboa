@@ -1,7 +1,6 @@
 import av
 import math
 import numpy as np
-from gmpy2 import mpq as FastFraction
 from pylibrb import (  # pylint: disable=unused-import
     DType,
     SAMPLES_AXIS,

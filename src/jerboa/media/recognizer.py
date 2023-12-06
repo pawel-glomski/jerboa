@@ -3,7 +3,7 @@ from collections.abc import Callable
 import yt_dlp
 
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import ThreadPool, FnTask, Future
+from jerboa.core.multithreading import ThreadPool, FnTask
 from jerboa.core.file import JbPath
 from .source import MediaSource
 
@@ -24,7 +24,7 @@ class MediaSourceRecognizer:
         media_source_path: JbPath,
         on_success: Callable[[MediaSource], None],
         on_failure: Callable[[str], None],
-    ) -> Future[None]:
+    ) -> FnTask.Future:
         return self._thread_pool.start(
             FnTask(
                 lambda executor: self._recognize(
@@ -59,8 +59,8 @@ class MediaSourceRecognizer:
             recognition_error_message = str(err)
         except (av.error.InvalidDataError, av.error.EOFError):  # not a media file
             if media_source_path.is_local:
-                recognition_error_message = 'Format of the file "{path}" is not supported'.format(
-                    path=media_source_path.path
+                recognition_error_message = (
+                    f"Format of the file '{media_source_path.path}' is not supported"
                 )
             else:
                 ydl_opts = {
@@ -68,8 +68,7 @@ class MediaSourceRecognizer:
                     #   '-S': 'proto:m3u8' # TODO: prefer single stream formats
                 }
                 try:
-                    if executor.is_aborted:
-                        executor.abort()
+                    executor.exit_if_aborted()
 
                     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
                         info_dict = ydl.sanitize_info(
