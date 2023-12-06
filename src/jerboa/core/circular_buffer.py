@@ -8,12 +8,12 @@ class CircularBuffer:
 
     def __init__(self, shape: tuple = (8,), index_axis: int = 0, dtype: np.dtype = np.float64):
         """
-        Initializes the circular buffer.
+        Initializes the buffer.
 
         Args:
-          shape (tuple): Shape of the buffer, excluding the index axis.
-          index_axis (int): Index axis along which to store the data.
-          dtype (np.dtype): Data type of the buffer.
+            shape (tuple): Shape of the buffer, excluding the index axis.
+            index_axis (int): Index axis along which to store the data.
+            dtype (np.dtype): Data type of the buffer.
         """
         self.data = np.zeros(shape, dtype=dtype)
         self._axis = index_axis
@@ -32,17 +32,18 @@ class CircularBuffer:
     def __len__(self) -> int:
         """
         Returns:
-          int: Number of elements currently in the buffer.
+            int: Number of elements currently in the buffer.
         """
         return self._size
 
     def __getitem__(self, idx: int) -> np.ndarray:
         """Receives a single element at the specified index, without removing it from the buffer.
+
         Args:
-          idx (int): Index of the element to receive.
+            idx (int): Index of the element to receive.
 
         Returns:
-          np.ndarray: The requested element.
+            np.ndarray: The requested element.
         """
         if idx < 0:
             idx = len(self) + idx
@@ -61,7 +62,7 @@ class CircularBuffer:
     def index_axis(self) -> int:
         """
         Returns:
-          int: The axis used to index elements.
+            int: The axis used to index elements.
         """
         return self._axis
 
@@ -69,7 +70,7 @@ class CircularBuffer:
     def max_size(self) -> int:
         """
         Returns:
-          int: Maximum number of elements that can be stored in the buffer.
+            int: Maximum number of elements that can be stored in the buffer.
         """
         return self.data.shape[self._axis]
 
@@ -77,14 +78,14 @@ class CircularBuffer:
     def dtype(self) -> np.dtype:
         """
         Returns:
-          int: The type of the data.
+              int: The type of the data.
         """
         return self.data.dtype
 
     def get_shape_for_data(self, elements_num: int) -> tuple:
         """
         Returns:
-          tuple: Shape for data with the number of elements equal to `elements_num`
+            tuple: Shape for data with the number of elements equal to `elements_num`
         """
         shape = list(self.data.shape)
         shape[self.index_axis] = elements_num
@@ -95,10 +96,10 @@ class CircularBuffer:
         Resizes the underyling buffer to a new size.
 
         Args:
-          new_max_size (int): The new maximum size for the buffer.
+            new_max_size (int): The new maximum size for the buffer.
 
         Raises:
-          ValueError: If the new buffer won't be able to hold current number of elements.
+            ValueError: If the new buffer won't be able to hold current number of elements.
         """
         if new_max_size < self._size:
             raise ValueError("New size cannot fit current contents!")
@@ -129,7 +130,7 @@ class CircularBuffer:
         Appends data into the buffer.
 
         Args:
-          data (np.ndarray): The data to be appended into the buffer.
+            data (np.ndarray): The data to be appended into the buffer.
         """
         if data.size == 0:
             return
@@ -160,13 +161,13 @@ class CircularBuffer:
         Removes and returns the first n elements from the buffer.
 
         Args:
-          pop_size (int): The number of elements to remove from the buffer.
+            pop_size (int): The number of elements to remove from the buffer.
 
         Returns:
-          np.ndarray: The elements removed from the buffer.
+            np.ndarray: The elements removed from the buffer.
 
         Raises:
-          ValueError: When attempting to remove more elements than the buffer contains.
+            ValueError: When attempting to remove more elements than the buffer contains.
         """
         data = np.concatenate(self._get(pop_size), self._axis)
         # max below prevents 0 % 0 when pop_size == 0 and max_size == 0 and does nothing for other cases
@@ -186,14 +187,14 @@ class CircularBuffer:
         and `tail`. The total number of elements across both views is equal to `count`.
 
         Args:
-          count (int): The number of elements to retrieve from the buffer.
+            count (int): The number of elements to retrieve from the buffer.
 
         Returns:
-          tuple[np.ndarray, np.ndarray]: A tuple containing the primary and overflow array views.
-          Concatenate these views to obtain the complete result.
+            tuple[np.ndarray, np.ndarray]: A tuple containing the primary and overflow array views.
+            Concatenate these views to obtain the complete result.
 
         Raises:
-          ValueError: When the `count` is greater than the number of elements in the buffer.
+            ValueError: When the `count` is greater than the number of elements in the buffer.
         """
         if count > self._size:
             raise ValueError("Tried to access more elements than are in the buffer")
