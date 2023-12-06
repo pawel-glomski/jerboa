@@ -13,8 +13,6 @@ from .timer import ClockPlaybackTimer
 from .state import PlayerState
 from . import decoding
 
-THREAD_RESPONSE_TIMEOUT = 0.1
-DECODER_PREFILL_TIMEOUT = 10
 SEEK_TIME = 5  # in seconds
 
 
@@ -215,7 +213,7 @@ class MediaPlayer:
                 self._ready_to_play_signal.emit()
 
         except:
-            logger.debug(f"Initializing '{media_source.title}'... Failed")
+            logger.error(f"Initializing '{media_source.title}'... Failed")
 
             if audio_decoder is not None:
                 audio_decoder.kill()
@@ -225,7 +223,7 @@ class MediaPlayer:
             self.__thread__uninitialize(executor, finish_task=False)
 
             self._fatal_error_signal.emit()
-            raise  # thread pool worker will log the exception
+            raise
 
     def __thread__initialize__open_media_contexts(
         self,
@@ -366,22 +364,22 @@ class MediaPlayer:
         logger.debug("Resuming...")
         try:
             self._clock_timer.resume()
-            audio_future = self._audio_player.resume()
-            video_future = self._video_player.resume()
 
+            audio_future = self._audio_player.resume()
             executor.abort_aware_wait_for_future(audio_future)
+            video_future = self._video_player.resume()
             executor.abort_aware_wait_for_future(video_future)
 
             if self._audio_player.is_initialized:
                 if self._audio_player.reached_eof:
-                    logger.debug("Resuming... Failed (EOF)")
+                    logger.info("Resuming... Failed (EOF)")
                     executor.abort()
                 else:
                     assert audio_future.stage == Task.Stage.FINISHED_CLEAN
 
             if self._video_player.is_initialized:
                 if self._video_player.reached_eof:
-                    logger.debug("Resuming... Failed (EOF)")
+                    logger.info("Resuming... Failed (EOF)")
                     executor.abort()
                 else:
                     assert video_future.stage == Task.Stage.FINISHED_CLEAN
@@ -429,17 +427,14 @@ class MediaPlayer:
             next_timepoint__source = self._timeline.unmap_timepoint_to_source(next_timepoint)
             assert next_timepoint__source is not None
 
-            audio_future = self._audio_player.seek(
-                next_timepoint__source,
-                new_timer_offset=next_timepoint,
-            )
+            audio_future = self._audio_player.seek(next_timepoint__source)
             video_future = self._video_player.seek(next_timepoint__source)
 
             executor.abort_aware_wait_for_future(audio_future)
             executor.abort_aware_wait_for_future(video_future)
 
             if self._audio_player.reached_eof or self._video_player.reached_eof:
-                logger.debug("Seeking... Failed (EOF)")
+                logger.info("Seeking... Failed (EOF)")
                 executor.abort()
 
             if self._audio_player.is_initialized:
@@ -475,9 +470,8 @@ class MediaPlayer:
             except MediaPlayer.KillTask as kill_task:
                 if kill_task.execute_and_finish(self.__thread__kill):
                     break
-            except Exception as exception:
-                logger.error("Task crashed with the following exception:")
-                logger.exception(exception)
+            except Exception:
+                logger.exception("Task crashed with the following exception:")
 
     def __thread__kill(self) -> None:
         logger.info("Killed by a task")

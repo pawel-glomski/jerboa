@@ -235,22 +235,23 @@ class QtAudioSourceDevice(QtC.QIODevice):
         return 0
 
 
-class Context:
+class ActivationContext:
     def __init__(self):
-        self._depth = 0
+        self._active = False
 
     def __del__(self):
-        assert self._depth == 0
-
-    def __bool__(self) -> bool:
-        return self._depth > 0
+        assert not self._active
 
     def __enter__(self) -> None:
-        self._depth += 1
+        assert not self._active
+        self._active = True
 
-    def __exit__(self, *_) -> None:
-        self._depth -= 1
-        assert self._depth >= 0
+    def __exit__(self, *exc_args) -> None:
+        assert self._active
+        self._active = False
+
+    def __bool__(self) -> bool:
+        return self._active
 
 
 class AudioPlayer(PlaybackTimer):
@@ -261,13 +262,13 @@ class AudioPlayer(PlaybackTimer):
         buffer_underrun_signal: Signal,
         eof_signal: Signal,
     ):
-        self._decoder: Decoder | None = None
         self._state = PlayerState.UNINITIALIZED
-        self._time_offset = 0.0
-
-        self._ignore_state_changes = Context()
-
+        self._decoder: Decoder | None = None
         self._audio_sink: QtM.QAudioSink | None = None
+        self._time_offset: float | None = None
+
+        self._ignore_state_changes = ActivationContext()
+
         self._audio_manager = audio_manager
         self._audio_manager.current_output_device_changed_signal.connect(
             self.__audio_thread__on_output_device_changed
@@ -317,7 +318,7 @@ class AudioPlayer(PlaybackTimer):
     @QtC.Slot()
     def __audio_thread__on_output_device_changed(self) -> None:
         with self._rlock:
-            if self._audio_sink:
+            if self._audio_sink is not None:
                 self._audio_sink.reset()
                 self._decoder.apply_new_media_constraints(self.get_constraints())
 
@@ -369,7 +370,7 @@ class AudioPlayer(PlaybackTimer):
             decoder_future = decoder.apply_new_media_constraints(self.get_constraints())
             executor.abort_aware_wait_for_future(decoder_future)
             if decoder_future.stage != Task.Stage.FINISHED_CLEAN:
-                logger.debug("Initializing... Failed (Decoder constraints update error)")
+                logger.error("Initializing... Failed (Decoder constraints update error)")
                 executor.abort()
 
             jb_audio_cofnig = decoder.presentation_media_config
@@ -381,31 +382,64 @@ class AudioPlayer(PlaybackTimer):
             )
 
             with executor.finish_context:
-                self._decoder = decoder
-                self.__audio_thread__reset_audio_sink__locked(audio_format)
-                logger.debug("Initializing... Successful")
+                if self.__audio_thread__reset__locked(audio_format, decoder):
+                    logger.debug("Initializing... Successful")
+                else:
+                    logger.error("Initializing... Failed")
+                    executor.abort()
 
-    def __audio_thread__reset_audio_sink__locked(self, audio_format: QtM.QAudioFormat) -> None:
-        logger.debug("Resetting audio sink")
-        self.__audio_thread__delete_audio_sink__locked()
-        self.__audio_thread__create_audio_sink__locked(audio_format)
+    def __audio_thread__reset__locked(
+        self, audio_format: QtM.QAudioFormat, decoder: Decoder
+    ) -> bool:
+        logger.debug("Resetting audio sink...")
 
-    def __audio_thread__delete_audio_sink__locked(self) -> None:
+        self.__audio_thread__reset__clear_audio_sink__locked()
+        if decoder is not self._decoder:
+            self.__audio_thread__reset__clear_decoder__locked()
+        self.__audio_thread__reset__init__locked(audio_format, decoder)
+
+        if self.state == PlayerState.UNINITIALIZED:
+            logger.error("Resetting audio sink... Failed (QAudioSink malfunction)")
+            self.__audio_thread__reset__clear_decoder__locked()
+            self.__audio_thread__reset__clear_audio_sink__locked()
+            self._set_state_with_log(PlayerState.UNINITIALIZED)
+            self.fatal_error_signal.emit()
+            return False
+
+        logger.debug("Resetting audio sink... Successful)")
+        return True
+
+    def __audio_thread__reset__clear_decoder__locked(self) -> None:
+        if self._decoder is not None:
+            self._decoder.kill()  # we do not need to wait for it to finish
+            self._decoder = None
+            self._time_offset = None
+
+    def __audio_thread__reset__clear_audio_sink__locked(self) -> None:
         if self._audio_sink is not None:
-            self._audio_sink.stop()
-            self._audio_sink.stateChanged.disconnect()
-            self._audio_sink.deleteLater()
-            self._audio_sink = None
+            with self._ignore_state_changes:
+                self._audio_sink.stop()
+                self._audio_sink.stateChanged.disconnect()
+                self._audio_sink.deleteLater()
+                self._audio_sink = None
 
-    def __audio_thread__create_audio_sink__locked(self, audio_format: QtM.QAudioFormat) -> None:
+    def __audio_thread__reset__init__locked(
+        self, audio_format: QtM.QAudioFormat, decoder: Decoder
+    ) -> None:
         assert self._audio_sink is None
+
+        if decoder.current_timepoint is None:
+            logger.error("Decoder not prefilled")
+            return
+
+        self._decoder = decoder
+        self._time_offset = decoder.current_timepoint
 
         self._audio_sink = QtM.QAudioSink(
             self._audio_manager.get_current_output_device(), audio_format
         )
         self._audio_sink.stateChanged.connect(self.__audio_thread__on_audio_sink_state_change)
-
-        self._audio_sink.start(QtAudioSourceDevice(self._decoder))
+        self._audio_sink.start(QtAudioSourceDevice(decoder))
         self._audio_sink.suspend()
 
     def uninitialize(self) -> Task.Future:
@@ -421,13 +455,10 @@ class AudioPlayer(PlaybackTimer):
 
             logger.debug("Uninitializing...")
 
-            with self._ignore_state_changes:
-                self.__audio_thread__delete_audio_sink__locked()
-                self._decoder.kill()  # we do not need to wait for it to finish
-                self._decoder = None
-                self._time_offset = 0.0
+            self.__audio_thread__reset__clear_audio_sink__locked()
+            self.__audio_thread__reset__clear_decoder__locked()
 
-                self._set_state_with_log(PlayerState.UNINITIALIZED)
+            self._set_state_with_log(PlayerState.UNINITIALIZED)
 
             logger.debug("Uninitializing... Successful")
 
@@ -437,7 +468,7 @@ class AudioPlayer(PlaybackTimer):
     def __audio_thread__suspend(self, executor: Task.Executor) -> None:
         with self._rlock:
             if self._audio_sink is None:
-                logger.debug("Suspending... Failed (Player not initialized)")
+                logger.error("Suspending... Failed (Player not initialized)")
                 executor.abort()
 
             if self.state == PlayerState.SUSPENDED:
@@ -448,7 +479,7 @@ class AudioPlayer(PlaybackTimer):
                     logger.debug("Suspending...")
                     self._audio_sink.suspend()
                     if self.state != PlayerState.SUSPENDED:
-                        logger.debug("Suspending... Failed")
+                        logger.error("Suspending... Failed")
                         executor.abort()
                     logger.debug("Suspending... Successful")
 
@@ -469,27 +500,18 @@ class AudioPlayer(PlaybackTimer):
 
                     self._audio_sink.resume()
                     if self.state != PlayerState.PLAYING:
-                        logger.debug("Resuming... Failed (EOF or decoder error)")
+                        logger.error("Resuming... Failed (EOF or decoder error)")
                         executor.abort()
                     logger.debug("Resuming... Successful")
 
-    def seek(self, source_timepoint: float, new_timer_offset: float) -> Task.Future:
+    def seek(self, source_timepoint: float) -> Task.Future:
         assert self.state != PlayerState.PLAYING
 
         return self._audio_manager.run_on_audio_thread(
-            FnTask(
-                lambda executor: self.__audio_thread__seek(
-                    executor, source_timepoint, new_timer_offset
-                )
-            )
+            FnTask(lambda executor: self.__audio_thread__seek(executor, source_timepoint))
         )
 
-    def __audio_thread__seek(
-        self,
-        executor: Task.Executor,
-        source_timepoint: float,
-        new_timer_offset: float,
-    ) -> None:
+    def __audio_thread__seek(self, executor: Task.Executor, source_timepoint: float) -> None:
         assert source_timepoint >= 0
 
         logger.debug("Seeking...")
@@ -500,29 +522,30 @@ class AudioPlayer(PlaybackTimer):
             seek_future = self._decoder.seek(source_timepoint)
             executor.abort_aware_wait_for_future(seek_future)
             if seek_future.stage != Task.Stage.FINISHED_CLEAN:
-                logger.debug("Seeking... Failed (Decoder seek error)")
+                logger.error("Seeking... Failed (Decoder seek failed)")
                 executor.abort()
 
             prefill_future = self._decoder.prefill()
             executor.abort_aware_wait_for_future(prefill_future)
             if prefill_future.stage != Task.Stage.FINISHED_CLEAN:
                 if self._decoder.is_done and self._decoder.buffered_duration <= 0:
-                    logger.debug("Seeking... Failed (EOF)")
+                    logger.info("Seeking... Failed (EOF)")
                     self._state = PlayerState.SUSPENDED
                     self.eof_signal.emit()
                 else:
-                    logger.debug("Seeking... Failed (Decoder prefill error)")
+                    logger.error("Seeking... Failed (Decoder prefill failed)")
                 executor.abort()
 
             with executor.finish_context:
-                self._time_offset = new_timer_offset
-                with self._ignore_state_changes:
-                    self.__audio_thread__reset_audio_sink__locked(self._audio_sink.format())
-                logger.debug("Seeking... Successful")
+                if self.__audio_thread__reset__locked(self._audio_sink.format(), self._decoder):
+                    logger.debug("Seeking... Successful")
+                else:
+                    logger.error("Seeking... Failed")
+                    executor.abort()
 
     def current_timepoint(self) -> float | None:
         with self._rlock:
-            if self._audio_sink is not None:
+            if self._audio_sink is not None and self._time_offset is not None:
                 return self._time_offset + self._audio_sink.processedUSecs() / 1e6
         return None
 

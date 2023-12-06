@@ -69,12 +69,16 @@ class Decoder:
         return self._is_done
 
     @property
+    def is_killed(self) -> bool:
+        return self._is_killed
+
+    @property
     def buffered_duration(self) -> float:
         return self._buffer.duration
 
     @property
-    def is_killed(self) -> bool:
-        return self._is_killed
+    def current_timepoint(self) -> float | None:
+        return self._buffer.current_timepoint
 
     def __thread(self):
         self._logger.debug("Starting decoding")

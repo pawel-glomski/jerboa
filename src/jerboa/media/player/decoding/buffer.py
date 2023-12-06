@@ -9,7 +9,7 @@ AUDIO_BUFFER_SIZE_MODIFIER = 1.2
 
 
 class AudioBuffer:
-    def __init__(self, audio_config: AudioConfig, max_duration: float) -> None:
+    def __init__(self, audio_config: AudioConfig, max_duration: float):
         self._audio_config = audio_config
 
         self._audio = create_circular_audio_buffer(
@@ -20,7 +20,7 @@ class AudioBuffer:
             max_duration=max_duration,
         )
         # self._audio_last_sample = np.zeros(self._audio.get_shape_for_data(1), self._audio.dtype)
-        self._timepoint: float | None = None
+        self._current_timepoint: float | None = None
 
         self._max_samples = int(max_duration * audio_config.sample_rate)
 
@@ -31,9 +31,13 @@ class AudioBuffer:
     def duration(self) -> float:
         return len(self._audio) / self._audio_config.sample_rate
 
+    @property
+    def current_timepoint(self) -> float | None:
+        return self._current_timepoint
+
     def clear(self) -> None:
         self._audio.clear()
-        self._timepoint = None
+        self._current_timepoint = None
         # self._audio_last_sample[:] = 0
 
     def put(self, audio_frame: JbAudioFrame) -> None:
@@ -42,8 +46,8 @@ class AudioBuffer:
         self._audio.put(audio_frame.audio_signal)
         # self._audio_last_sample[:] = self._audio[-1]
 
-        if self._timepoint is None:
-            self._timepoint = audio_frame.beg_timepoint
+        if self._current_timepoint is None:
+            self._current_timepoint = audio_frame.beg_timepoint
 
     def pop(self, samples_num: int) -> JbAudioFrame:
         assert not self.is_empty()
@@ -55,12 +59,11 @@ class AudioBuffer:
         audio_duration = pop_samples_num / self._audio_config.sample_rate
 
         frame = JbAudioFrame(
-            beg_timepoint=self._timepoint,
-            end_timepoint=self._timepoint + audio_duration,
+            beg_timepoint=self._current_timepoint,
+            end_timepoint=self._current_timepoint + audio_duration,
             audio_signal=audio_signal,
         )
-
-        self._timepoint = frame.end_timepoint
+        self._current_timepoint = frame.end_timepoint
 
         return frame
 
@@ -72,9 +75,10 @@ class AudioBuffer:
 
 
 class VideoBuffer:
-    def __init__(self, max_duration: float) -> None:
+    def __init__(self, max_duration: float):
         self._max_duration = max_duration
         self._duration = 0.0
+        self._current_timepoint: float | None = None
 
         self._frames = deque[JbVideoFrame]()
 
@@ -85,9 +89,14 @@ class VideoBuffer:
     def duration(self) -> float:
         return self._duration
 
+    @property
+    def current_timepoint(self) -> float | None:
+        return self._current_timepoint
+
     def clear(self) -> None:
         self._frames.clear()
         self._duration = 0.0
+        self._current_timepoint = None
 
     def put(self, video_frame: JbVideoFrame) -> None:
         assert not self.is_full()
@@ -95,12 +104,17 @@ class VideoBuffer:
         self._duration += video_frame.duration
         self._frames.append(video_frame)
 
+        if self._current_timepoint is None:
+            self._current_timepoint = video_frame.beg_timepoint
+
     def pop(self) -> JbVideoFrame:
         assert not self.is_empty()
 
         frame = self._frames.popleft()
         self._duration -= frame.duration
         self._duration *= not self.is_empty()  # ensure `_duration == 0` when `is_empty() == true`
+
+        self._current_timepoint = frame.end_timepoint
 
         return frame
 

@@ -15,7 +15,9 @@ THREAD_RESPONSE_TIMEOUT = 0.1
 SLEEP_THRESHOLD_RATIO = 1 / 3  # how much earlier can we display the frame (ratio of frame duration)
 SLEEP_THRESHOLD_MAX = 1 / 24 * SLEEP_THRESHOLD_RATIO  # but we cannot display it earlier than this
 SLEEP_TIME_MAX = 0.25
-FRAME_RETRIES_MAX = 128  # at the start of playback usually ~32, but let's be safe with 128
+
+TIMER_STARTUP_WAIT_TIME = 1 / 120
+TIMER_SYNC_RETRIES_MAX = 32
 
 
 class VideoPlayer:
@@ -122,8 +124,9 @@ class VideoPlayer:
     def __thread(self, init_task: Task) -> None:
         init_task.run_pending()
         if self.state == PlayerState.UNINITIALIZED:
-            logger.debug("Initializing... Failed")
+            logger.error("Initializing... Failed")
             return
+
         try:
             self.__thread__playback_loop()
         except VideoPlayer.UninitializeTask as uninit_task:
@@ -144,7 +147,7 @@ class VideoPlayer:
 
     def __thread__playback_loop(self) -> None:
         frame: JbVideoFrame | None = None
-        frame_retries = 0
+        sync_retries = 0
 
         self.__thread__emit_first_frame()
         while True:
@@ -155,19 +158,19 @@ class VideoPlayer:
 
                 if frame is None:
                     frame = self.__thread__get_frame()
+                    sync_retries = 0
                 else:
-                    frame_retries += 1
+                    sync_retries += 1
 
                 if frame is not None and self.__thread__sync_with_timer(frame):
                     self._video_frame_update_signal.emit(frame=frame)
                     frame = None
-                    frame_retries = 0
-                elif frame_retries >= FRAME_RETRIES_MAX:
+                elif sync_retries >= TIMER_SYNC_RETRIES_MAX:
                     logger.error(
                         "The timer is not progressing... This player will be "
-                        "suspended and a buffer underrun signal will be emitted..."
+                        "suspended and a 'Buffer Underrun' signal will be emitted..."
                     )
-                    frame_retries = 0
+                    sync_retries = 0
                     self.__thread__set_state(PlayerState.SUSPENDED)
                     self.buffer_underrun_signal.emit()
 
@@ -176,7 +179,6 @@ class VideoPlayer:
                     lambda executor: self.__thread__seek(executor, seek_task.timepoint)
                 ):
                     frame = None
-                    frame_retries = 0
 
     def __thread__seek(self, executor: Task.Executor, timepoint: float) -> None:
         logger.debug("Seeking...")
@@ -184,18 +186,18 @@ class VideoPlayer:
         seek_future = self._decoder.seek(timepoint)
         executor.abort_aware_wait_for_future(seek_future)
         if seek_future.stage != Task.Stage.FINISHED_CLEAN:
-            logger.debug("Seeking... Failed (Decoder seek error)")
+            logger.error("Seeking... Failed (Decoder seek error)")
             executor.abort()
 
         prefill_future = self._decoder.prefill()
         executor.abort_aware_wait_for_future(prefill_future)
         if prefill_future.stage != Task.Stage.FINISHED_CLEAN:
             if self._decoder.is_done and self._decoder.buffered_duration <= 0:
-                logger.debug("Seeking... Failed (EOF)")
+                logger.info("Seeking... Failed (EOF)")
                 self._state = PlayerState.SUSPENDED
                 self.eof_signal.emit()
             else:
-                logger.debug("Seeking... Failed (Decoder prefill error)")
+                logger.error("Seeking... Failed (Decoder prefill error)")
             executor.abort()
 
         with executor.finish_context:
@@ -223,6 +225,7 @@ class VideoPlayer:
 
         current_timepoint = self._timer.current_timepoint()
         if current_timepoint is None:
+            self._tasks.create_task_added_event().wait(timeout=TIMER_STARTUP_WAIT_TIME)
             return False
 
         sleep_time = frame.beg_timepoint - current_timepoint
