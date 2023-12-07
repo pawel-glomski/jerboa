@@ -8,8 +8,8 @@ from pathlib import Path
 from functools import partial
 
 from jerboa.core import timeline
-from .algorithms import Algorithm
-from .algorithms.option import OptionBase
+from .algorithm import Algorithm
+from .parameter import Parameter
 
 
 class MostRecentState:
@@ -64,15 +64,15 @@ class MostRecentState:
 
 class Action:
     @staticmethod
-    def command_change_timeline_options(
-        options: list[OptionBase],
+    def command_change_timeline_parameters(
+        parameters: list[Parameter],
     ) -> Callable[["AnalysisRun"], Callable[["AnalysisRunProxy"], Any]]:
         def command(analysis_run: "AnalysisRun"):
-            new_timeline = analysis_run.change_timeline_options(options)
+            new_timeline = analysis_run.change_timeline_parameters(parameters)
 
             # response:
             return partial(
-                AnalysisRunProxy.response_set_timeline_after_options_change,
+                AnalysisRunProxy.response_set_timeline_after_parameters_change,
                 new_timeline=new_timeline,
             )
 
@@ -241,8 +241,10 @@ class AnalysisRun:
         self._stop = True
         self._commands_not_empty_or_stopping.notify()
 
-    def change_timeline_options(self, options: list[OptionBase]) -> timeline.FragmentedTimeline:
-        self._algorithm.change_timeline_options(options)
+    def change_timeline_parameters(
+        self, parameters: list[Parameter]
+    ) -> timeline.FragmentedTimeline:
+        self._algorithm.change_timeline_parameters(parameters)
         return self._algorithm.generate_new_timeline()
 
     def save_to_file(self, path: Path) -> tuple[bool, str]:

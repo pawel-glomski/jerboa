@@ -32,6 +32,9 @@ class Container(containers.DeclarativeContainer):
     audio_output_devices_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
     current_audio_output_device_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
 
+    analysis_algorithm_registered_signal = providers.Singleton(
+        gui.core.signal.QtSignal, "algorithm"
+    )
     analysis_algorithm_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
 
     # -------------------------------------- Multithreading -------------------------------------- #
@@ -51,12 +54,17 @@ class Container(containers.DeclarativeContainer):
     timeline = providers.Singleton(
         core.timeline.FragmentedTimeline,
         # init_sections=[core.timeline.TMSection(0, float("inf"), 1)],
-        init_sections=[core.timeline.TMSection(i, i + 1, 0.5 + 0.5 * (i % 2)) for i in range(1000)],
+        init_sections=[
+            core.timeline.TMSection(i * 3, i * 3 + 3, (2 - (i % 3)) / 2) for i in range(1000)
+        ],
     )
 
     # ------------------------------------- Analysis Manager ------------------------------------- #
 
-    algorithm_registry = providers.Singleton(analysis.registry.AlgorithmRegistry)
+    analysis_algorithm_registry = providers.Singleton(
+        analysis.registry.AlgorithmRegistry,
+        analysis_algorithm_registered_signal=analysis_algorithm_registered_signal,
+    )
 
     analysis_manager = providers.Singleton(analysis.manager.AnalysisManager)
 
@@ -119,8 +127,22 @@ class Container(containers.DeclarativeContainer):
         seek_forward_signal=seek_forward_signal,
         video_frame_update_signal=video_frame_update_signal,
         analysis_algorithm_selected_signal=analysis_algorithm_selected_signal,
-        algorithm_registry=algorithm_registry,
+        analysis_algorithm_registered_signal=analysis_algorithm_registered_signal,
     )
+
+
+def main():
+    dependencies_container = Container()
+    dependencies_container.wire()
+    dependencies_container.gui_container().wire()
+
+    connect_signals()
+
+    sys.exit(gui.container.run())
+
+
+if __name__ == "__main__":
+    main()
 
 
 @inject
@@ -130,18 +152,18 @@ def connect_signals(
     seek_backward: core.signal.Signal = Provide[Container.seek_backward_signal],
     seek_forward: core.signal.Signal = Provide[Container.seek_forward_signal],
     media_player: media.player.media_player.MediaPlayer = Provide[Container.media_player],
-):
+) -> None:
     media_source_selected.connect(media_player.initialize)
     playback_toggle.connect(media_player.playback_toggle)
     seek_backward.connect(media_player.seek_backward)
     seek_forward.connect(media_player.seek_forward)
 
 
-if __name__ == "__main__":
-    _dependencies_container = Container()
-    _dependencies_container.wire()
-    _dependencies_container.gui_container().wire()
-
-    connect_signals()
-
-    sys.exit(gui.container.run())
+@inject
+def register_analysis_algorithms(
+    analysis_algorithm_registry: analysis.registry.AlgorithmRegistry = Provide[
+        Container.analysis_algorithm_registry
+    ],
+) -> None:
+    analysis_algorithm_registry.register_algorithm(analysis.algorithms.silence_remover.Algorithm)
+    analysis_algorithm_registry.register_algorithm(analysis.algorithms.redundancy_remover.Algorithm)

@@ -3,7 +3,7 @@ from PySide6.QtCore import Qt
 
 
 from jerboa.media.source import MediaSource, MediaStreamSource
-from jerboa.gui.common import property as gui_property
+from jerboa.gui.common import parameter
 
 
 class StreamVariantSelector(QtW.QWidget):
@@ -47,13 +47,13 @@ class MediaSourceResolver(QtW.QWidget):
     ):
         super().__init__()
 
-        title_property = gui_property.String(
+        title_parameter = parameter.String(
             name=title_text, description="", init_value="", read_only=True
         )
         title_layout = QtW.QHBoxLayout()
-        title_layout.addWidget(title_property.label_widget)
-        title_layout.addWidget(title_property.input_widget)
-        self._title = title_property.input_widget
+        title_layout.addWidget(title_parameter.label_widget)
+        title_layout.addWidget(title_parameter.input_widget)
+        self._title = title_parameter.input_widget
 
         streams_selection_layout = QtW.QHBoxLayout()
         streams_selection_layout.addWidget(audio_variant_selector)

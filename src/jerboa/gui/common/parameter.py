@@ -35,7 +35,7 @@ class InputWidget(QtW.QFrame, Generic[ValueT]):
 
 
 @dataclass(frozen=True)
-class Property(Generic[ValueT, InputWidgetT]):
+class Parameter(Generic[ValueT, InputWidgetT]):
     label_widget: LabelWidget
     input_widget: InputWidgetT
 
@@ -46,6 +46,50 @@ class Property(Generic[ValueT, InputWidgetT]):
 
 
 # ----------------------------------------- Input widgets ---------------------------------------- #
+
+
+class BetterSlider(QtW.QSlider):
+    def mousePressEvent(self, event: QtG.QMouseEvent):
+        if event.button() == QtC.Qt.LeftButton:
+            self.setValue(self.value_at_mouse_position(event.pos()))
+        super().mousePressEvent(event)
+
+    @property
+    def value_range(self) -> int:
+        return self.maximum() - self.minimum()
+
+    def value_at_mouse_position(self, position: QtC.QPoint) -> int:
+        style_option = QtW.QStyleOptionSlider()
+        self.initStyleOption(style_option)
+
+        groove_rect = self.style().subControlRect(
+            QtW.QStyle.ComplexControl.CC_Slider,
+            style_option,
+            QtW.QStyle.SubControl.SC_SliderGroove,
+            self,
+        )
+        handle_rect = self.style().subControlRect(
+            QtW.QStyle.ComplexControl.CC_Slider,
+            style_option,
+            QtW.QStyle.SubControl.SC_SliderHandle,
+            self,
+        )
+        handle_half_size = handle_rect.center() - handle_rect.topLeft()
+
+        position -= groove_rect.topLeft()  # make it relative to the groove
+        position -= handle_half_size  # we want the handle's center to land at the cursor
+        available_space = groove_rect.size() - handle_rect.size()
+
+        if self.orientation() == Qt.Orientation.Horizontal:
+            position = position.x()
+            available_space = available_space.width()
+        else:
+            position = position.y()
+            available_space = available_space.height()
+
+        return QtW.QStyle.sliderValueFromPosition(
+            self.minimum(), self.maximum(), position, available_space, style_option.upsideDown
+        )
 
 
 class IntegerInput(InputWidget):
@@ -63,7 +107,7 @@ class IntegerInput(InputWidget):
 
         self._slider = None
         if slider_orientation is not None:
-            self._slider = QtW.QSlider(slider_orientation)
+            self._slider = BetterSlider(slider_orientation)
             self._slider.valueChanged.connect(self._on_slider_value_changed)
 
         self._value_edit = QtW.QLineEdit()
@@ -131,7 +175,7 @@ class FloatInput(InputWidget):
 
         self._slider = None
         if slider_orientation is not None:
-            self._slider = QtW.QSlider(slider_orientation)
+            self._slider = BetterSlider(slider_orientation)
             self._slider.setMinimum(0)
             self._slider.setMaximum(10**FloatInput.DECIMALS)
             self._slider.valueChanged.connect(self._on_slider_value_changed)
@@ -206,10 +250,10 @@ class StringInput(InputWidget):
         self._value_edit.setText(init_value)
 
 
-# --------------------------------------- Property widgets --------------------------------------- #
+# --------------------------------------- Parameter widgets --------------------------------------- #
 
 
-class Float(Property[float, FloatInput]):
+class Float(Parameter[float, FloatInput]):
     def __init__(
         self,
         name: str,
@@ -224,7 +268,7 @@ class Float(Property[float, FloatInput]):
         )
 
 
-class Integer(Property[int, IntegerInput]):
+class Integer(Parameter[int, IntegerInput]):
     def __init__(
         self,
         name: str,
@@ -239,7 +283,7 @@ class Integer(Property[int, IntegerInput]):
         )
 
 
-class String(Property[str, StringInput]):
+class String(Parameter[str, StringInput]):
     def __init__(self, name: str, description: str, init_value: str, read_only: bool = False):
         super().__init__(
             LabelWidget(name, description),
@@ -247,60 +291,68 @@ class String(Property[str, StringInput]):
         )
 
 
-class Enum(Property):
+class Enum(Parameter):
     ...  # TODO
 
 
-class Path(Property):
+class Path(Parameter):
     ...  # TODO
 
 
-class PropertiesCollection(QtW.QWidget):
+class ParameterCollection(QtW.QWidget):
     def __init__(self):
         super().__init__()
-        self._properties = list[Property]()
+        self._parameters = list[Parameter]()
 
-    def reset(self, properties: list[Property]) -> None:
-        self._properties.clear()
+    def reset(self, parameters: list[Parameter]) -> None:
+        if self.layout() is not None:
+            grid_layout = self.layout()
+            while grid_layout.count():
+                widget = grid_layout.itemAt(0).widget()
+                widget.setParent(None)
+                widget.deleteLater()
+                grid_layout.removeWidget(widget)
+        else:
+            grid_layout = QtW.QGridLayout()
+            grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+            self.setLayout(grid_layout)
 
-        grid_layout = QtW.QGridLayout()
-        grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        for row_index, property_ in enumerate(properties):
-            grid_layout.addWidget(property_.label_widget, row_index, 0)
-            grid_layout.addWidget(property_.input_widget, row_index, 1)
+        for row_index, parameter in enumerate(parameters):
+            grid_layout.addWidget(parameter.label_widget, row_index, 0)
+            grid_layout.addWidget(parameter.input_widget, row_index, 1)
         self.setLayout(grid_layout)
 
 
-def from_algorithm_option(option: analysis.option.Option) -> Property:
-    match option:
-        case analysis.option.Integer():
+def from_algorithm_parameter(parameter: analysis.parameter.Parameter) -> Parameter:
+    match parameter:
+        case analysis.parameter.Integer():
             return Integer(
-                name=option.name,
-                description=option.description,
-                init_value=option.default_value,
-                min_value=option.min_value,
-                max_value=option.max_value,
+                name=parameter.name,
+                description=parameter.description,
+                init_value=parameter.default_value,
+                min_value=parameter.min_value,
+                max_value=parameter.max_value,
             )
-        case analysis.option.Float():
+        case analysis.parameter.Float():
             return Float(
-                name=option.name,
-                description=option.description,
-                init_value=option.default_value,
-                min_value=option.min_value,
-                max_value=option.max_value,
+                name=parameter.name,
+                description=parameter.description,
+                init_value=parameter.default_value,
+                min_value=parameter.min_value,
+                max_value=parameter.max_value,
             )
-        case analysis.option.String():
+        case analysis.parameter.String():
             return String(
-                name=option.name,
-                description=option.description,
-                init_value=option.default_value,
+                name=parameter.name,
+                description=parameter.description,
+                init_value=parameter.default_value,
             )
-        case analysis.option.Enum():
+        case analysis.parameter.Enum():
             raise NotImplementedError()
             # return Enum(
-            #     name=option.name,
-            #     description=option.description,
-            #     init_value=option.default_value,
+            #     name=parameter.name,
+            #     description=parameter.description,
+            #     init_value=parameter.default_value,
             # )
-        case analysis.option.Path():
+        case analysis.parameter.Path():
             raise NotImplementedError()

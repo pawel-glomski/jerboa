@@ -11,7 +11,7 @@ class Domain(enum.Enum):
 T = TypeVar("T")
 
 
-class Option(Generic[T]):
+class Parameter(Generic[T]):
     def __init__(
         self,
         value_type: type[T],
@@ -37,7 +37,7 @@ class Option(Generic[T]):
 
     def __set__(self, instance, value: T) -> None:
         if self.domain == Domain.ANALYSIS and hasattr(instance, self.variable_name):
-            raise TypeError("Analysis option can be assigned only once")
+            raise TypeError("Analysis parameter can be assigned only once")
         setattr(instance, self.variable_name, self.setter_transformer(value))
 
     def __delete__(self, instance) -> None:
@@ -54,7 +54,7 @@ class Option(Generic[T]):
         return f"{self.__class__.__name__}({attributes})"
 
 
-class Number(Option[T]):
+class Number(Parameter[T]):
     def __init__(
         self,
         value_type: type[T],
@@ -118,7 +118,7 @@ class Float(Number[float]):
         )
 
 
-class String(Option[str]):
+class String(Parameter[str]):
     def __init__(
         self,
         default_value: str,
@@ -133,7 +133,7 @@ class String(Option[str]):
         )
 
 
-class Enum(Option[T]):
+class Enum(Parameter[T]):
     def __init__(
         self,
         enum_type: type[T],
@@ -152,7 +152,7 @@ class Enum(Option[T]):
         self.possible_values = [enum_value.value for enum_value in enum_type]
 
 
-class Path(Option[pathlib.Path]):
+class Path(Parameter[pathlib.Path]):
     def __init__(
         self,
         default_value: pathlib.Path,
@@ -171,10 +171,10 @@ class Path(Option[pathlib.Path]):
         self.should_already_exist = should_already_exist
 
         if not reads and not writes:
-            raise ValueError("Useless option")
+            raise ValueError("Useless parameter")
 
         if self.is_directory and self.extensions:
-            raise ValueError("Directory option should not have extensions")
+            raise ValueError("Directory parameter should not have extensions")
 
         super().__init__(
             value_type=pathlib.Path,
@@ -196,7 +196,7 @@ class Path(Option[pathlib.Path]):
             raise ValueError(f'Path "{path}" should point a directory.')
         if not self.is_directory and path.suffix not in self.extensions:
             raise ValueError(
-                f'Unexpected extension ({path.suffix}) of "{path}", this option accepts only '
+                f'Unexpected extension ({path.suffix}) of "{path}", this parameter accepts only '
                 f"the following extensions: {self.extensions}."
             )
         return path.resolve()

@@ -2,14 +2,11 @@ from dependency_injector import containers, providers
 from dependency_injector.wiring import Provide, inject
 
 import PySide6.QtWidgets as QtW
-import PySide6.QtGui as QtG
 
-from jerboa.core.file import PathProcessor, JbPath
+from jerboa.core.file import PathProcessor
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadPool
 from jerboa.media.recognizer import MediaSourceRecognizer
-from jerboa.analysis.registry import AlgorithmRegistry
-from .palette import Palette
 from .main_view_stack import MainViewStack
 from .status_bar import StatusBar
 from .main_window import MainWindow
@@ -40,8 +37,8 @@ class Container(containers.DeclarativeContainer):
     seek_forward_signal = providers.Dependency(Signal)
     video_frame_update_signal = providers.Dependency(Signal)
 
+    analysis_algorithm_registered_signal = providers.Dependency(Signal)
     analysis_algorithm_selected_signal = providers.Dependency(Signal)
-    algorithm_registry = providers.Dependency(AlgorithmRegistry)
 
     # ------------------------------------------ Palette ----------------------------------------- #
 
@@ -199,17 +196,18 @@ class Container(containers.DeclarativeContainer):
 
     # ---------------------------- Analysis algorithm selection dialog --------------------------- #
 
+    analysis_algorithm_selector = providers.Singleton(
+        analysis_algorithm_selection.dialog.AlgorithmSelector,
+        algorithm_changed_signal=providers.Factory(core.signal.QtSignal, "algorithm"),
+    )
+
     analysis_algorithm_selection_dialog = providers.Singleton(
         analysis_algorithm_selection.dialog.Dialog,
         min_size=(600, 400),
-        algorithm_selector=providers.Factory(
-            analysis_algorithm_selection.dialog.AlgorithmSelector,
-            algorithm_registry=algorithm_registry,
-            algorithm_changed_signal=providers.Factory(core.signal.QtSignal, "algorithm"),
-        ),
+        algorithm_selector=analysis_algorithm_selector,
         configurator=providers.Factory(
             analysis_algorithm_selection.dialog.AlgorithmConfigurator,
-            properties_collection=providers.Factory(common.property.PropertiesCollection),
+            parameter_collection=providers.Factory(common.parameter.ParameterCollection),
         ),
         button_box=providers.Factory(
             common.button_box.RejectAcceptButtonBox,
@@ -224,7 +222,23 @@ class Container(containers.DeclarativeContainer):
 
 
 @inject
-def connect_signals(
+def run(
+    qt_app: QtW.QApplication = Provide[Container.qt_app],
+    jb_main_window: MainWindow = Provide[Container.jb_main_window],
+) -> int:
+    connect_signals()
+    fix_palette()
+
+    jb_main_window.show()
+    return qt_app.exec()
+
+
+def connect_signals():
+    connect_menu_bar_signals()
+
+
+@inject
+def connect_menu_bar_signals(
     menu_bar_file_open: menu_bar.MenuAction = Provide[Container.menu_bar_file_open],
     menu_bar_analyze: menu_bar.MenuAction = Provide[Container.menu_bar_analyze],
     media_source_selection_dialog: media_source_selection.dialog.Dialog = Provide[
@@ -239,19 +253,19 @@ def connect_signals(
 
 
 @inject
+def connect_analysis_algorithm_selector(
+    analysis_algorithm_registered_signal: Signal = Provide[
+        Container.analysis_algorithm_registered_signal
+    ],
+    analysis_algorithm_selector: analysis_algorithm_selection.dialog.AlgorithmSelector = Provide[
+        Container.analysis_algorithm_selector
+    ],
+) -> None:
+    analysis_algorithm_registered_signal.connect(analysis_algorithm_selector.add_algorithm)
+
+
+@inject
 def fix_palette(qt_app: QtW.QApplication = Provide[Container.qt_app]) -> None:
     palette = qt_app.palette()
     palette.setColor(palette.ColorRole.ToolTipBase, palette.color(palette.ColorRole.Window))
     qt_app.setPalette(palette)
-
-
-@inject
-def run(
-    qt_app: QtW.QApplication = Provide[Container.qt_app],
-    jb_main_window: MainWindow = Provide[Container.jb_main_window],
-) -> int:
-    connect_signals()
-    fix_palette()
-
-    jb_main_window.show()
-    return qt_app.exec()

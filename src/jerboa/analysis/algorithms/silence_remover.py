@@ -20,25 +20,25 @@ class Algorithm(analysis.algorithm.Algorithm):
     NAME = "Silence Remover"
     DESCRIPTION = "Removes silence. Very fast and very low memory requirements."
 
-    db_threshold = analysis.option.Float(
+    db_threshold = analysis.parameter.Float(
         default_value=0.5,
         min_value=0,
         max_value=1,
         description="Determines what energy levels should be considered a silence",
-        domain=analysis.option.Domain.INTERPRETATION,
+        domain=analysis.parameter.Domain.INTERPRETATION,
     )
-    db_threshold2 = analysis.option.Integer(
+    db_threshold2 = analysis.parameter.Integer(
         default_value=2,
         min_value=2,
         max_value=10,
         description="Determines what energy levels should be considered a silence",
-        domain=analysis.option.Domain.ANALYSIS,
+        domain=analysis.parameter.Domain.ANALYSIS,
     )
 
-    db_threshold3 = analysis.option.String(
+    db_threshold3 = analysis.parameter.String(
         default_value="abcd",
         description="Determines what energy levels should be considered a silence",
-        domain=analysis.option.Domain.INTERPRETATION,
+        domain=analysis.parameter.Domain.INTERPRETATION,
     )
 
     def initialize(self):
