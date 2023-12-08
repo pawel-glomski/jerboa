@@ -150,10 +150,7 @@ class DecodingContext:
     def seek(self, timepoint: float) -> None:
         assert timepoint >= 0
 
-        self.media.avc.container.seek(
-            round(timepoint / self.media.avc.stream.time_base),
-            stream=self.media.avc.stream,
-        )
+        self.media.avc.container.seek(round(timepoint * av.time_base))
         self.last_seek_timepoint = timepoint
         self.min_timepoint = timepoint
 
