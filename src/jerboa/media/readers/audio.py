@@ -45,6 +45,7 @@ class AudioReader:
                 raise IndexError(
                     f"Bad audio stream index: {stream_idx=}, {len(container.streams.audio)=}"
                 )
+            container.streams.audio[stream_idx].thread_type = "AUTO"
 
             reformatter = AudioReformatter(self._config)
             for raw_frame in container.decode(container.streams.audio[stream_idx]):

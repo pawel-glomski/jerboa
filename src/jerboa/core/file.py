@@ -5,9 +5,67 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QUrl
 
-CACHE_DIR_ENV_VAR_NAME = "SPLE_HOME"
-DEFAULT_CACHE_DIR_PATH = Path.home() / ".jerboa/"
-CACHE_DIR_PATH = Path(os.environ.get(CACHE_DIR_ENV_VAR_NAME, DEFAULT_CACHE_DIR_PATH)).resolve()
+from jerboa.core.logger import logger
+
+_HOME_PATH_VAR_NAME = "JERBOA_HOME"
+_HOME_PATH_DEFAULT = Path("~/.jerboa/")
+HOME_PATH = Path(os.environ.get(_HOME_PATH_VAR_NAME, _HOME_PATH_DEFAULT)).resolve()
+
+SETTINGS_PATH = HOME_PATH / "settings.json"
+CACHE_DIR_PATH_DEFAULT = Path("~/.cache")
+
+
+class FileManager:
+    def __init__(self, cache_dir_path: str):
+        self._cache_dir_path = Path(cache_dir_path).resolve()
+
+        if not self._cache_dir_path.is_dir():
+            logger.error(
+                f"Cache dir path ({self._cache_dir_path}) is not a directory. "
+                f"Using the default instead ({CACHE_DIR_PATH_DEFAULT})"
+            )
+            self._cache_dir_path = CACHE_DIR_PATH_DEFAULT
+
+        for _ in range(2):
+            try:
+                self._cache_dir_path.mkdir(parents=True, exist_ok=True)
+                test_file_path = self._cache_dir_path / "_write_test"
+                with open(test_file_path, "wb"):
+                    pass
+                test_file_path.unlink()
+                break
+            except PermissionError:
+                if self._cache_dir_path is CACHE_DIR_PATH_DEFAULT:
+                    raise
+                logger.error("No permissions to modify the cache dir, using the default instead")
+                self._cache_dir_path = CACHE_DIR_PATH_DEFAULT
+
+    @property
+    def settings_path(self) -> Path:
+        return SETTINGS_PATH
+
+    @property
+    def cache_dir_path(self) -> Path:
+        return self._cache_dir_path
+
+    def create_cache_dir(self, dir_path: str) -> Path:
+        if not dir_path.startswith("."):  # relative, make it absolute
+            dir_path = self.cache_dir_path / dir_path
+        return _create_cache_dir__absolute(dir_path)
+
+    def _create_cache_dir__absolute(self, absolute_dir_path: str) -> Path:
+        dir_path = Path(absolute_dir_path).resolve()
+        assert str(CACHE_DIR_PATH) in str(dir_path)
+
+        if not dir_path.exists():
+            os.makedirs(dir_path)
+        assert dir_path.exists() and dir_path.is_dir()
+        return dir_path
+
+
+# ------------------------------------------------------------------------------------------------ #
+#                                           PathProcessor                                          #
+# ------------------------------------------------------------------------------------------------ #
 
 
 @dataclass
@@ -53,20 +111,3 @@ class PathProcessor:
         if url.isLocalFile():
             return JbPath(url.toLocalFile(), is_local=True)
         return JbPath(url.toString(), is_local=False)
-
-
-def create_cache_dir_rel(relative_dir_path: str) -> Path:
-    return create_cache_dir_abs(CACHE_DIR_PATH / relative_dir_path)
-
-
-def create_cache_dir_abs(absolute_dir_path: str) -> Path:
-    dir_path = Path(absolute_dir_path).resolve()
-    assert str(CACHE_DIR_PATH) in str(dir_path)
-
-    if not dir_path.exists():
-        os.makedirs(dir_path)
-    assert dir_path.exists() and dir_path.is_dir()
-    return dir_path
-
-
-create_cache_dir_abs(CACHE_DIR_PATH / "temp")
