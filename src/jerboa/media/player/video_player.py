@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from threading import Lock
 
-from jerboa.core.logger import logger
+from jerboa.logger import logger
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask
 from jerboa.media.core import MediaType

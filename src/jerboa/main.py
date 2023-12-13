@@ -1,6 +1,5 @@
 import sys
 from dependency_injector import containers, providers
-from dependency_injector.wiring import Provide, inject
 
 from PySide6 import QtWidgets as QtW
 
@@ -8,21 +7,20 @@ from jerboa import core
 from jerboa import analysis
 from jerboa import media
 from jerboa import gui
+from jerboa.settings import Settings
 
 
 class Container(containers.DeclarativeContainer):
-    # config = providers.Configuration()
-
-    wiring_config = containers.WiringConfiguration(
-        modules=[__name__],
-    )
+    settings = providers.Singleton(Settings.load)
 
     qt_app = providers.Singleton(QtW.QApplication, [])
 
     # ------------------------------------------ Signals ----------------------------------------- #
 
+    show_error_message_signal = providers.Singleton(gui.core.signal.QtSignal, "message", "parent")
+
     media_source_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "media_source")
-    ready_to_play_signal = providers.Singleton(gui.core.signal.QtSignal, "media_source")
+    ready_to_play_signal = providers.Singleton(gui.core.signal.QtSignal)
     video_frame_update_signal = providers.Singleton(gui.core.signal.QtSignal, "frame")
 
     playback_toggle_signal = providers.Singleton(gui.core.signal.QtSignal)
@@ -32,10 +30,17 @@ class Container(containers.DeclarativeContainer):
     audio_output_devices_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
     current_audio_output_device_changed_signal = providers.Singleton(gui.core.signal.QtSignal)
 
-    analysis_algorithm_registered_signal = providers.Singleton(
-        gui.core.signal.QtSignal, "algorithm"
+    analysis_alg_registered_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
+    analysis_alg_env_prep_signal = providers.Singleton(
+        gui.core.signal.QtSignal, "algorithm_name", "env_parameters"
     )
-    analysis_algorithm_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
+    analysis_alg_env_prep_task_started_signal = providers.Singleton(
+        gui.core.signal.QtSignal, "algorithm_name", "task_future"
+    )
+    analysis_alg_env_prep_progress_signal = providers.Singleton(
+        gui.core.signal.QtSignal, "progress", "message"
+    )
+    analysis_alg_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
 
     # -------------------------------------- Multithreading -------------------------------------- #
 
@@ -61,9 +66,14 @@ class Container(containers.DeclarativeContainer):
 
     # ------------------------------------- Analysis Manager ------------------------------------- #
 
-    analysis_algorithm_registry = providers.Singleton(
+    analysis_alg_registry = providers.Singleton(
         analysis.registry.AlgorithmRegistry,
-        analysis_algorithm_registered_signal=analysis_algorithm_registered_signal,
+        settings=settings,
+        thread_pool=thread_pool,
+        alg_registered_signal=analysis_alg_registered_signal,
+        alg_env_prep_task_started_signal=analysis_alg_env_prep_task_started_signal,
+        alg_env_prep_progress_signal=analysis_alg_env_prep_progress_signal,
+        show_error_message_signal=show_error_message_signal,
     )
 
     analysis_manager = providers.Singleton(analysis.manager.AnalysisManager)
@@ -120,50 +130,77 @@ class Container(containers.DeclarativeContainer):
         gui.container.Container,
         qt_app=qt_app,
         thread_pool=thread_pool,
+        show_error_message_signal=show_error_message_signal,
         media_source_selected_signal=media_source_selected_signal,
-        ready_to_play_signal=ready_to_play_signal,
         playback_toggle_signal=playback_toggle_signal,
         seek_backward_signal=seek_backward_signal,
         seek_forward_signal=seek_forward_signal,
-        video_frame_update_signal=video_frame_update_signal,
-        analysis_algorithm_selected_signal=analysis_algorithm_selected_signal,
-        analysis_algorithm_registered_signal=analysis_algorithm_registered_signal,
+        analysis_alg_env_prep_signal=analysis_alg_env_prep_signal,
+        analysis_alg_selected_signal=analysis_alg_selected_signal,
     )
 
 
 def main():
-    dependencies_container = Container()
-    dependencies_container.wire()
-    dependencies_container.gui_container().wire()
+    core_c = Container()
+    connect_signals(core_c)
 
-    connect_signals()
+    core_c.analysis_alg_registry().update()
 
-    sys.exit(gui.container.run())
+    sys.exit(run_gui(core_c.gui_container()))
+
+
+def connect_signals(core_c: Container) -> None:
+    gui_c = core_c.gui_container()
+
+    # ----------------------------------- media player signals ----------------------------------- #
+
+    core_c.media_source_selected_signal().connect(core_c.media_player().initialize)
+    core_c.playback_toggle_signal().connect(core_c.media_player().playback_toggle)
+    core_c.seek_backward_signal().connect(core_c.media_player().seek_backward)
+    core_c.seek_forward_signal().connect(core_c.media_player().seek_forward)
+
+    core_c.ready_to_play_signal().connect(gui_c.jb_main_page_stack().show_player_page)
+    core_c.video_frame_update_signal().connect(gui_c.player_page_canvas().update_frame)
+
+    # -------------------------------- algorithm registry signals -------------------------------- #
+
+    core_c.analysis_alg_registered_signal().connect(
+        gui_c.analysis_alg_registry_dialog().add_algorithm
+    )
+    core_c.analysis_alg_env_prep_signal().connect(
+        core_c.analysis_alg_registry().prepare_environment
+    )
+    core_c.analysis_alg_env_prep_task_started_signal().connect(
+        gui_c.analysis_alg_registry_dialog().open_env_prep_progress_dialog
+    )
+    core_c.analysis_alg_env_prep_progress_signal().connect(
+        gui_c.analysis_alg_registry_dialog().update_env_prep_progress_dialog
+    )
+
+    # ------------------------------- error message dialog signals ------------------------------- #
+
+    core_c.show_error_message_signal().connect(gui_c.error_message_dialog_factory().open)
+
+    # ------------------------------------- menu bar signals ------------------------------------- #
+
+    gui_c.menu_bar_file_open().signal.connect(gui_c.media_source_selection_dialog().open_clean)
+    gui_c.menu_bar_algorithms().signal.connect(gui_c.analysis_alg_registry_dialog().open)
+
+
+def run_gui(gui_c: gui.container.Container) -> int:
+    qt_app = gui_c.qt_app()
+    jb_main_window = gui_c.jb_main_window()
+
+    palette = qt_app.palette()
+    palette.setColor(palette.ColorRole.ToolTipBase, palette.color(palette.ColorRole.Window))
+    palette.setColor(
+        palette.ColorRole.ToolTipText, palette.color(palette.ColorRole.PlaceholderText)
+    )
+    qt_app.setPalette(palette)
+
+    jb_main_window.show()
+    return qt_app.exec()
 
 
 if __name__ == "__main__":
     main()
-
-
-@inject
-def connect_signals(
-    media_source_selected: core.signal.Signal = Provide[Container.media_source_selected_signal],
-    playback_toggle: core.signal.Signal = Provide[Container.playback_toggle_signal],
-    seek_backward: core.signal.Signal = Provide[Container.seek_backward_signal],
-    seek_forward: core.signal.Signal = Provide[Container.seek_forward_signal],
-    media_player: media.player.media_player.MediaPlayer = Provide[Container.media_player],
-) -> None:
-    media_source_selected.connect(media_player.initialize)
-    playback_toggle.connect(media_player.playback_toggle)
-    seek_backward.connect(media_player.seek_backward)
-    seek_forward.connect(media_player.seek_forward)
-
-
-@inject
-def register_analysis_algorithms(
-    analysis_algorithm_registry: analysis.registry.AlgorithmRegistry = Provide[
-        Container.analysis_algorithm_registry
-    ],
-) -> None:
-    analysis_algorithm_registry.register_algorithm(analysis.algorithms.silence_remover.Algorithm)
-    analysis_algorithm_registry.register_algorithm(analysis.algorithms.redundancy_remover.Algorithm)

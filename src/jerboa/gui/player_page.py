@@ -36,7 +36,7 @@ class FrameMappingContext:
 
 
 class Canvas(QtW.QStackedWidget):
-    def __init__(self, video_frame_update_signal: Signal, no_video_text: str):
+    def __init__(self, no_video_text: str):
         super().__init__()
 
         self.setMinimumHeight(50)
@@ -56,9 +56,7 @@ class Canvas(QtW.QStackedWidget):
         self.addWidget(self._no_video_label)
         self.setCurrentWidget(self._no_video_label)
 
-        video_frame_update_signal.connect(self._on_frame_update)
-
-    def _on_frame_update(self, frame: JbVideoFrame) -> None:
+    def update_frame(self, frame: JbVideoFrame) -> None:
         if frame is not None:
             self._assure_correct_frame_size(frame.width, frame.height)
 
@@ -92,11 +90,13 @@ class Timeline(QtW.QLabel):
 
         self.setText("timeline")
         self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
+        self.setStyleSheet("background-color: palette(Base);")
+
         # self.setFrameShape(QtW.QFrame.Shape.StyledPanel)
         self.setMinimumHeight(50)
 
 
-class PlayerView(QtW.QWidget):
+class PlayerPage(QtW.QWidget):
     def __init__(
         self,
         canvas: Canvas,
@@ -119,7 +119,7 @@ class PlayerView(QtW.QWidget):
         self._splitter.setStyleSheet(
             """
             QSplitter::handle {
-                border-top: 1px solid #413F42;
+                border-top: 1px solid palette(mid);
                 margin: 3px 0px;
             }
             """

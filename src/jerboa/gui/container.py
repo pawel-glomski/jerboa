@@ -1,5 +1,4 @@
 from dependency_injector import containers, providers
-from dependency_injector.wiring import Provide, inject
 
 import PySide6.QtWidgets as QtW
 
@@ -7,38 +6,44 @@ from jerboa.core.file import PathProcessor
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadPool
 from jerboa.media.recognizer import MediaSourceRecognizer
-from .main_view_stack import MainViewStack
+
+from .error_message_dialog import ErrorMessageDialogFactory
+from .main_page_stack import MainPageStack
 from .status_bar import StatusBar
 from .main_window import MainWindow
 from . import core
 from . import common
 from . import menu_bar
-from . import player_view
+from . import player_page
 from . import resources
 from . import media_source_selection
 from . import analysis_algorithm_selection
+from . import analysis_algorithm_registry
 
 
 class Container(containers.DeclarativeContainer):
-    # config = providers.Configuration()
-    wiring_config = containers.WiringConfiguration(
-        modules=[__name__],
-    )
-
     # --------------------------------------- Dependencies --------------------------------------- #
 
     qt_app = providers.Dependency(QtW.QApplication)
     thread_pool = providers.Dependency(ThreadPool)
 
+    show_error_message_signal = providers.Dependency(Signal)
+
     media_source_selected_signal = providers.Dependency(Signal)
-    ready_to_play_signal = providers.Dependency(Signal)
     playback_toggle_signal = providers.Dependency(Signal)
     seek_backward_signal = providers.Dependency(Signal)
     seek_forward_signal = providers.Dependency(Signal)
-    video_frame_update_signal = providers.Dependency(Signal)
 
-    analysis_algorithm_registered_signal = providers.Dependency(Signal)
-    analysis_algorithm_selected_signal = providers.Dependency(Signal)
+    analysis_alg_env_prep_signal = providers.Dependency(Signal)
+    analysis_alg_selected_signal = providers.Dependency(Signal)
+
+    # ----------------------------------------- Resources ---------------------------------------- #
+
+    resource__loading_spinner_movie = providers.Singleton(
+        resources.common.LoadingSpinner,
+        path=":/loading_spinner.gif",
+        size=(30, 30),
+    )
 
     # ------------------------------------------ Palette ----------------------------------------- #
 
@@ -46,14 +51,6 @@ class Container(containers.DeclarativeContainer):
     #     Palette,
     #     app=qt_app,
     # )
-
-    # ----------------------------------------- Resources ---------------------------------------- #
-
-    resource_loading_spinner = providers.Singleton(
-        resources.common.LoadingSpinner,
-        path=":/loading_spinner.gif",
-        size=(30, 30),
-    )
 
     # ----------------------------------------- Menu bar ----------------------------------------- #
 
@@ -70,9 +67,9 @@ class Container(containers.DeclarativeContainer):
         ),
     )
 
-    menu_bar_analyze = providers.Singleton(
+    menu_bar_algorithms = providers.Singleton(
         menu_bar.MenuAction,
-        name="Analyze",
+        name="Algorithms",
         signal=providers.Factory(core.signal.QtSignal),
     )
 
@@ -82,38 +79,34 @@ class Container(containers.DeclarativeContainer):
             menu_bar_file,
         ),
         actions=providers.List(
-            menu_bar_analyze,
+            menu_bar_algorithms,
         ),
     )
 
-    # ---------------------------------------- Player view --------------------------------------- #
+    # ---------------------------------------- Player page --------------------------------------- #
 
-    player_view_canvas = providers.Singleton(
-        player_view.Canvas,
-        video_frame_update_signal=video_frame_update_signal,
-        no_video_text="No video stream",
-    )
-    player_view_timeline = providers.Singleton(
-        player_view.Timeline,
+    player_page_canvas = providers.Singleton(player_page.Canvas, no_video_text="No video stream")
+    player_page_timeline = providers.Singleton(
+        player_page.Timeline,
         # playback_update_signal=media_player.playback_update
     )
 
-    jb_player_view = providers.Singleton(
-        player_view.PlayerView,
-        canvas=player_view_canvas,
-        timeline=player_view_timeline,
+    jb_player_page = providers.Singleton(
+        player_page.PlayerPage,
+        canvas=player_page_canvas,
+        timeline=player_page_timeline,
         playback_toggle_signal=playback_toggle_signal,
         seek_backward_signal=seek_backward_signal,
         seek_forward_signal=seek_forward_signal,
     )
 
-    # -------------------------------------- Main view stack ------------------------------------- #
+    # -------------------------------------- Main page stack ------------------------------------- #
 
-    jb_main_view_stack = providers.Singleton(
-        MainViewStack,
-        player_view=jb_player_view,
-        # settings_view=settings_view,
-        # plugins_view=plugins_view,
+    jb_main_page_stack = providers.Singleton(
+        MainPageStack,
+        player_page=jb_player_page,
+        # settings_page=settings_page,
+        # plugins_page=plugins_page,
     )
 
     # ---------------------------------------- Status bar ---------------------------------------- #
@@ -129,14 +122,23 @@ class Container(containers.DeclarativeContainer):
         min_size=(640, 360),
         relative_size=(0.5, 0.5),
         menu_bar=jb_menu_bar,
-        main_widget=jb_main_view_stack,
+        main_widget=jb_main_page_stack,
         status_bar=jb_status_bar,
+    )
+
+    # ----------------------------------- Error message dialog ----------------------------------- #
+
+    error_message_dialog_factory = providers.Singleton(
+        ErrorMessageDialogFactory,
+        title="Error messsage",
+        default_parent=jb_main_window,
     )
 
     # ------------------------------- Media source selection dialog ------------------------------ #
 
     media_source_selection_dialog = providers.Singleton(
         media_source_selection.dialog.Dialog,
+        title="Select media file",
         min_size=(800, 400),
         path_selector=providers.Factory(
             common.file.PathSelector,
@@ -157,14 +159,14 @@ class Container(containers.DeclarativeContainer):
             path_selected_signal=providers.Factory(core.signal.QtSignal, "media_source_path"),
             path_modified_signal=providers.Factory(core.signal.QtSignal),
         ),
-        panel_stack=providers.Factory(common.panel_stack.PanelStack),
-        hint_panel=providers.Factory(
-            common.panel_stack.HintPanel,
+        page_stack=providers.Factory(common.page_stack.PageStack),
+        hint_page=providers.Factory(
+            common.page_stack.MessagePage,
             text="Select a local file or enter an URL",
         ),
-        loading_spinner_panel=providers.Factory(
-            common.panel_stack.LoadingSpinnerPanel,
-            loading_spinner_movie=resource_loading_spinner,
+        loading_spinner_page=providers.Factory(
+            common.page_stack.LoadingSpinnerPage,
+            loading_spinner_movie=resource__loading_spinner_movie,
         ),
         media_source_resolver=providers.Factory(
             media_source_selection.resolver.MediaSourceResolver,
@@ -178,94 +180,68 @@ class Container(containers.DeclarativeContainer):
                 label_text="Selected video quality:",
             ),
         ),
-        button_box=providers.Factory(
-            common.button_box.RejectAcceptButtonBox,
-            reject_button=common.button_box.ButtonType.Cancel,
-            accept_button=common.button_box.ButtonType.Ok,
-            icons=False,
-            is_accept_button_disabled_by_default=True,
-        ),
-        recognizer=providers.Factory(
-            MediaSourceRecognizer,
-            recognition_finished_signal=providers.Factory(core.signal.QtSignal, "callback"),
-            thread_pool=thread_pool,
-        ),
+        button_box=providers.Factory(common.button_box.RejectAcceptButtonBox),
+        recognizer=providers.Factory(MediaSourceRecognizer, thread_pool=thread_pool),
+        recognizer_success_signal=providers.Factory(core.signal.QtSignal, "media_source"),
+        recognizer_failure_signal=providers.Factory(core.signal.QtSignal, "error_message"),
         media_source_selected_signal=media_source_selected_signal,
+        show_error_message_signal=show_error_message_signal,
         parent=jb_main_window,
     )
 
-    # ---------------------------- Analysis algorithm selection dialog --------------------------- #
+    # -------------------------------- Analysis algorithm registry ------------------------------- #
 
-    analysis_algorithm_selector = providers.Singleton(
-        analysis_algorithm_selection.dialog.AlgorithmSelector,
-        algorithm_changed_signal=providers.Factory(core.signal.QtSignal, "algorithm"),
+    analysis_alg_registry_dialog = providers.Singleton(
+        analysis_algorithm_registry.dialog.Dialog,
+        title="Algorithm registry",
+        min_size=(600, 400),
+        name_column_header=providers.Factory(
+            analysis_algorithm_registry.dialog.ColumnHeader, "Algorithm"
+        ),
+        description_column_header=providers.Factory(
+            analysis_algorithm_registry.dialog.ColumnHeader, "Description"
+        ),
+        environment_column_header=providers.Factory(
+            analysis_algorithm_registry.dialog.ColumnHeader, "Env"
+        ),
+        env_config_dialog_factory=providers.Factory(
+            analysis_algorithm_registry.env_config_dialog.Dialog,
+            title="Environment configuration",
+            min_size=(300, 100),
+            parameter_collection=providers.Factory(
+                common.parameter.ParameterCollection,
+                no_params_text="No parameters",
+            ),
+            button_box=providers.Factory(
+                common.button_box.RejectAcceptButtonBox,
+                is_accept_button_disabled_by_default=False,
+            ),
+        ).provider,
+        env_prep_progress_dialog_factory=providers.Factory(
+            analysis_algorithm_registry.env_prep_progress_dialog.Dialog,
+            title="Preparing environment",
+            min_size=(400, 100),
+            init_message="Initializing...",
+            button_box=providers.Factory(
+                common.button_box.RejectAcceptButtonBox,
+                reject_button_text="Abort",
+            ),
+        ).provider,
+        analysis_alg_env_prep_signal=analysis_alg_env_prep_signal,
+        parent=jb_main_window,
     )
+
+    # -------------------------- Analysis algorithm configuration dialog ------------------------- #
 
     analysis_algorithm_selection_dialog = providers.Singleton(
         analysis_algorithm_selection.dialog.Dialog,
+        title="Algorithm configuration",
         min_size=(600, 400),
-        algorithm_selector=analysis_algorithm_selector,
         configurator=providers.Factory(
             analysis_algorithm_selection.dialog.AlgorithmConfigurator,
             parameter_collection=providers.Factory(common.parameter.ParameterCollection),
         ),
-        button_box=providers.Factory(
-            common.button_box.RejectAcceptButtonBox,
-            reject_button=common.button_box.ButtonType.Cancel,
-            accept_button=common.button_box.ButtonType.Ok,
-            icons=False,
-            is_accept_button_disabled_by_default=False,
-        ),
-        analysis_algorithm_selected_signal=analysis_algorithm_selected_signal,
+        button_box=providers.Factory(common.button_box.RejectAcceptButtonBox),
+        analysis_alg_selected_signal=analysis_alg_selected_signal,
         parent=jb_main_window,
     )
-
-
-@inject
-def run(
-    qt_app: QtW.QApplication = Provide[Container.qt_app],
-    jb_main_window: MainWindow = Provide[Container.jb_main_window],
-) -> int:
-    connect_signals()
-    fix_palette()
-
-    jb_main_window.show()
-    return qt_app.exec()
-
-
-def connect_signals():
-    connect_menu_bar_signals()
-
-
-@inject
-def connect_menu_bar_signals(
-    menu_bar_file_open: menu_bar.MenuAction = Provide[Container.menu_bar_file_open],
-    menu_bar_analyze: menu_bar.MenuAction = Provide[Container.menu_bar_analyze],
-    media_source_selection_dialog: media_source_selection.dialog.Dialog = Provide[
-        Container.media_source_selection_dialog
-    ],
-    analysis_algorithm_selection_dialog: analysis_algorithm_selection.dialog.Dialog = Provide[
-        Container.analysis_algorithm_selection_dialog
-    ],
-) -> None:
-    menu_bar_file_open.signal.connect(media_source_selection_dialog.open_clean)
-    menu_bar_analyze.signal.connect(analysis_algorithm_selection_dialog.open_clean)
-
-
-@inject
-def connect_analysis_algorithm_selector(
-    analysis_algorithm_registered_signal: Signal = Provide[
-        Container.analysis_algorithm_registered_signal
-    ],
-    analysis_algorithm_selector: analysis_algorithm_selection.dialog.AlgorithmSelector = Provide[
-        Container.analysis_algorithm_selector
-    ],
-) -> None:
-    analysis_algorithm_registered_signal.connect(analysis_algorithm_selector.add_algorithm)
-
-
-@inject
-def fix_palette(qt_app: QtW.QApplication = Provide[Container.qt_app]) -> None:
-    palette = qt_app.palette()
-    palette.setColor(palette.ColorRole.ToolTipBase, palette.color(palette.ColorRole.Window))
-    qt_app.setPalette(palette)

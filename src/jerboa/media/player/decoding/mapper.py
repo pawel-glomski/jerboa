@@ -1,6 +1,6 @@
-from jerboa.core.circular_buffer import create_circular_audio_buffer
 from jerboa.media import standardized_audio as std_audio
 from jerboa.media.core import AudioConfig
+from .circular_buffer import create_circular_audio_buffer
 from .frame import PreMappedFrame, MappedAudioFrame, MappedVideoFrame
 
 

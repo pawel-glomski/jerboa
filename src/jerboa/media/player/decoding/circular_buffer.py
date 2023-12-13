@@ -170,7 +170,8 @@ class CircularBuffer:
             ValueError: When attempting to remove more elements than the buffer contains.
         """
         data = np.concatenate(self._get(pop_size), self._axis)
-        # max below prevents 0 % 0 when pop_size == 0 and max_size == 0 and does nothing for other cases
+        # `max()` below prevents `0 % 0` when `pop_size == 0 and max_size == 0`,
+        # and does nothing for other cases
         self._head = (self._head + pop_size) % max(1, self.max_size)
         self._size -= pop_size
         return data
@@ -179,12 +180,12 @@ class CircularBuffer:
         """
         Retrieves the first n elements of the buffer and returns them as two array views.
 
-        The first (primary) view contains elements in the range: (`head` -> max(`max_size`, `tail`)).
+        The first (primary) view contains elements in the range: (`head` -> max(`max_size`, `tail`))
 
         The second (overflow) view contains elements in the range: (0 -> head).
 
-        The distribution of elements between the two views depends on the relative positions of `head`
-        and `tail`. The total number of elements across both views is equal to `count`.
+        The distribution of elements between the two views depends on the relative positions of
+        `head` and `tail`. The total number of elements across both views is equal to `count`.
 
         Args:
             count (int): The number of elements to retrieve from the buffer.

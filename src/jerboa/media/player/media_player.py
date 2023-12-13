@@ -1,7 +1,7 @@
 from typing import Callable
 import enum
 
-from jerboa.core.logger import logger
+from jerboa.logger import logger
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadPool, ThreadSpawner, TaskQueue, Task, FnTask
 from jerboa.core.timeline import FragmentedTimeline

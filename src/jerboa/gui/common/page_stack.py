@@ -3,26 +3,26 @@ import PySide6.QtGui as QtG
 from PySide6.QtCore import Qt
 
 
-class PanelStack(QtW.QStackedWidget):
+class PageStack(QtW.QStackedWidget):
     def __init__(self) -> None:
         super().__init__()
         self.setFrameShape(QtW.QFrame.Shape.Box)
         self.setSizePolicy(QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Expanding)
 
-    def set_panels(self, panels: list[QtW.QWidget]) -> None:
+    def set_pages(self, pages: list[QtW.QWidget]) -> None:
         while self.count() > 0:
             self.removeWidget(self.widget(0))
-        for panel in panels:
-            self.addWidget(panel)
+        for page in pages:
+            self.addWidget(page)
 
 
-class HintPanel(QtW.QLabel):
+class MessagePage(QtW.QLabel):
     def __init__(self, text: str):
         super().__init__(text)
         self.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
 
-class LoadingSpinnerPanel(QtW.QLabel):
+class LoadingSpinnerPage(QtW.QLabel):
     def __init__(self, loading_spinner_movie: QtG.QMovie):
         super().__init__()
         self.setMovie(loading_spinner_movie)

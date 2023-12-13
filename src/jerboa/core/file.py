@@ -5,7 +5,7 @@ from dataclasses import dataclass
 
 from PySide6.QtCore import QUrl
 
-from jerboa.core.logger import logger
+from jerboa.logger import logger
 
 _HOME_PATH_VAR_NAME = "JERBOA_HOME"
 _HOME_PATH_DEFAULT = Path("~/.jerboa/")

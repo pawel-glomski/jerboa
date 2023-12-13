@@ -1,7 +1,51 @@
+[project]
+name = "jerboa"
+dynamic = ["version"]
+description = "AI-powered Python media player"
+
+authors = [{ name = "Paweł Głomski", email = "pglomski.dev@gmail.com" }]
+urls.Homepage = "https://github.com/pawel-glomski/jerboa"
+
+readme = "README.md"
+license.text = "AGPLv3"
+classifiers = [
+    "License :: OSI Approved :: GNU Affero General Public License v3",
+    "Intended Audience :: Developers",
+    "Intended Audience :: End Users/Desktop",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Multimedia :: Video :: Display",
+    "Topic :: Multimedia :: Sound/Audio :: Players",
+    "Programming Language :: Python :: 3",
+]
+
+requires-python = ">=3.11, <3.12"
+dependencies = [
+    "dependency-injector",
+    "loguru",
+    "pydantic-settings",
+    "av",
+    "pylibrb",
+    "PySide6",
+    "yt-dlp",
+]
+
+[project.optional-dependencies]
+gmpy = ["gmpy2"]
+
+[project.scripts]
+jerboa = "jerboa.main:main"
+
+[project.gui-scripts]
+jerboa = "jerboa.main:main"
+
 [build-system]
-requires = ["setuptools>=42", "wheel"]
+requires = ["setuptools >= 61.0"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools.dynamic]
+version = { attr = "jerboa.__version__" }
+
 [tool.black]
-target-versions = ["py310", "py311", "py312"]
+target-versions = ["py312"]
 line-length = 100

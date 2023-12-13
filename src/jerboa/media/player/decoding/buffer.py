@@ -1,7 +1,7 @@
 from collections import deque
 
-from jerboa.core.circular_buffer import create_circular_audio_buffer
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig
+from .circular_buffer import create_circular_audio_buffer
 from .frame import JbAudioFrame, JbVideoFrame
 
 

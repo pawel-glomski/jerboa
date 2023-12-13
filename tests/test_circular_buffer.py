@@ -5,7 +5,7 @@ import numpy as np
 from typing import Callable
 from dataclasses import dataclass
 
-from jerboa.core.circular_buffer import CircularBuffer
+from jerboa.media.player.decoding.circular_buffer import CircularBuffer
 
 
 @dataclass

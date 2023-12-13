@@ -21,6 +21,7 @@ logger.add(
         "<level>{extra[context]}{message}</level>"
         "<light-black>{extra[details]}</light-black>"
     ),
+    diagnose=False,
 )
 logger.configure(
     extra={

@@ -3,7 +3,6 @@ from PySide6.QtCore import Qt
 
 
 from jerboa.media.source import MediaSource, MediaStreamSource
-from jerboa.gui.common import parameter
 
 
 class StreamVariantSelector(QtW.QWidget):
@@ -47,13 +46,12 @@ class MediaSourceResolver(QtW.QWidget):
     ):
         super().__init__()
 
-        title_parameter = parameter.String(
-            name=title_text, description="", init_value="", read_only=True
-        )
+        self._title = QtW.QLineEdit()
+        self._title.setReadOnly(True)
+
         title_layout = QtW.QHBoxLayout()
-        title_layout.addWidget(title_parameter.label_widget)
-        title_layout.addWidget(title_parameter.input_widget)
-        self._title = title_parameter.input_widget
+        title_layout.addWidget(QtW.QLabel(title_text))
+        title_layout.addWidget(self._title)
 
         streams_selection_layout = QtW.QHBoxLayout()
         streams_selection_layout.addWidget(audio_variant_selector)
@@ -70,14 +68,14 @@ class MediaSourceResolver(QtW.QWidget):
     def reset(self) -> None:
         self._media_source = None
 
-        self._title.reset("")
+        self._title.setText("")
         self._audio_variant_selector.reset()
         self._video_variant_selector.reset()
 
     def set_media_source(self, media_source: MediaSource):
         self._media_source = media_source
 
-        self._title.reset(media_source.title)
+        self._title.setText(media_source.title)
         self._audio_variant_selector.set_stream_source(media_source.audio)
         self._video_variant_selector.set_stream_source(media_source.video)
 

@@ -6,7 +6,7 @@ from collections import deque
 import dataclasses as dclass
 import enum
 
-from .logger import logger
+from jerboa.logger import logger
 
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
@@ -446,6 +446,8 @@ class Task(Exception, Generic[T1]):
         def active(self) -> bool:
             return self._active
 
+    # ----------------------------------------- Executor ----------------------------------------- #
+
     class Executor(Generic[T2]):
         def __init__(self, state: "Task.State[T2]") -> None:
             self._state = state
@@ -551,33 +553,45 @@ class Task(Exception, Generic[T1]):
             *,
             finishing_aborted: bool = False,
             timeout: float | None = None,
+            aborts_other: bool = True,
         ) -> bool:
             assert self._active
-            assert future._state.task is not self._state.task
+            assert future._state.task is not self._state.task  # pylint: disable=protected-access
 
             is_finished_event = future.create_finished_event(finishing_aborted=finishing_aborted)
             return self.abort_aware_wait(
-                event=is_finished_event,
-                finishing_aborted=finishing_aborted,
-                timeout=timeout,
+                is_finished_event, timeout=timeout, aborts_other=aborts_other
             )
 
         def abort_aware_wait(
             self,
             event: Event,
             *,
-            finishing_aborted: bool = False,
             timeout: float | None = None,
+            aborts_other: bool = True,
         ) -> bool:
             assert self._active
 
             with self._state.mutex:
-                self._state.add_event_to_abort_on_finish__locked(
-                    event, finishing_aborted=finishing_aborted
-                )
+                self._state.add_event_to_abort_on_finish__locked(event, finishing_aborted=False)
             result = event.wait(timeout=timeout)
-            self.exit_if_aborted()
+            if self.stage.is_aborted():
+                if aborts_other:
+                    event.abort()
+                self.abort()
             return result
+
+        def abort_aware_sleep(self, sleep_time: float) -> bool:
+            """Returns `False` if aborted"""
+            assert self._active
+            assert sleep_time is not None
+
+            with self._state.mutex:
+                event = self._state.create_finished_event__locked(finishing_aborted=False)
+            event.wait(timeout=sleep_time)
+            return not self.stage.is_aborted()
+
+    # ------------------------------------------- Task ------------------------------------------- #
 
     id: Any = dclass.field(default=None, kw_only=True)
     already_finished: dclass.InitVar[bool] = dclass.field(default=False, kw_only=True)
@@ -649,7 +663,7 @@ class Task(Exception, Generic[T1]):
         """
         raise self
 
-    def invalidates(self, task: "Task") -> bool:
+    def invalidates(self, task: "Task") -> bool:  # pylint: disable=unused-argument
         return False
 
 

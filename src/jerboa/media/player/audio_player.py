@@ -4,7 +4,8 @@ import PySide6.QtWidgets as QtW
 import PySide6.QtMultimedia as QtM
 import PySide6.QtCore as QtC
 
-from jerboa.core.logger import logger
+from jerboa.utils import ActivationContext
+from jerboa.logger import logger
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import (
     ThreadSpawner,
@@ -233,25 +234,6 @@ class QtAudioSourceDevice(QtC.QIODevice):
 
     def bytesAvailable(self) -> int:
         return 0
-
-
-class ActivationContext:
-    def __init__(self):
-        self._active = False
-
-    def __del__(self):
-        assert not self._active
-
-    def __enter__(self) -> None:
-        assert not self._active
-        self._active = True
-
-    def __exit__(self, *exc_args) -> None:
-        assert self._active
-        self._active = False
-
-    def __bool__(self) -> bool:
-        return self._active
 
 
 class AudioPlayer(PlaybackTimer):
@@ -537,6 +519,8 @@ class AudioPlayer(PlaybackTimer):
                 executor.abort()
 
             with executor.finish_context:
+                # for some reason QAudioSink stops working after a few restarts, so instead we just
+                # create a new sink each time...
                 if self.__audio_thread__reset__locked(self._audio_sink.format(), self._decoder):
                     logger.debug("Seeking... Successful")
                 else:

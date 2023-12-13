@@ -1,11 +1,10 @@
-from abc import ABC, abstractmethod
 from typing import Callable
 from dataclasses import dataclass
 from threading import Lock, Condition
 import inspect
 
 
-class Signal(ABC):
+class Signal:
     class Promise:
         class AlreadyFulfilledError(Exception):
             ...
@@ -61,7 +60,6 @@ class Signal(ABC):
     def subscribers(self) -> list[Callable[[EmitArg], None]]:
         return self._subscribers
 
-    @abstractmethod
     def connect(self, subscriber: Callable) -> None:
         subscriber_parameters = inspect.signature(subscriber).parameters
 
@@ -92,8 +90,8 @@ class Signal(ABC):
                 )
             self._subscribers.append(_worker)
 
-    @abstractmethod
-    def emit(self, **kwargs) -> Promise:
+    # capture positional arguments to `_`, to crash on the "missing arguments" error instead
+    def emit(self, *_, **kwargs) -> Promise:
         with self._mutex:
             emit_arg = Signal.EmitArg(
                 slot_kwargs=kwargs,

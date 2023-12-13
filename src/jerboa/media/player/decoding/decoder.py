@@ -1,6 +1,6 @@
 from dataclasses import dataclass
 
-from jerboa.core.logger import logger
+from jerboa.logger import logger
 from jerboa.core.multithreading import ThreadSpawner, Task, FnTask, PredicateEmitter, Thread
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig, AudioConstraints
 from .buffer import create_buffer

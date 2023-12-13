@@ -9,29 +9,22 @@ from .source import MediaSource
 
 
 class MediaSourceRecognizer:
-    def __init__(
-        self,
-        recognition_finished_signal: Signal,
-        thread_pool: ThreadPool,
-    ) -> None:
-        self._recognition_finished_signal = recognition_finished_signal
-        self._recognition_finished_signal.connect(lambda callback: callback())
-
+    def __init__(self, thread_pool: ThreadPool) -> None:
         self._thread_pool = thread_pool
 
     def recognize(
         self,
         media_source_path: JbPath,
-        on_success: Callable[[MediaSource], None],
-        on_failure: Callable[[str], None],
+        success_signal: Signal,
+        failure_signal: Signal,
     ) -> FnTask.Future:
         return self._thread_pool.start(
             FnTask(
                 lambda executor: self._recognize(
                     executor,
                     media_source_path,
-                    on_success,
-                    on_failure,
+                    success_signal,
+                    failure_signal,
                 )
             )
         )
@@ -40,8 +33,8 @@ class MediaSourceRecognizer:
         self,
         executor: FnTask.Executor,
         media_source_path: JbPath,
-        on_success: Callable[[MediaSource], None],
-        on_failure: Callable[[str], None],
+        success_signal: Signal,
+        failure_signal: Signal,
     ):
         import av
 
@@ -81,10 +74,8 @@ class MediaSourceRecognizer:
                 except Exception as err:
                     recognition_error_message = str(err)
 
-        def callback_impl():
+        with executor.finish_context:
             if media_source is not None:
-                on_success(media_source)
+                success_signal.emit(media_source=media_source)
             else:
-                on_failure(recognition_error_message)
-
-        executor.finish_with(self._recognition_finished_signal.emit, callback=callback_impl)
+                failure_signal.emit(error_message=recognition_error_message)

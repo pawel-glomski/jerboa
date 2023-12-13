@@ -9,26 +9,31 @@ from jerboa.media.source import MediaSource
 from jerboa.media.recognizer import MediaSourceRecognizer
 from jerboa.gui.common.file import PathSelector
 from jerboa.gui.common.button_box import RejectAcceptButtonBox
-from jerboa.gui.common.panel_stack import PanelStack, HintPanel, LoadingSpinnerPanel
+from jerboa.gui.common.page_stack import PageStack, MessagePage, LoadingSpinnerPage
 from .resolver import MediaSourceResolver
 
 
 class Dialog(QtW.QDialog):
     def __init__(
         self,
+        title: str,
         min_size: tuple[int, int],
         path_selector: PathSelector,
-        panel_stack: PanelStack,
-        hint_panel: HintPanel,
-        loading_spinner_panel: LoadingSpinnerPanel,
+        page_stack: PageStack,
+        hint_page: MessagePage,
+        loading_spinner_page: LoadingSpinnerPage,
         media_source_resolver: MediaSourceResolver,
         button_box: RejectAcceptButtonBox,
         recognizer: MediaSourceRecognizer,
+        recognizer_success_signal: Signal,
+        recognizer_failure_signal: Signal,
         media_source_selected_signal: Signal,
+        show_error_message_signal: Signal,
         parent: QtW.QWidget | None = None,
         flags: Qt.WindowType = Qt.WindowType.Dialog,
     ) -> None:
         super().__init__(parent, flags)
+        self.setWindowTitle(title)
         self.setMinimumSize(*min_size)
 
         self._path_selector = path_selector
@@ -36,12 +41,12 @@ class Dialog(QtW.QDialog):
         self._path_selector.path_invalid_signal.connect(self._on_media_source_invalid_path)
         self._path_selector.path_modified_signal.connect(button_box.loose_accept_focus)
 
-        self._panel_hint = hint_panel
-        self._panel_loading = loading_spinner_panel
-        self._panel_media_source_resolver = media_source_resolver
-        self._panel_stack = panel_stack
-        self._panel_stack.set_panels(
-            [self._panel_hint, self._panel_loading, self._panel_media_source_resolver]
+        self._page_hint = hint_page
+        self._page_loading = loading_spinner_page
+        self._page_media_source_resolver = media_source_resolver
+        self._page_stack = page_stack
+        self._page_stack.set_pages(
+            [self._page_hint, self._page_loading, self._page_media_source_resolver]
         )
 
         self._button_box = button_box
@@ -51,14 +56,16 @@ class Dialog(QtW.QDialog):
         self._recognizer = recognizer
         self._recognizer_task_future: Task.Future | None = None
 
-        self._error_dialog = QtW.QErrorMessage(parent=self)
-        self._error_dialog.accepted.connect(self.reset)
-
+        self._recognizer_success_signal = recognizer_success_signal
+        self._recognizer_failure_signal = recognizer_failure_signal
+        self._recognizer_success_signal.connect(self._on_media_source_recognition_success)
+        self._recognizer_failure_signal.connect(self._on_media_source_recognition_failure)
         self._media_source_selected_signal = media_source_selected_signal
+        self._show_error_message_signal = show_error_message_signal
 
         main_layout = QtW.QVBoxLayout(self)
         main_layout.addWidget(path_selector)
-        main_layout.addWidget(self._panel_stack)
+        main_layout.addWidget(self._page_stack)
         main_layout.addWidget(button_box)
         self.setLayout(main_layout)
 
@@ -72,8 +79,8 @@ class Dialog(QtW.QDialog):
         self._media_source = None
 
         self._path_selector.reset()
-        self._panel_stack.setCurrentWidget(self._panel_hint)
-        self._panel_media_source_resolver.reset()
+        self._page_stack.setCurrentWidget(self._page_hint)
+        self._page_media_source_resolver.reset()
         self._button_box.reset()
 
     def accept(self) -> None:
@@ -81,7 +88,7 @@ class Dialog(QtW.QDialog):
 
         media_source = self._media_source
         if not self._media_source.is_resolved:
-            media_source = self._panel_media_source_resolver.get_resolved_media_source()
+            media_source = self._page_media_source_resolver.get_resolved_media_source()
             assert self._media_source.title == media_source.title
             assert media_source.is_resolved
 
@@ -95,14 +102,14 @@ class Dialog(QtW.QDialog):
 
     def _on_media_source_path_selected(self, media_source_path: JbPath) -> None:
         self._button_box.reset()
-        self._panel_stack.setCurrentWidget(self._panel_loading)
+        self._page_stack.setCurrentWidget(self._page_loading)
 
         if self._recognizer_task_future is not None:
             self._recognizer_task_future.abort()
         self._recognizer_task_future = self._recognizer.recognize(
             media_source_path,
-            on_success=self._on_media_source_recognition_success,
-            on_failure=self._on_media_source_recognition_failure,
+            success_signal=self._recognizer_success_signal,
+            failure_signal=self._recognizer_failure_signal,
         )
 
     def _on_media_source_recognition_success(self, media_source: MediaSource) -> None:
@@ -110,8 +117,8 @@ class Dialog(QtW.QDialog):
         if media_source.is_resolved:
             self.accept()
         else:
-            self._panel_media_source_resolver.set_media_source(media_source)
-            self._panel_stack.setCurrentWidget(self._panel_media_source_resolver)
+            self._page_media_source_resolver.set_media_source(media_source)
+            self._page_stack.setCurrentWidget(self._page_media_source_resolver)
             self._button_box.enable_accept()
 
     def _on_media_source_recognition_failure(self, error_message: str) -> None:
@@ -119,4 +126,4 @@ class Dialog(QtW.QDialog):
 
     def _on_media_source_invalid_path(self, error_message: str):
         self.reset()
-        self._error_dialog.showMessage(error_message)
+        self._show_error_message_signal.emit(message=error_message, parent=self)
