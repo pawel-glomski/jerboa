@@ -1,3 +1,20 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 from typing import Any, Callable, Generic, TypeVar
 from abc import ABC, abstractmethod
 from threading import Thread, Lock, Condition
@@ -6,7 +23,7 @@ from collections import deque
 import dataclasses as dclass
 import enum
 
-from jerboa.logger import logger
+from jerboa.log import logger
 
 T1 = TypeVar("T1")
 T2 = TypeVar("T2")
@@ -402,22 +419,19 @@ class Task(Exception, Generic[T1]):
 
     # --------------------------------------- FinishContext -------------------------------------- #
 
-    class UnexpectedStageError(Exception):
-        def __init__(self, expected_stage: str, state: "Task.State"):
-            super().__init__(f"{expected_stage}, stage={state.stage} ({state.task})")
-
     class FinishContext(Generic[T2]):
         def __init__(self, state: "Task.State[T2]"):
             self._state = state
             self._active = False
 
-        def __enter__(self) -> "Task.FinishContext[T2]":
+        def __enter__(self) -> None:
             self._state.mutex.acquire()
             try:
                 assert not self._active
+                assert (
+                    self._state.stage.is_in_progress()
+                ), f"Task not in-progress ({self._state.task})"
 
-                if not self._state.stage.is_in_progress():
-                    raise Task.UnexpectedStageError("Task not in-progress", self._state)
                 if self._state.stage.is_aborted():
                     raise Task.Abort()
             except:
@@ -425,18 +439,17 @@ class Task(Exception, Generic[T1]):
                 raise
 
             self._active = True
-            return self
 
         def __exit__(self, exc_type: type[Exception] | None, exc: Exception, traceback) -> bool:
             try:
-                if self._state.stage.is_finished(finishing_aborted=True):
-                    # Only `Task.Executor` and `Task.FinishContext` can finish tasks
-                    raise Task.UnexpectedStageError("Task already finished", self._state)
+                assert self._active
+                assert self._state.stage.is_in_progress(), (
+                    "Task already finished - only `Task.Executor` and `Task.FinishContext` "
+                    f"can finish tasks ({self._state.task})"
+                )
 
                 if exc_type is None:
                     self._state.set_stage__locked(Task.Stage.FINISHED_CLEAN)
-                assert self._active
-
                 return False
             finally:
                 self._active = False
@@ -458,11 +471,13 @@ class Task(Exception, Generic[T1]):
             with self._state.mutex:
                 try:
                     assert not self._active
+                    assert self._state.stage.is_in_progress(), (
+                        "Task not in-progress " f"({self._state.task})"
+                    )
 
                     if self._state.stage.is_aborted():
+                        self._state.set_stage__locked(Task.Stage.FINISHED_BY_ABORT)
                         raise Task.Abort()
-                    if self._state.stage != Task.Stage.IN_PROGRESS:
-                        raise Task.UnexpectedStageError("Task not in-progress", self._state)
                 except Exception as exception:
                     if not self._state.stage.is_finished(finishing_aborted=True):
                         self._state.finish_with_exception__locked(exception, raise_now=True)
@@ -474,16 +489,22 @@ class Task(Exception, Generic[T1]):
             exception_handled = False
 
             with self._state.mutex:
-                if (
-                    self._state.stage.is_finished(finishing_aborted=True)
-                    and self._state.stage != Task.Stage.FINISHED_CLEAN
-                ):
-                    # Only `Task.Executor` and `Task.FinishContext` can finish tasks
-                    raise Task.UnexpectedStageError("Task already finished", self._state)
+                assert exc_type != Task.Abort or self._state.stage.is_in_progress()
+                assert (
+                    self._state.stage.is_in_progress()
+                    or self._state.stage == Task.Stage.FINISHED_CLEAN
+                ), (
+                    "Task not in progress - only `Task.Executor` and `Task.FinishContext` "
+                    f"can finish aborted/crashed tasks ({self._state.task})"
+                )
 
-                if not self._state.stage.is_finished(finishing_aborted=True):
+                if self._state.stage.is_in_progress():
                     if exc_type == Task.Abort:
-                        logger.debug("Task self-aborted", details=self._state.task)
+                        if self._state.stage == Task.Stage.IN_PROGRESS_ABORT:
+                            logger.debug("Task aborted as requested", details=self._state.task)
+                        else:
+                            logger.debug("Task self-aborted", details=self._state.task)
+
                         self._state.set_stage__locked(Task.Stage.FINISHED_BY_ABORT)
                         exception_handled = True
                     elif exc_type is not None:
@@ -493,14 +514,12 @@ class Task(Exception, Generic[T1]):
                     else:
                         logger.error("Task implementaion error", details=self._state.task)
                         self._state.finish_with_exception__locked(
-                            Task.UnexpectedStageError(
-                                "Task finished running but did not mark itself as finished",
-                                self._state,
+                            AssertionError(
+                                "Task finished running but did not mark itself as finished "
+                                f"({self._state.task})",
                             ).with_traceback(traceback),
                             raise_now=True,
                         )
-                else:
-                    assert exc_type != Task.Abort
 
             assert self._active
             return exception_handled
@@ -522,6 +541,7 @@ class Task(Exception, Generic[T1]):
             assert self.finish_context.active
             assert self._state.mutex.locked()
             assert self._state.stage.is_in_progress()
+
             self._state.result = result
 
         def exit_if_aborted(self) -> None:
@@ -598,12 +618,6 @@ class Task(Exception, Generic[T1]):
     future: "Task.Future[T1]" = dclass.field(init=False, repr=False)
     _state: "Task.State[T1]" = dclass.field(init=False)
 
-    def __hash__(self) -> int:
-        return id(self)
-
-    def __eq__(self, other: Any) -> bool:
-        return other is self
-
     def __post_init__(self, already_finished: bool):
         init_stage = Task.Stage.FINISHED_CLEAN if already_finished else Task.Stage.PENDING
         super().__setattr__("_state", Task.State[T1](self, init_stage))
@@ -671,8 +685,6 @@ class Task(Exception, Generic[T1]):
 class FnTask(Task[T1]):
     fn: Callable[[Task.Executor[T1]], T1]
 
-    __hash__ = Task[T1].__hash__
-
     def run_impl(self) -> None:
         self.execute(self.fn)
 
@@ -718,8 +730,9 @@ class TaskQueue:
         assert self.mutex.locked()
 
         if apply_invalidation_rules:
-            if task.invalidates(self._current_task):
-                self._current_task.future.abort()
+            if not self._current_task.future.stage.is_finished(finishing_aborted=False):
+                if task.invalidates(self._current_task):
+                    self._current_task.future.abort()
 
             valid_tasks = deque[Task]()
             for other_task in self._tasks:
@@ -780,16 +793,17 @@ class PyThreadPool(ThreadPool):
     def __init__(self, workers: int | None = None):
         super().__init__()
         self._thread_pool = ThreadPoolExecutor(workers)
-        self._running_tasks = set[FnTask]()
+        self._running_tasks = dict[int, FnTask]()
 
     def start(self, task: FnTask[T1]) -> Task.Future[T1]:
-        self._running_tasks.add(task)
+        task_id = id(task)
+        self._running_tasks[task_id] = task
 
         def job():
             try:
                 do_job_with_exception_logging(task.run_pending, args=[], kwargs={})
             finally:
-                self._running_tasks.remove(task)
+                self._running_tasks.pop(task_id)
 
         self._thread_pool.submit(job)
         return task.future
@@ -805,6 +819,6 @@ class PyThreadSpawner(ThreadSpawner):
         Thread(target=do_job_with_exception_logging, args=[job, args, kwargs], daemon=True).start()
 
 
-@logger.catch
 def do_job_with_exception_logging(job: Callable, args: tuple, kwargs: dict) -> None:
-    return job(*args, **kwargs)
+    with logger.catch():
+        return job(*args, **kwargs)

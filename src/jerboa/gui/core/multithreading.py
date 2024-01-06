@@ -1,3 +1,20 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 from typing import Callable
 
 from PySide6 import QtCore as QtC
@@ -17,16 +34,17 @@ class QtThreadPool(ThreadPool):
         if workers:
             self._thread_pool.setMaxThreadCount(workers)
 
-        self._running_tasks = set[FnTask]()
+        self._running_tasks = dict[int, FnTask]()
 
     def start(self, task: FnTask) -> FnTask.Future:
-        self._running_tasks.add(task)
+        task_id = id(task)
+        self._running_tasks[task_id] = task
 
         def job():
             try:
                 do_job_with_exception_logging(task.run_pending, args=[], kwargs={})
             finally:
-                self._running_tasks.remove(task)
+                self._running_tasks.pop(task_id)
 
         self._thread_pool.start(job)
         return task.future
