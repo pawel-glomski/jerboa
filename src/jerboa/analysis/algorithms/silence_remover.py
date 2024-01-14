@@ -1,9 +1,26 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 import textwrap
 import pydantic
 
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import Task
-from jerboa.media.readers.audio import AudioReader
+from jerboa.core.timeline import TMSection
 from jerboa.media.core import AudioConfig, AudioChannelLayout, AudioSampleFormat
 from jerboa.analysis import algorithm as alg
 
@@ -19,14 +36,16 @@ PROCESSING_AUDIO_CONFIG = AudioConfig(
     frame_duration=None,  # use the default
 )
 
-PROCESSING_FRAME_SAMPLES = 1024
+PROCESSING_FRAME_SAMPLES = 400
+PROCESSING_HOP_SIZE = 160
 
 
 class Environment(alg.Environment):
     use_librosa: bool = pydantic.Field(default=False, description="Use librosa for computations")
     test_float: float = pydantic.Field(default=2, ge=2, le=5)
 
-    def model_post_init(self, _):
+    def model_post_init(self, __context):
+        super().model_post_init(__context)
         self.state = Environment.State.NOT_PREPARED__TRY_BY_DEFAULT
 
     def prepare(self, executor: Task.Executor, progress_update_signal: Signal) -> None:
@@ -62,37 +81,29 @@ class InterpretationParams(alg.InterpretationParams):
     )
 
 
-class Implementation(alg.Implementation):
-    def __init__(
-        self,
-        analysis_params: AnalysisParams,
-        interpretation_params: InterpretationParams,
-    ):
-        super().__init__()
-        self._analysis_params = analysis_params
-        self._interpretation_params = interpretation_params
-        self._audio_reader = AudioReader(PROCESSING_AUDIO_CONFIG)
-
-    def update_interpretation_params(self, params: InterpretationParams) -> None:
+class Analyzer(alg.Analyzer):
+    def analyze(self, previous_packets: list[alg.AnalysisPacket]) -> list[alg.AnalysisPacket]:
+        # for section in resource_manager.create_audio_resource():
+        #     ...
         raise NotImplementedError()
 
-    def analyze(self) -> None:
-        raise NotImplementedError()
 
-    def interpret(self, file) -> None:
-        for section in self._audio_reader.read_stream(file, stream_idx=0):
-            ...
+class Interpreter(alg.Interpreter):
+    def interpret(
+        self, interpretation_params: InterpretationParams, packets: list[alg.AnalysisPacket]
+    ) -> list[TMSection]:
+        raise NotImplementedError()
 
 
 ALGORITHM = alg.Algorithm(
     name="Silence Remover",
     description=textwrap.dedent(
-        """\
-        Removes silence.
+        """Removes silence.
         Very fast and very low memory requirements."""
     ),
     environment=Environment(),
     analysis_params_class=AnalysisParams,
+    analyzer_class=Analyzer,
     interpretation_params_class=InterpretationParams,
-    implementation_class=Implementation,
+    interpreter_class=Interpreter,
 )

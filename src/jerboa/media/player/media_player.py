@@ -1,7 +1,24 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 from typing import Callable
 import enum
 
-from jerboa.logger import logger
+from jerboa.log import logger
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadPool, ThreadSpawner, TaskQueue, Task, FnTask
 from jerboa.core.timeline import FragmentedTimeline
@@ -27,8 +44,7 @@ class PlayerTask(FnTask):
         EOF = enum.auto()
 
     def invalidates(self, task: Task) -> bool:
-        if not isinstance(task.id, PlayerTask.ID):
-            return False
+        assert isinstance(task.id, PlayerTask.ID)
 
         match self.id:
             case PlayerTask.ID.INITIALIZE:
@@ -271,12 +287,10 @@ class MediaPlayer:
         constraints: AudioConstraints,
     ) -> decoding.decoder.Decoder:
         return decoding.context.DecodingContext(
-            media=decoding.context.MediaContext(
-                avc=decoding.context.AVContext.open(
-                    filepath=source.path,
-                    media_type=source.media_type,
-                    stream_idx=0,
-                ),
+            media=decoding.context.MediaContext.open(
+                filepath=source.path,
+                media_type=source.media_type,
+                stream_idx=0,
                 media_constraints=constraints,
             ),
             timeline=self._timeline,

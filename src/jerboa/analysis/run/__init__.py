@@ -1,5 +1,5 @@
 # Jerboa - AI-powered media player
-# Copyright (C) 2023 Paweł Głomski
+# Copyright (C) 2024 Paweł Głomski
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published
@@ -15,18 +15,4 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import PySide6.QtWidgets as QtW
-
-
-class StatusBar(QtW.QStatusBar):
-    def __init__(self):
-        super().__init__()
-
-        self.showMessage("Ready")
-        self.setStyleSheet(
-            """
-          QStatusBar {
-            border-top: 1px solid #413F42;
-          }
-          """
-        )
+from . import manager

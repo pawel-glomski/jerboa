@@ -573,31 +573,26 @@ class Task(Exception, Generic[T1]):
             *,
             finishing_aborted: bool = False,
             timeout: float | None = None,
-            aborts_other: bool = True,
+            abort_future: bool = True,
         ) -> bool:
             assert self._active
             assert future._state.task is not self._state.task  # pylint: disable=protected-access
 
             is_finished_event = future.create_finished_event(finishing_aborted=finishing_aborted)
-            return self.abort_aware_wait(
-                is_finished_event, timeout=timeout, aborts_other=aborts_other
-            )
+            try:
+                return self.abort_aware_wait(is_finished_event, timeout=timeout)
+            except Task.Abort:
+                if abort_future:
+                    future.abort()
+                raise
 
-        def abort_aware_wait(
-            self,
-            event: Event,
-            *,
-            timeout: float | None = None,
-            aborts_other: bool = True,
-        ) -> bool:
+        def abort_aware_wait(self, event: Event, *, timeout: float | None = None) -> bool:
             assert self._active
 
             with self._state.mutex:
                 self._state.add_event_to_abort_on_finish__locked(event, finishing_aborted=False)
             result = event.wait(timeout=timeout)
             if self.stage.is_aborted():
-                if aborts_other:
-                    event.abort()
                 self.abort()
             return result
 
@@ -700,7 +695,7 @@ class TaskQueue:
         self._tasks = deque[Task]()
         self._task_added = PredicateEmitter(predicate=lambda: not self.is_empty())
 
-        self._current_task = Task(already_finished=True, id="DUMMY_INIT_TASK")
+        self._current_task = Task(id="DUMMY_INIT_TASK", already_finished=True)
 
     @property
     def mutex(self) -> Lock:

@@ -1,5 +1,20 @@
-import enum
-from dataclasses import dataclass
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 from typing import Callable
 
 import PySide6.QtWidgets as QtW
@@ -7,36 +22,11 @@ from PySide6.QtCore import Qt
 
 from jerboa.core.multithreading import Task
 from jerboa.core.signal import Signal
-from jerboa.analysis.algorithm import Algorithm, Environment
+from jerboa.analysis.algorithm import Algorithm
 from .env_config_dialog import Dialog as EnvConfigDialog
 from .env_prep_progress_dialog import Dialog as EnvPrepProgressDialog
-
-
-# TODO: refactor this file
-
-
-class Column(enum.IntEnum):
-    NAME = 0
-    DESCRIPTION = enum.auto()
-    ENV_CONFIG = enum.auto()
-    COLUMNS_NUM = enum.auto()
-
-
-class ColumnHeader(QtW.QLabel):
-    def __init__(self, text: str):
-        super().__init__(text)
-
-        font = self.font()
-        font.setBold(True)
-        font.setPointSizeF(font.pointSizeF() + 1)
-        self.setFont(font)
-
-
-@dataclass
-class RegistryEntry:
-    name_label: QtW.QLabel
-    description_label: QtW.QLabel
-    environment_config_button: QtW.QToolButton
+from .alg_config_dialog import Dialog as AlgConfigDialog
+from .grid import Grid, Row, Column
 
 
 class Dialog(QtW.QDialog):
@@ -44,12 +34,13 @@ class Dialog(QtW.QDialog):
         self,
         title: str,
         min_size: tuple[int, int],
-        name_column_header: QtW.QWidget,
-        description_column_header: QtW.QWidget,
-        environment_column_header: QtW.QWidget,
+        grid: Grid,
+        row_factory: Callable[[Algorithm], Row],
         env_config_dialog_factory: Callable,
         env_prep_progress_dialog_factory: Callable,
-        analysis_alg_env_prep_signal: Signal,
+        alg_config_dialog_factory: Callable,
+        alg_env_prep_singal: Signal,
+        alg_run_signal: Signal,
         parent: QtW.QWidget | None = None,
         flags: Qt.WindowType = Qt.WindowType.Dialog,
     ):
@@ -57,89 +48,30 @@ class Dialog(QtW.QDialog):
         self.setWindowTitle(title)
         self.setMinimumSize(*min_size)
 
-        self._entries = dict[str, RegistryEntry]()
+        self._grid = grid
+        self._row_factory = row_factory
 
         self._env_config_dialog: EnvConfigDialog = env_config_dialog_factory(parent=self)
         self._env_prep_progress_dialog: EnvPrepProgressDialog = env_prep_progress_dialog_factory(
             parent=self
         )
+        self._alg_config_dialog: AlgConfigDialog = alg_config_dialog_factory(parent=self)
 
-        self._analysis_alg_env_prep_signal = analysis_alg_env_prep_signal
+        self._alg_env_prep_singal = alg_env_prep_singal
+        self._alg_run_signal = alg_run_signal
 
-        layout = QtW.QGridLayout()
-        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
-        layout.setSpacing(20)
-
-        layout.addWidget(name_column_header, 0, Column.NAME, Qt.AlignmentFlag.AlignLeft)
-        layout.addWidget(
-            description_column_header, 0, Column.DESCRIPTION, Qt.AlignmentFlag.AlignLeft
-        )
-        layout.addWidget(
-            environment_column_header, 0, Column.ENV_CONFIG, Qt.AlignmentFlag.AlignLeft
-        )
-
-        separator = QtW.QFrame()
-        separator.setLineWidth(1)
-        separator.setMidLineWidth(1)
-        separator.setFrameShape(QtW.QFrame.Shape.HLine)
-        layout.addWidget(separator, layout.rowCount(), 0, 1, 3)
-
+        layout = QtW.QVBoxLayout()
+        layout.addWidget(self._grid)
         self.setLayout(layout)
 
     def add_algorithm(self, algorithm: Algorithm) -> None:
-        layout: QtW.QGridLayout = self.layout()
-
-        row_idx = layout.rowCount()
-
-        # -------------------------------------- name label -------------------------------------- #
-
-        name_label = QtW.QLabel(algorithm.name)
-        name_label.setWordWrap(True)
-        name_label.setSizePolicy(QtW.QSizePolicy.Policy.Fixed, QtW.QSizePolicy.Policy.Minimum)
-        name_font = name_label.font()
-        name_font.setBold(True)
-        name_font.setPointSizeF(name_font.pointSizeF() + 1)
-        name_label.setFont(name_font)
-
-        # -------------------------------------- desc label -------------------------------------- #
-
-        description_label = QtW.QLabel(algorithm.description)
-        description_label.setWordWrap(True)
-        description_label.setSizePolicy(
-            QtW.QSizePolicy.Policy.Expanding, QtW.QSizePolicy.Policy.Minimum
-        )
-        desc_font = description_label.font()
-        desc_font.setPointSizeF(desc_font.pointSizeF() - 1)
-        description_label.setFont(desc_font)
-
-        # -------------------------------------- env button -------------------------------------- #
-
-        env_config_button = QtW.QToolButton()
-        env_config_button.setText("⚙")
-        env_config_button.setSizePolicy(QtW.QSizePolicy.Policy.Fixed, QtW.QSizePolicy.Policy.Fixed)
-        env_font = env_config_button.font()
-        env_font.setBold(True)
-        env_config_button.setFont(env_font)
+        row = self._row_factory(algorithm)
+        env_config_button: QtW.QToolButton = row.get(Column.ENV_CONFIG)
+        run_button: QtW.QToolButton = row.get(Column.RUN)
         env_config_button.pressed.connect(lambda: self._open_env_config_dialog_for(algorithm))
+        run_button.pressed.connect(lambda: self._run_algorithm(algorithm))
 
-        # --------------------------------------- add entry -------------------------------------- #
-
-        self._entries[algorithm.name] = RegistryEntry(
-            name_label=name_label,
-            description_label=description_label,
-            environment_config_button=env_config_button,
-        )
-
-        self._update_alg_env_state_color(algorithm)
-        self._env_prep_progress_dialog.finished.connect(
-            lambda _: self._update_alg_env_state_color(algorithm)
-        )
-
-        # ------------------------------------- add to layout ------------------------------------ #
-
-        layout.addWidget(name_label, row_idx, Column.NAME)
-        layout.addWidget(description_label, row_idx, Column.DESCRIPTION)
-        layout.addWidget(env_config_button, row_idx, Column.ENV_CONFIG)
+        self._grid.add_row(algorithm.name, row)
 
     def _open_env_config_dialog_for(self, algorithm: Algorithm) -> None:
         env_fields = algorithm.environment.model_fields.copy()
@@ -147,20 +79,28 @@ class Dialog(QtW.QDialog):
 
         env_parameters = self._env_config_dialog.open(env_fields)
         if env_parameters is not None:
-            self._analysis_alg_env_prep_signal.emit(
-                algorithm_name=algorithm.name,
-                env_parameters=env_parameters,
+            self._alg_env_prep_singal.emit(algorithm=algorithm, env_parameters=env_parameters)
+
+    def _run_algorithm(self, algorithm: Algorithm):
+        analysis_fields = algorithm.analysis_params_class.model_fields.copy()
+        interpretation_fields = algorithm.interpretation_params_class.model_fields.copy()
+        configuration = self._alg_config_dialog.open_for(analysis_fields, interpretation_fields)
+
+        if configuration is not None:
+            analysis_params, interpretation_params = configuration
+            self._alg_run_signal.emit(
+                algorithm=algorithm,
+                analysis_params=analysis_params,
+                interpretation_params=interpretation_params,
             )
 
-    def _update_alg_env_state_color(self, algorithm: Algorithm) -> None:
-        env_config_button = self._entries[algorithm.name].environment_config_button
-        if algorithm.environment.state == Environment.State.PREPARATION_SUCCESSFUL:
-            env_config_button.setStyleSheet("background-color: darkgreen")
-        elif algorithm.environment.state == Environment.State.PREPARATION_FAILED:
-            env_config_button.setStyleSheet("background-color: darkred")
+    def open_env_prep_progress_dialog(self, algorithm: Algorithm, task_future: Task.Future) -> None:
+        # only show the progress dialog if the task takes longer
+        task_future.wait(finishing_aborted=True, timeout=0.1)
+        if not task_future.stage.is_finished(finishing_aborted=True):
+            self._env_prep_progress_dialog.open(algorithm, task_future)
 
-    def open_env_prep_progress_dialog(self, algorithm_name: str, task_future: Task.Future) -> None:
-        return self._env_prep_progress_dialog.open(algorithm_name, task_future)
+        self._grid.row(algorithm.name).reflect_state(algorithm.environment.state)
 
     def update_env_prep_progress_dialog(self, progress: float | None, message: str) -> None:
         self._env_prep_progress_dialog.update(progress, message)

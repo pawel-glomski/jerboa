@@ -1,3 +1,20 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 import av
 from dataclasses import dataclass, field
 
@@ -39,7 +56,7 @@ class AVContext:
         assert media_type in [MediaType.AUDIO, MediaType.VIDEO]
 
         container = av.open(
-            filepath,
+            f"cache:{filepath}",
             # timeout=(None, 0.5),
         )
         # container.flags |= av.container.core.Flags.NONBLOCK
@@ -52,24 +69,30 @@ class AVContext:
         return AVContext(container, stream)
 
 
-@dataclass(frozen=True, init=False)
+@dataclass(frozen=True)
 class MediaContext:
     avc: AVContext
     intermediate_config: AudioConfig | VideoConfig
     presentation_config: AudioConfig | VideoConfig
 
-    def __init__(self, avc: AVContext, media_constraints: AudioConstraints | None):
-        super().__setattr__("avc", avc)
-        super().__setattr__(
-            "presentation_config",
-            MediaContext.create_presentation_media_config(
-                stream=avc.stream,
-                constraints=media_constraints,
-            ),
+    @staticmethod
+    def open(
+        filepath: str,
+        media_type: MediaType,
+        stream_idx: int,
+        media_constraints: AudioConstraints | None,
+    ) -> "MediaContext":
+        avc = AVContext.open(filepath=filepath, media_type=media_type, stream_idx=stream_idx)
+        presentation_config = MediaContext.create_presentation_media_config(
+            stream=avc.stream,
+            constraints=media_constraints,
         )
-        super().__setattr__(
-            "intermediate_config",
-            MediaContext.create_intermediate_media_config(self.presentation_config),
+        intermediate_config = MediaContext.create_intermediate_media_config(presentation_config)
+
+        return MediaContext(
+            avc=avc,
+            presentation_config=presentation_config,
+            intermediate_config=intermediate_config,
         )
 
     @staticmethod

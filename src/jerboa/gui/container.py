@@ -1,3 +1,20 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 from dependency_injector import containers, providers
 
 import PySide6.QtWidgets as QtW
@@ -17,7 +34,6 @@ from . import menu_bar
 from . import player_page
 from . import resources
 from . import media_source_selection
-from . import analysis_algorithm_selection
 from . import analysis_algorithm_registry
 
 
@@ -36,6 +52,7 @@ class Container(containers.DeclarativeContainer):
 
     analysis_alg_env_prep_signal = providers.Dependency(Signal)
     analysis_alg_selected_signal = providers.Dependency(Signal)
+    analysis_alg_run_signal = providers.Dependency(Signal)
 
     # ----------------------------------------- Resources ---------------------------------------- #
 
@@ -195,15 +212,20 @@ class Container(containers.DeclarativeContainer):
         analysis_algorithm_registry.dialog.Dialog,
         title="Algorithm registry",
         min_size=(600, 400),
-        name_column_header=providers.Factory(
-            analysis_algorithm_registry.dialog.ColumnHeader, "Algorithm"
+        grid=providers.Factory(
+            analysis_algorithm_registry.grid.Grid,
+            header=providers.Dict(
+                {
+                    analysis_algorithm_registry.grid.Column.NAME: providers.Factory(
+                        analysis_algorithm_registry.grid.ColumnHeader, "Algorithm"
+                    ),
+                    analysis_algorithm_registry.grid.Column.DESCRIPTION: providers.Factory(
+                        analysis_algorithm_registry.grid.ColumnHeader, "Description"
+                    ),
+                }
+            ),
         ),
-        description_column_header=providers.Factory(
-            analysis_algorithm_registry.dialog.ColumnHeader, "Description"
-        ),
-        environment_column_header=providers.Factory(
-            analysis_algorithm_registry.dialog.ColumnHeader, "Env"
-        ),
+        row_factory=providers.Factory(analysis_algorithm_registry.grid.Row).provider,
         env_config_dialog_factory=providers.Factory(
             analysis_algorithm_registry.env_config_dialog.Dialog,
             title="Environment configuration",
@@ -227,21 +249,34 @@ class Container(containers.DeclarativeContainer):
                 reject_button_text="Abort",
             ),
         ).provider,
-        analysis_alg_env_prep_signal=analysis_alg_env_prep_signal,
-        parent=jb_main_window,
-    )
-
-    # -------------------------- Analysis algorithm configuration dialog ------------------------- #
-
-    analysis_algorithm_selection_dialog = providers.Singleton(
-        analysis_algorithm_selection.dialog.Dialog,
-        title="Algorithm configuration",
-        min_size=(600, 400),
-        configurator=providers.Factory(
-            analysis_algorithm_selection.dialog.AlgorithmConfigurator,
-            parameter_collection=providers.Factory(common.parameter.ParameterCollection),
-        ),
-        button_box=providers.Factory(common.button_box.RejectAcceptButtonBox),
-        analysis_alg_selected_signal=analysis_alg_selected_signal,
+        alg_config_dialog_factory=providers.Factory(
+            analysis_algorithm_registry.alg_config_dialog.Dialog,
+            title="Algorithm configuration",
+            min_size=(600, 400),
+            analysis_params_configurator=providers.Factory(
+                common.parameter.ParameterConfigurator,
+                title="Analysis",
+                params_collection=providers.Factory(
+                    common.parameter.ParameterCollection,
+                    no_params_text="No parameters",
+                ),
+            ),
+            interpretation_params_configurator=providers.Factory(
+                common.parameter.ParameterConfigurator,
+                title="Interpretation",
+                params_collection=providers.Factory(
+                    common.parameter.ParameterCollection,
+                    no_params_text="No parameters",
+                ),
+            ),
+            button_box=providers.Factory(
+                common.button_box.RejectAcceptButtonBox,
+                is_accept_button_disabled_by_default=False,
+            ),
+            analysis_alg_selected_signal=analysis_alg_selected_signal,
+            parent=jb_main_window,
+        ).provider,
+        alg_env_prep_singal=analysis_alg_env_prep_signal,
+        alg_run_signal=analysis_alg_run_signal,
         parent=jb_main_window,
     )

@@ -1,3 +1,20 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 import av
 import enum
 import numpy as np
@@ -134,7 +151,7 @@ class Node(ABC):
 
     @abstractmethod
     def pull(self, context: DecodingContext) -> Any | None:
-        return self.parent.pull(context)
+        raise NotImplementedError()
 
 
 class DemuxingNode(Node):
@@ -323,7 +340,7 @@ class TimedVideoFrameCreationNode(Node):
         return None
 
 
-class AccurateSeekNode(Node):
+class SemiAccurateSeekNode(Node):
     def __init__(self, parent: Node | None):
         super().__init__(
             input_types={TimedAVFrame},

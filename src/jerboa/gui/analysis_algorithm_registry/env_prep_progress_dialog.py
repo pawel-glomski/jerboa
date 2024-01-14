@@ -1,3 +1,21 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
+import PySide6.QtCore as QtC
 import PySide6.QtWidgets as QtW
 from PySide6.QtCore import Qt
 
@@ -54,11 +72,12 @@ class Dialog(QtW.QDialog):
 
     def update(self, progress: float | None, message: str) -> None:
         if progress is None:
-            self.reject()
+            QtC.QTimer.singleShot(100, self.reject)
             return
 
         self._progress_bar.setValue(MINIMUM + (MAXIMUM - MINIMUM) * progress)
         if progress < 1:
             self._message_label.setText(message)
         else:
-            self.accept()
+            self._button_box.enable_accept()
+            QtC.QTimer.singleShot(100, self.accept)

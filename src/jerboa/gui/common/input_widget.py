@@ -1,3 +1,20 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 import enum
 from typing import TypeVar, Generic
 
@@ -126,7 +143,7 @@ class Number(InputWidget[ValueT]):
         layout = QtW.QHBoxLayout()
         layout.addWidget(self._line_edit, 1)
         if self._slider is not None:
-            layout.addWidget(self._slider, 3)
+            layout.addWidget(self._slider, 9)
         self.setLayout(layout)
 
         # update the slider (if present)
@@ -181,8 +198,8 @@ class String(InputWidget):
         self.setLayout(layout)
 
     @property
-    def value(self) -> float:
-        return float(self._line_edit.text())
+    def value(self) -> str:
+        return self._line_edit.text()
 
 
 class Enum(InputWidget[ValueT]):

@@ -1,5 +1,5 @@
 # Jerboa - AI-powered media player
-# Copyright (C) 2023 Paweł Głomski
+# Copyright (C) 2024 Paweł Głomski
 
 # This program is free software: you can redistribute it and/or modify
 # it under the terms of the GNU Affero General Public License as published
@@ -15,18 +15,20 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
+from PySide6.QtGui import QResizeEvent
 import PySide6.QtWidgets as QtW
 
 
-class StatusBar(QtW.QStatusBar):
-    def __init__(self):
-        super().__init__()
+class TextWidget(QtW.QLabel):
+    def __init__(self, text: str, *, font_size_offset: float, bold: bool = False):
+        super().__init__(text)
 
-        self.showMessage("Ready")
-        self.setStyleSheet(
-            """
-          QStatusBar {
-            border-top: 1px solid #413F42;
-          }
-          """
-        )
+        font = self.font()
+        font.setBold(bold)
+        font.setPointSizeF(font.pointSizeF() + font_size_offset)
+
+        self.setFont(font)
+        self.setWordWrap(True)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)

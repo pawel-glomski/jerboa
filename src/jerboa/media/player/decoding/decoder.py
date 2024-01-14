@@ -1,6 +1,23 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 from dataclasses import dataclass
 
-from jerboa.logger import logger
+from jerboa.log import logger
 from jerboa.core.multithreading import ThreadSpawner, Task, FnTask, PredicateEmitter, Thread
 from jerboa.media.core import MediaType, AudioConfig, VideoConfig, AudioConstraints
 from .buffer import create_buffer
@@ -216,7 +233,7 @@ def create_audio_decoder(
             parent=node.FrameMappingNode(
                 parent=node.FrameMappingPreparationNode(
                     parent=node.AudioIntermediateReformattingNode(
-                        parent=node.AccurateSeekNode(
+                        parent=node.SemiAccurateSeekNode(
                             parent=node.TimedAudioFrameCreationNode(
                                 parent=node.AudioFrameTimingCorrectionNode(
                                     parent=node.DecodingNode(
@@ -244,7 +261,7 @@ def create_video_decoder(
         output_node=node.VideoPresentationReformattingNode(
             parent=node.FrameMappingNode(
                 parent=node.FrameMappingPreparationNode(
-                    parent=node.AccurateSeekNode(
+                    parent=node.SemiAccurateSeekNode(
                         parent=node.TimedVideoFrameCreationNode(
                             parent=node.DecodingNode(
                                 parent=node.KeyframeIntervalWatcherNode(

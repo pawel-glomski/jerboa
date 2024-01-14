@@ -1,26 +1,30 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 import textwrap
 import pydantic
+import typing as t
 
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import Task
+from jerboa.core.timeline import TMSection
 from jerboa.analysis import algorithm as alg
-from jerboa.media.readers.audio import AudioReader
-from jerboa.media.core import AudioConfig, AudioChannelLayout, AudioSampleFormat
 
 import jerboa.analysis.utils.environment as env_utils
-
-
-PROCESSING_AUDIO_SAMPLE_FORMAT = AudioSampleFormat(AudioSampleFormat.DataType.F32, is_planar=True)
-PROCESSING_AUDIO_CHANNEL_LAYOUT = AudioChannelLayout.LAYOUT_MONO
-PROCESSING_AUDIO_SAMPLE_RATE = 16000
-PROCESSING_AUDIO_CONFIG = AudioConfig(
-    sample_format=PROCESSING_AUDIO_SAMPLE_FORMAT,
-    channel_layout=PROCESSING_AUDIO_CHANNEL_LAYOUT,
-    sample_rate=PROCESSING_AUDIO_SAMPLE_RATE,
-    frame_duration=None,  # use the default
-)
-
-PROCESSING_FRAME_SAMPLES = 1024
 
 
 class Environment(alg.Environment):
@@ -38,7 +42,7 @@ class Environment(alg.Environment):
 
 
 class AnalysisParams(alg.AnalysisParams):
-    int_param: int = pydantic.Field(
+    int_param2: int = pydantic.Field(
         default=2,
         ge=2,
         le=10,
@@ -53,47 +57,36 @@ class InterpretationParams(alg.InterpretationParams):
         le=1.0,
         description="This is a float param",
     )
-    str_param: str = pydantic.Field(
-        default="abcd",
-        description="This is a str param",
-    )
 
 
-class Implementation(alg.Implementation):
-    def __init__(
+class Analyzer(alg.Analyzer):
+    def analyze(
         self,
-        analysis_params: AnalysisParams,
-        interpretation_params: InterpretationParams,
-    ):
-        super().__init__()
-        self._analysis_params = analysis_params
-        self._interpretation_params = interpretation_params
-        self._audio_reader = AudioReader(PROCESSING_AUDIO_CONFIG)
-
-    def update_interpretation_params(self, params: InterpretationParams) -> None:
+        executor: Task.Executor,
+        previous_packet: alg.AnalysisPacket,
+    ) -> t.Iterable[alg.AnalysisPacket]:
         raise NotImplementedError()
 
-    def analyze(self) -> None:
-        raise NotImplementedError()
 
-    def interpret(self, file) -> None:
-        for section in self._audio_reader.read_stream(file, stream_idx=0):
-            ...
+class Interpreter(alg.Interpreter):
+    def interpret(
+        self, interpretation_params: InterpretationParams, packets: list[alg.AnalysisPacket]
+    ) -> list[TMSection]:
+        raise NotImplementedError()
 
 
 ALGORITHM = alg.Algorithm(
     name="Redundancy remover",
     description=textwrap.dedent(
-        """\
-        Removes redundancy in the audio using spectrogram analysis.
-        Very fast and very low memory requirements."""
+        """Removes redundancy in the audio using spectrogram analysis.
+           Very fast and very low memory requirements."""
     ),
     environment=Environment(),
     analysis_params_class=AnalysisParams,
+    analyzer_class=Analyzer,
     interpretation_params_class=InterpretationParams,
-    implementation_class=Implementation,
+    interpreter_class=Interpreter,
 )
-
 
 # class Algorithm(analysis.algorithm.Algorithm):
 #     NAME = "Redundancy remover"

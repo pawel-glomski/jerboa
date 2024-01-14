@@ -1,3 +1,25 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+import multiprocessing as mp
+
+if __name__ == "__main__":
+    mp.set_start_method("spawn")
+
+# pylint: disable=wrong-import-position
 import sys
 from dependency_injector import containers, providers
 
@@ -8,6 +30,7 @@ from jerboa import analysis
 from jerboa import media
 from jerboa import gui
 from jerboa.settings import Settings
+from jerboa.log import logger
 
 
 class Container(containers.DeclarativeContainer):
@@ -17,7 +40,9 @@ class Container(containers.DeclarativeContainer):
 
     # ------------------------------------------ Signals ----------------------------------------- #
 
-    show_error_message_signal = providers.Singleton(gui.core.signal.QtSignal, "message", "parent")
+    show_error_message_signal = providers.Singleton(
+        gui.core.signal.QtSignal, "message", "title", "parent"  # "title" and "parent" are optional
+    )
 
     media_source_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "media_source")
     ready_to_play_signal = providers.Singleton(gui.core.signal.QtSignal)
@@ -32,15 +57,21 @@ class Container(containers.DeclarativeContainer):
 
     analysis_alg_registered_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
     analysis_alg_env_prep_signal = providers.Singleton(
-        gui.core.signal.QtSignal, "algorithm_name", "env_parameters"
+        gui.core.signal.QtSignal, "algorithm", "env_parameters"
     )
     analysis_alg_env_prep_task_started_signal = providers.Singleton(
-        gui.core.signal.QtSignal, "algorithm_name", "task_future"
+        gui.core.signal.QtSignal, "algorithm", "task_future"
     )
     analysis_alg_env_prep_progress_signal = providers.Singleton(
         gui.core.signal.QtSignal, "progress", "message"
     )
     analysis_alg_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
+    analysis_alg_run_signal = providers.Singleton(
+        gui.core.signal.QtSignal,
+        "algorithm",
+        "analysis_params",
+        "interpretation_params",
+    )
 
     # -------------------------------------- Multithreading -------------------------------------- #
 
@@ -58,25 +89,32 @@ class Container(containers.DeclarativeContainer):
 
     timeline = providers.Singleton(
         core.timeline.FragmentedTimeline,
-        # init_sections=[core.timeline.TMSection(0, float("inf"), 1)],
-        init_sections=[
-            core.timeline.TMSection(i * 3, i * 3 + 3, (2 - (i % 3)) / 2) for i in range(1000)
-        ],
+        init_sections=[core.timeline.TMSection(0, float("inf"), 1)],
+        # init_sections=[
+        #     core.timeline.TMSection(i * 3, i * 3 + 3, (2 - (i % 3)) / 2) for i in range(1000)
+        # ],
     )
 
-    # ------------------------------------- Analysis Manager ------------------------------------- #
+    # ------------------------------------- AlgorithmRegistry ------------------------------------ #
 
+    # TODO(?): refactor out the environment preparation to a separate class
     analysis_alg_registry = providers.Singleton(
         analysis.registry.AlgorithmRegistry,
         settings=settings,
         thread_pool=thread_pool,
+        prev_task_still_running_error_msg="Previous task is still running",
+        alg_env_prep_error_message=(
+            "An error occurred while setting up the environment for an analysis algorithm"
+        ),
         alg_registered_signal=analysis_alg_registered_signal,
         alg_env_prep_task_started_signal=analysis_alg_env_prep_task_started_signal,
         alg_env_prep_progress_signal=analysis_alg_env_prep_progress_signal,
         show_error_message_signal=show_error_message_signal,
     )
 
-    analysis_manager = providers.Singleton(analysis.manager.AnalysisManager)
+    # -------------------------------------- AnalysisManager ------------------------------------- #
+
+    analysis_manager = providers.Singleton(analysis.run.manager.AnalysisManager)
 
     # --------------------------------------- Media player --------------------------------------- #
 
@@ -137,10 +175,13 @@ class Container(containers.DeclarativeContainer):
         seek_forward_signal=seek_forward_signal,
         analysis_alg_env_prep_signal=analysis_alg_env_prep_signal,
         analysis_alg_selected_signal=analysis_alg_selected_signal,
+        analysis_alg_run_signal=analysis_alg_run_signal,
     )
 
 
 def main():
+    logger.initialize(name="Main")
+
     core_c = Container()
     connect_signals(core_c)
 
@@ -177,6 +218,10 @@ def connect_signals(core_c: Container) -> None:
         gui_c.analysis_alg_registry_dialog().update_env_prep_progress_dialog
     )
 
+    # ------------------------------------- analysis manager ------------------------------------- #
+
+    core_c.analysis_alg_run_signal().connect(core_c.analysis_manager().run_algorithm)
+
     # ------------------------------- error message dialog signals ------------------------------- #
 
     core_c.show_error_message_signal().connect(gui_c.error_message_dialog_factory().open)
@@ -191,11 +236,17 @@ def run_gui(gui_c: gui.container.Container) -> int:
     qt_app = gui_c.qt_app()
     jb_main_window = gui_c.jb_main_window()
 
+    # TODO: Just define a dark/light palettes. Using system's pallete is too unpredicable
     palette = qt_app.palette()
     palette.setColor(palette.ColorRole.ToolTipBase, palette.color(palette.ColorRole.Window))
     palette.setColor(
         palette.ColorRole.ToolTipText, palette.color(palette.ColorRole.PlaceholderText)
     )
+    # palette.setColor(
+    #     palette.ColorGroup.Disabled,
+    #     palette.ColorRole.Button,
+    #     palette.color(palette.ColorRole.Button).darker(150),
+    # )
     qt_app.setPalette(palette)
 
     jb_main_window.show()

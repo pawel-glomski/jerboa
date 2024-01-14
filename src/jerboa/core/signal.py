@@ -1,7 +1,26 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 from typing import Callable
 from dataclasses import dataclass
 from threading import Lock, Condition
 import inspect
+
+from jerboa import utils
 
 
 class Signal:
@@ -48,8 +67,7 @@ class Signal:
         pass
 
     def __init__(self, *arg_names: str, max_subscribers: float = float("inf")):
-        self._arg_names = arg_names
-        self._arg_names_set = set(arg_names)
+        self._arg_names = set(arg_names)
         self._subscribers = list[Callable[[Signal.EmitArg], None]]()
         self._max_subscribers = float(max_subscribers)
         if self._max_subscribers <= 0:
@@ -61,21 +79,7 @@ class Signal:
         return self._subscribers
 
     def connect(self, subscriber: Callable) -> None:
-        subscriber_parameters = inspect.signature(subscriber).parameters
-
-        missing_args = self._arg_names_set - subscriber_parameters.keys()
-        unexpected_args = subscriber_parameters.keys() - self._arg_names_set
-        unexpected_args -= {
-            param.name
-            for param in subscriber_parameters.values()
-            if (param.kind in [inspect.Parameter.VAR_KEYWORD, inspect.Parameter.VAR_POSITIONAL])
-            or param.default is not inspect.Parameter.empty
-        }
-        if len(missing_args) > 0 or len(unexpected_args):
-            raise KeyError(
-                f"Subscriber ({subscriber}) has wrong signature. "
-                f"Missing args={missing_args}, unexpected args={unexpected_args}"
-            )
+        utils.assert_callable(subscriber, expected_args=self._arg_names)
 
         def _worker(emit_arg: Signal.EmitArg):
             try:

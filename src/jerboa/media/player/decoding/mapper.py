@@ -1,3 +1,20 @@
+# Jerboa - AI-powered media player
+# Copyright (C) 2023 Paweł Głomski
+
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU Affero General Public License as published
+# by the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+# GNU Affero General Public License for more details.
+
+# You should have received a copy of the GNU Affero General Public License
+# along with this program. If not, see <https://www.gnu.org/licenses/>.
+
+
 from jerboa.media import standardized_audio as std_audio
 from jerboa.media.core import AudioConfig
 from .circular_buffer import create_circular_audio_buffer
@@ -34,8 +51,8 @@ class AudioMapper:
             config.sample_rate,
             config.channels_num,
             std_audio.Option.PROCESS_REALTIME
-            | std_audio.Option.ENGINE_FINER
-            | std_audio.Option.WINDOW_SHORT,
+            | std_audio.Option.ENGINE_FASTER
+            | std_audio.Option.WINDOW_STANDARD,
         )
         self._stretcher.set_max_process_size(self._audio.max_size)
 
