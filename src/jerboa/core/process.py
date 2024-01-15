@@ -87,9 +87,6 @@ class IPCProtocol:
 
     def __setattr__(self, name: str, value) -> None:
         assert hasattr(self.__class__, name), f"Message ({name}) not defined in the protocol."
-        assert (
-            self._role == getattr(self.__class__, name).receiver_role
-        ), f"Message ({name}) cannot be received by this process."
 
         super().__setattr__(name, value)
 

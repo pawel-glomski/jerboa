@@ -31,13 +31,6 @@ from . import runner
 
 
 @dataclass
-class AlgorithmInstanceDesc:
-    algorithm: alg.Algorithm
-    analysis_params: alg.AnalysisParams
-    interpretation_params: alg.InterpretationParams
-
-
-@dataclass
 class AnalysisRun:
     class State(enum.Enum):
         SUSPENDED = enum.auto()
@@ -47,7 +40,7 @@ class AnalysisRun:
     process: mp.Process | None
     ipc: proc.IPC | None
 
-    alg_desc: AlgorithmInstanceDesc
+    alg_desc: alg.AlgorithmInstanceDesc
     interpreter: alg.Interpreter
 
     packets: list[alg.AnalysisPacket] = field(default_factory=list)
@@ -57,7 +50,7 @@ class AnalysisRun:
 
 @dataclass
 class AnalysisRunView:
-    alg_desc: AlgorithmInstanceDesc
+    alg_desc: alg.AlgorithmInstanceDesc
 
     state: AnalysisRun.State
 
@@ -79,9 +72,9 @@ class IPCProtocolChild(proc.IPCProtocolChild):
 
 class IPCProtocolParent(proc.IPCProtocolParent):
     run_created = proc.IPCMsgDesc("run_id", "algorithm", "state")
+    run_deleted = proc.IPCMsgDesc("run_id")
     run_reinterpreted = proc.IPCMsgDesc("run_id", "sections")
     run_interpretation_updated = proc.IPCMsgDesc("run_id", "sections")
-    run_deleted = proc.IPCMsgDesc("run_id")
     error = proc.IPCMsgDesc("message")
 
 
@@ -103,7 +96,7 @@ class AnalysisManagementProcess:
 
         self._ipc.configure(protocol)
 
-    def __task__create_run(self, alg_desc: AlgorithmInstanceDesc) -> None:
+    def __task__create_run(self, alg_desc: alg.AlgorithmInstanceDesc) -> None:
         assert self._next_run_id not in self._runs
 
         parent_ipc, child_ipc = proc.IPC.create()
@@ -209,9 +202,9 @@ class AnalysisManager:
 
         protocol = IPCProtocolParent()
         protocol.run_created = self.__task__run_created
+        protocol.run_deleted = self.__task__run_deleted
         protocol.run_reinterpreted = self.__task__run_reinterpreted
         protocol.run_interpretation_updated = self.__task__run_interpretation_updated
-        protocol.run_deleted = self.__task__run_interpretation_updated
         protocol.error = self.__task__error
 
         self._ipc.configure(protocol)
@@ -242,6 +235,10 @@ class AnalysisManager:
         self._runs[run_id] = AnalysisRunView(algorithm, state)
         self._run_created_signal.emit(run_id=run_id, algorithm=algorithm)
 
+    def __task__run_deleted(self, run_id: int) -> None:
+        self._run_deleted_singal.emit(run_id=run_id)
+        self._runs.pop(run_id)
+
     def __task__run_reinterpreted(self, run_id: int, sections: list[TMSection]) -> None:
         self._runs[run_id].sections = sections
         self._create_timeline()
@@ -262,7 +259,7 @@ class AnalysisManager:
             logger.warning("Killing Analysis Management Process timed out. Terminating it instead")
             self._process.terminate()
 
-    def run_algorithm(self, alg_desc: AlgorithmInstanceDesc):
+    def run_algorithm(self, alg_desc: alg.AlgorithmInstanceDesc):
         self._ipc.send(IPCProtocolChild.create_run, alg_desc=alg_desc)
 
     def reinterpret_run(self, run_id: int, interpretation_params: alg.InterpretationParams) -> None:

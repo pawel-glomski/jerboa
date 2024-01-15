@@ -66,12 +66,7 @@ class Container(containers.DeclarativeContainer):
         gui.core.signal.QtSignal, "progress", "message"
     )
     analysis_alg_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
-    analysis_alg_run_signal = providers.Singleton(
-        gui.core.signal.QtSignal,
-        "algorithm",
-        "analysis_params",
-        "interpretation_params",
-    )
+    analysis_alg_run_signal = providers.Singleton(gui.core.signal.QtSignal, "alg_desc")
 
     # -------------------------------------- Multithreading -------------------------------------- #
 

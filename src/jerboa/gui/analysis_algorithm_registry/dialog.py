@@ -22,7 +22,7 @@ from PySide6.QtCore import Qt
 
 from jerboa.core.multithreading import Task
 from jerboa.core.signal import Signal
-from jerboa.analysis.algorithm import Algorithm
+from jerboa.analysis.algorithm import Algorithm, AlgorithmInstanceDesc
 from .env_config_dialog import Dialog as EnvConfigDialog
 from .env_prep_progress_dialog import Dialog as EnvPrepProgressDialog
 from .alg_config_dialog import Dialog as AlgConfigDialog
@@ -89,9 +89,11 @@ class Dialog(QtW.QDialog):
         if configuration is not None:
             analysis_params, interpretation_params = configuration
             self._alg_run_signal.emit(
-                algorithm=algorithm,
-                analysis_params=analysis_params,
-                interpretation_params=interpretation_params,
+                alg_desc=AlgorithmInstanceDesc(
+                    algorithm=algorithm,
+                    analysis_params=analysis_params,
+                    interpretation_params=interpretation_params,
+                )
             )
 
     def open_env_prep_progress_dialog(self, algorithm: Algorithm, task_future: Task.Future) -> None:

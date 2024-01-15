@@ -20,6 +20,7 @@ import pickle
 import pydantic
 import typing as t
 import abc
+from dataclasses import dataclass
 
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import Task
@@ -123,3 +124,10 @@ class Algorithm(pydantic.BaseModel):
 
     interpretation_params_class: type[InterpretationParams]
     interpreter_class: type[Interpreter]
+
+
+@dataclass
+class AlgorithmInstanceDesc:
+    algorithm: Algorithm
+    analysis_params: AnalysisParams
+    interpretation_params: InterpretationParams
