@@ -18,9 +18,9 @@
 from typing import Callable
 from dataclasses import dataclass
 from threading import Lock, Condition
-import inspect
 
 from jerboa import utils
+from jerboa.log import logger
 
 
 class Signal:
@@ -84,6 +84,8 @@ class Signal:
         def _worker(emit_arg: Signal.EmitArg):
             try:
                 subscriber(**emit_arg.slot_kwargs)
+            except Exception:
+                logger.exception("Signal's slot has crashed with the following exception:")
             finally:
                 emit_arg.promise.fulfill()
 

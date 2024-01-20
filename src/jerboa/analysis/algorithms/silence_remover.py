@@ -17,6 +17,7 @@
 
 import textwrap
 import pydantic
+import typing as t
 
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import Task
@@ -82,16 +83,19 @@ class InterpretationParams(alg.InterpretationParams):
 
 
 class Analyzer(alg.Analyzer):
-    def analyze(self, previous_packets: list[alg.AnalysisPacket]) -> list[alg.AnalysisPacket]:
+    def analyze(
+        self,
+        executor: Task.Executor,
+        previous_packet: alg.AnalysisPacket,
+    ) -> t.Iterable[alg.AnalysisPacket]:
         # for section in resource_manager.create_audio_resource():
         #     ...
-        raise NotImplementedError()
+
+        return []
 
 
 class Interpreter(alg.Interpreter):
-    def interpret(
-        self, interpretation_params: InterpretationParams, packets: list[alg.AnalysisPacket]
-    ) -> list[TMSection]:
+    def interpret_next(self, packet: alg.AnalysisPacket) -> list[TMSection]:
         raise NotImplementedError()
 
 

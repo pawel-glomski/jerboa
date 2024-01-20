@@ -15,10 +15,11 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
+import sys
 import enum
+import time
 import typing as t
 import multiprocessing as mp
-import threading as th
 from multiprocessing.connection import Connection
 from dataclasses import dataclass, field
 
@@ -26,11 +27,14 @@ from jerboa import utils
 from jerboa.log import logger
 from jerboa.core.multithreading import TaskQueue, FnTask, Task
 
-KILL_TIMEOUT = 0.25
-RECEIVE_POLL_TIMEOUT = 0.05
+
+CHILD_CREATE_TIMEOUT = 10  # in seconds
+KILL_TIMEOUT = 0.25  # inf seconds
+RECEIVE_POLL_TIMEOUT = 0.05  # in seconds
+RECEIVE_POLL_MSG_NUM_MAX = 16  # max number of messages that will be pulled from the pipe at once
 
 
-class Role(enum.Flag):
+class Role(enum.Enum):
     PARENT = enum.auto()
     CHILD = enum.auto()
 
@@ -41,14 +45,16 @@ class IPCMsg:
     payload: dict[str]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, init=False)
 class IPCMsgDesc:
-    id: str = field(default="?", init=False)
+    id: str = field(default="?")
     payload: set[str] = field(default_factory=set)
+    response_timeout: float | None
 
-    def __init__(self, *payload: str):
+    def __init__(self, *payload: str, response_timeout: float | None = None):
         super().__init__()
         super().__setattr__("payload", set(payload))
+        super().__setattr__("response_timeout", response_timeout)
 
     def __set_name__(self, owner, name: str):
         super().__setattr__("id", name)
@@ -86,7 +92,7 @@ class IPCProtocol:
         return getattr(self, msg_id)
 
     def __setattr__(self, name: str, value) -> None:
-        assert hasattr(self.__class__, name), f"Message ({name}) not defined in the protocol."
+        assert hasattr(self.__class__, name), f"Message '{name}' not defined in the protocol."
 
         super().__setattr__(name, value)
 
@@ -104,9 +110,7 @@ class IPCProtocol:
     def assert_handled(self) -> None:
         msgs_with_missing_handlers = []
         for msg_id in (
-            name
-            for name, value in self.__class__.__dict__.items()
-            if isinstance(value, IPCMsgDesc) and value.receiver_role == self.role
+            name for name, value in self.__class__.__dict__.items() if isinstance(value, IPCMsgDesc)
         ):
             if getattr(self, msg_id) is None:
                 msgs_with_missing_handlers.append(msg_id)
@@ -124,6 +128,10 @@ class IPCProtocolChild(IPCProtocol):
 
 
 class IPCProtocolParent(IPCProtocol):
+    child_created = IPCMsgDesc()
+    child_finished = IPCMsgDesc()
+    error = IPCMsgDesc("message")
+
     def __init__(self):
         super().__init__(Role.PARENT)
 
@@ -134,8 +142,11 @@ class IPC:
         self._role = role
         self._is_running = True
 
-        self._tasks: TaskQueue | None = None
         self._protocol: IPCProtocol | None = None
+
+        self._tasks: TaskQueue | None = None
+
+        self._response_timeout_end: float = float("inf")
 
     @property
     def role(self) -> Role:
@@ -147,34 +158,99 @@ class IPC:
 
         self._tasks = TaskQueue()
 
-        if isinstance(protocol, IPCProtocolChild) and protocol.kill is None:
-            protocol.kill = self.kill
+        if self.role == Role.CHILD:
+            self._configure_as_child(protocol)
+        if self.role == Role.PARENT:
+            self._configure_as_parent(protocol)
+        protocol.assert_handled()
+
         self._protocol = protocol
 
+    def _configure_as_child(self, protocol: IPCProtocolChild) -> None:
+        protocol.kill = IPC._stack_handlers(protocol.kill, self.__run__kill)
+
+    def _configure_as_parent(self, protocol: IPCProtocolParent) -> None:
+        protocol.child_created = IPC._stack_handlers(
+            protocol.child_created, lambda: logger.debug("The child process has checked in")
+        )
+        protocol.child_finished = IPC._stack_handlers(protocol.child_finished, self.__run__kill)
+
+    @staticmethod
+    def _stack_handlers(*handlers: t.Callable) -> t.Callable:
+        def _wrapped_handler(**kwargs):
+            for handler in handlers:
+                if handler is not None:
+                    handler(**kwargs)
+
+        return _wrapped_handler
+
     def send(self, msg_desc: IPCMsgDesc, /, **payload):
-        msg = msg_desc.create(**payload)
-        self._tasks.add_task(FnTask(lambda executor: executor.finish_with(self._pipe.send, msg)))
+        self._tasks.add_task(
+            FnTask(lambda executor: executor.finish_with(self.__run__send, msg_desc, **payload))
+        )
+
+    def __run__send(self, msg_desc: IPCMsgDesc, /, **payload) -> None:
+        logger.debug(f"Sending a message: '{msg_desc.id}'")
+
+        self._pipe.send(msg_desc.create(**payload))
+        if msg_desc.response_timeout is not None:
+            self.__run__update_response_timeout(msg_desc.response_timeout)
+
+    def __run__update_response_timeout(self, response_timeout: float) -> None:
+        response_timeout_end = time.time() + response_timeout
+        if response_timeout_end < self._response_timeout_end:
+            self._response_timeout_end = response_timeout_end
 
     def kill(self) -> None:
-        def _recursive_kill():
-            if self._role & Role.PARENT:
-                self.send(IPCProtocol.p2c__kill)
+        self._tasks.add_task(FnTask(lambda executor: executor.finish_with(self.__run__kill)))
+
+    def __run__kill(self) -> None:
+        try:
+            if self._role == Role.PARENT and not self._pipe.closed:
+                self.send(IPCProtocolChild.kill)
+        finally:
             self._is_running = False
 
-        self._tasks.add_task(FnTask(lambda executor: executor.finish_with(_recursive_kill)))
-
     def run(self) -> None:
-        with logger.catch():
+        try:
+            if self.role == Role.CHILD:
+                self.__run__send(IPCProtocolParent.child_created)
+            if self.role == Role.PARENT:
+                if msg_task := self._receive_msg(timeout=CHILD_CREATE_TIMEOUT):
+                    msg_task.run_pending()
+                else:
+                    raise TimeoutError("Child process creation timed out")
+
             while self._is_running:
                 if self._pipe.poll(RECEIVE_POLL_TIMEOUT):
-                    while self._pipe.poll():
-                        msg: IPCMsg = self._pipe.recv()
-                        handle_task = self._protocol.handle(msg)
-                        self._tasks.add_task(handle_task)
+                    while len(self._tasks) < RECEIVE_POLL_MSG_NUM_MAX:
+                        if msg_task := self._receive_msg(timeout=0):
+                            self._response_timeout_end = float("inf")
+                            self._tasks.add_task(msg_task)
+                        else:
+                            break
+
+                if self._response_timeout_end <= time.time():
+                    raise TimeoutError("Unresponsive IPC")
+
                 self._tasks.run_all()
 
-    def run_in_background(self):
-        th.Thread(target=self.run, daemon=True).start()
+            logger.debug("IPC ends as requested")
+        except Exception as exception:
+            logger.exception("IPC crashed with the following exception:")
+
+            self.__run__kill()
+            if self.role == Role.CHILD and not self._pipe.closed:
+                self.__run__send(IPCProtocolParent.error, message=str(exception))
+            raise
+
+    def _receive_msg(self, *, timeout: float) -> Task | None:
+        if self._pipe.poll(timeout):
+            msg: IPCMsg = self._pipe.recv()
+            logger.debug(f"Received a message: '{msg.id}'")
+
+            return self._protocol.handle(msg)
+        return None
 
     @staticmethod
     def create() -> tuple["IPC", "IPC"]:
@@ -185,13 +261,20 @@ class IPC:
 def _worker(name: str, target: t.Callable, ipc: IPC, kwargs: dict[str], main_logger):
     logger.initialize(name=name, main_logger=main_logger)
     try:
+        logger.debug("The subprocess has started")
         target(ipc=ipc, **kwargs)
+        logger.debug("The subprocess has finished")
     except:
         logger.exception("Process has crashed:")
         raise
     finally:
         logger.complete()
+    sys.exit()
 
 
-def create(name: str, target: t.Callable, ipc: IPC, **kwargs) -> mp.Process:
+# TODO
+# import concurrent.futures
+# executor = concurrent.futures.ProcessPoolExecutor()
+def create(name: str, target: t.Callable, ipc: IPC, /, **kwargs) -> mp.Process:
+    logger.debug(f"Creating a subprocess: `{name}`")
     return mp.Process(name=name, target=_worker, args=(name, target, ipc, kwargs, logger))

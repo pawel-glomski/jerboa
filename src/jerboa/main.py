@@ -68,6 +68,10 @@ class Container(containers.DeclarativeContainer):
     analysis_alg_selected_signal = providers.Singleton(gui.core.signal.QtSignal, "algorithm")
     analysis_alg_run_signal = providers.Singleton(gui.core.signal.QtSignal, "alg_desc")
 
+    analysis_run_created_signal = providers.Singleton(
+        gui.core.signal.QtSignal, "run_id", "algorithm"
+    )
+
     # -------------------------------------- Multithreading -------------------------------------- #
 
     thread_spawner = providers.Singleton(
@@ -109,7 +113,12 @@ class Container(containers.DeclarativeContainer):
 
     # -------------------------------------- AnalysisManager ------------------------------------- #
 
-    analysis_manager = providers.Singleton(analysis.run.manager.AnalysisManager)
+    analysis_manager = providers.Singleton(
+        analysis.run.manager.AnalysisManager,
+        error_message_title="Analysis Management Process Error",
+        show_error_message_signal=show_error_message_signal,
+        run_created_signal=analysis_run_created_signal,
+    )
 
     # --------------------------------------- Media player --------------------------------------- #
 
@@ -180,7 +189,7 @@ def main():
     core_c = Container()
     connect_signals(core_c)
 
-    core_c.analysis_alg_registry().update()
+    core_c.analysis_alg_registry().register_all()
 
     sys.exit(run_gui(core_c.gui_container()))
 

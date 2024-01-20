@@ -23,7 +23,7 @@ requires-python = ">=3.11, <3.12"
 dependencies = [
     "dependency-injector",
     "loguru",
-    "pydantic-settings",
+    "pydantic",
     "av",
     "pylibrb",
     "PySide6",
@@ -47,5 +47,5 @@ build-backend = "setuptools.build_meta"
 version = { attr = "jerboa.__version__" }
 
 [tool.black]
-target-versions = ["py312"]
+target-versions = ["py311"]
 line-length = 100

@@ -15,7 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Callable, ContextManager
+from typing import Callable
 from PySide6 import QtCore as QtC
 
 from jerboa.core.signal import Signal

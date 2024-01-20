@@ -69,11 +69,10 @@ def validate_directory_write_permissions_with_fallback(dir_path: Path, fallback_
 
 
 DirectoryPath = Annotated[
-    Path,
+    pydantic.DirectoryPath,
     pydantic.Field(validate_default=True),
     pydantic.AfterValidator(validate_directory_write_permissions),
 ]
-
 
 # ------------------------------------------ Environment ----------------------------------------- #
 
@@ -87,19 +86,10 @@ class Environment(pydantic_settings.BaseSettings):
 
     def __post_init__(self):
         self.home_path.mkdir(parents=True, exist_ok=True)
-        self.extensions_dir_path.mkdir(parents=True, exist_ok=True)
 
     @property
     def settings_path(self) -> Path:
         return self.home_path / "settings.json"
-
-    @property
-    def extensions_dir_path(self) -> Path:
-        return self.home_path / "extensions/"
-
-    @property
-    def extensions_analysis_dir_path(self) -> Path:
-        return self.extensions_dir_path / "analysis/"
 
 
 ENVIRONMENT = Environment()

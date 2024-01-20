@@ -467,23 +467,25 @@ class Task(Exception, Generic[T1]):
             self._finish_context = Task.FinishContext[T2](state)
             self._active = False
 
-        def __enter__(self) -> "Task.Executor[T2]":
+        def __enter__(self) -> None:
             with self._state.mutex:
                 try:
-                    assert not self._active
-                    assert self._state.stage.is_in_progress(), (
-                        "Task not in-progress " f"({self._state.task})"
-                    )
+                    assert not self._active, f"({self._state.task})"
+                    assert self._state.stage.is_in_progress(), f"({self._state.task})"
 
                     if self._state.stage.is_aborted():
+                        logger.debug(
+                            "Task aborted before it could reach the executor",
+                            details=self._state.task,
+                        )
                         self._state.set_stage__locked(Task.Stage.FINISHED_BY_ABORT)
                         raise Task.Abort()
                 except Exception as exception:
                     if not self._state.stage.is_finished(finishing_aborted=True):
                         self._state.finish_with_exception__locked(exception, raise_now=True)
+                    raise
 
             self._active = True
-            return self
 
         def __exit__(self, exc_type: type[Exception] | None, exc: Exception, traceback) -> bool:
             exception_handled = False
@@ -592,8 +594,7 @@ class Task(Exception, Generic[T1]):
             with self._state.mutex:
                 self._state.add_event_to_abort_on_finish__locked(event, finishing_aborted=False)
             result = event.wait(timeout=timeout)
-            if self.stage.is_aborted():
-                self.abort()
+            self.exit_if_aborted()
             return result
 
         def abort_aware_sleep(self, sleep_time: float) -> bool:
@@ -612,11 +613,13 @@ class Task(Exception, Generic[T1]):
     already_finished: dclass.InitVar[bool] = dclass.field(default=False, kw_only=True)
     future: "Task.Future[T1]" = dclass.field(init=False, repr=False)
     _state: "Task.State[T1]" = dclass.field(init=False)
+    _executor: "Task.Executor[T1]" = dclass.field(init=False, repr=False)
 
     def __post_init__(self, already_finished: bool):
         init_stage = Task.Stage.FINISHED_CLEAN if already_finished else Task.Stage.PENDING
-        super().__setattr__("_state", Task.State[T1](self, init_stage))
-        super().__setattr__("future", Task.Future[T1](state=self._state))
+        super().__setattr__("_state", Task.State(self, init_stage))
+        super().__setattr__("future", Task.Future(state=self._state))
+        super().__setattr__("_executor", Task.Executor(state=self._state))
 
     def __del__(self):
         with self._state.mutex:
@@ -642,10 +645,10 @@ class Task(Exception, Generic[T1]):
 
     def execute(self, fn: Callable[["Task.Executor"], None]) -> "Task.Stage":
         try:
-            with Task.Executor(self._state) as executor:
-                fn(executor)
+            with self._executor:
+                fn(self._executor)
         except Task.Abort:
-            assert self._state.stage.is_finished()
+            assert self._state.stage.is_finished(finishing_aborted=True)
         return self._state.stage
 
     def run_pending(self) -> None:
@@ -696,6 +699,9 @@ class TaskQueue:
         self._task_added = PredicateEmitter(predicate=lambda: not self.is_empty())
 
         self._current_task = Task(id="DUMMY_INIT_TASK", already_finished=True)
+
+    def __len__(self) -> int:
+        return len(self._tasks)
 
     @property
     def mutex(self) -> Lock:

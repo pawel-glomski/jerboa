@@ -91,8 +91,12 @@ class Dialog(QtW.QDialog):
             self._alg_run_signal.emit(
                 alg_desc=AlgorithmInstanceDesc(
                     algorithm=algorithm,
-                    analysis_params=analysis_params,
-                    interpretation_params=interpretation_params,
+                    analysis_params=algorithm.analysis_params_class.model_validate(
+                        analysis_params, strict=True
+                    ),
+                    interpretation_params=algorithm.interpretation_params_class.model_validate(
+                        interpretation_params, strict=True
+                    ),
                 )
             )
 

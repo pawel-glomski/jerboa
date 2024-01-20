@@ -15,8 +15,6 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import sys
-
 from jerboa.log import logger
 from jerboa.core import process as proc
 from jerboa.core import multithreading as mth
@@ -24,9 +22,7 @@ from jerboa.analysis import algorithm as alg
 
 
 class IPCProtocolParent(proc.IPCProtocolParent):
-    update = proc.IPCMsgDesc("packet")
-    finished = proc.IPCMsgDesc()
-    error = proc.IPCMsgDesc("message")
+    analysis_updated = proc.IPCMsgDesc("packet")
 
 
 class AnalyzerProcess:
@@ -59,8 +55,7 @@ class AnalyzerProcess:
         # if it's taking a while, just kill the process
         if not analyzer_task.future.stage.is_finished(finishing_aborted=True):
             logger.warning("Analyzer did not finish cleanly in time. Terminating the process.")
-            sys.exit(1)
-        sys.exit(0)
+            # all subprocesses finish with the `sys.exit` call
 
     def __init__(
         self,
@@ -77,11 +72,13 @@ class AnalyzerProcess:
     def run(self, executor: mth.FnTask.Executor, last_packet: alg.AnalysisPacket) -> None:
         try:
             for packet in self._analyzer.analyze(executor=executor, previous_packet=last_packet):
-                self._ipc.send(IPCProtocolParent.update, packet=packet)
-            self._ipc.send(IPCProtocolParent.finished)
+                self._ipc.send(IPCProtocolParent.analysis_updated, packet=packet)
+                executor.exit_if_aborted()
+            self._ipc.send(IPCProtocolParent.child_finished)
+            executor.finish()
+        except mth.Task.Abort:
+            raise
         except Exception as exception:
             logger.exception("Analyzer crashed with an exception:")
             self._ipc.send(IPCProtocolParent.error, message=f"{exception}")
             raise
-        finally:
-            self._ipc.kill()

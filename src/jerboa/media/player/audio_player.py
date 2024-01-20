@@ -405,7 +405,7 @@ class AudioPlayer(PlaybackTimer):
             self.fatal_error_signal.emit()
             return False
 
-        logger.debug("Resetting audio sink... Successful)")
+        logger.debug("Resetting audio sink... Successful")
         return True
 
     def __audio_thread__reset__clear_decoder__locked(self) -> None:

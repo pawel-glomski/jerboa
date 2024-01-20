@@ -15,15 +15,12 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import importlib
-import importlib.util
-from pathlib import Path
-
 from jerboa.log import logger
-from jerboa.settings import Settings, ENVIRONMENT
+from jerboa.settings import Settings
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import ThreadPool, FnTask
 from jerboa.analysis.algorithm import Algorithm, Environment
+from . import algorithms
 
 
 class AlgorithmRegistry:
@@ -39,13 +36,7 @@ class AlgorithmRegistry:
         show_error_message_signal: Signal,
     ) -> None:
         self._settings = settings
-        self._algorithms_by_path = dict[Path, Algorithm]()
-        self._algorithms_by_name = dict[str, Algorithm]()
-
-        self._algorithm_dir_paths = [
-            Path(__file__).parent / "algorithms",
-            ENVIRONMENT.extensions_analysis_dir_path,
-        ]
+        self._algorithms = dict[str, Algorithm]()
 
         self._thread_pool = thread_pool
         self._last_task_future: FnTask.Future = FnTask(lambda: None, already_finished=True).future
@@ -59,48 +50,24 @@ class AlgorithmRegistry:
         self._show_error_message_signal = show_error_message_signal
 
     @property
-    def algorithms(self) -> dict[Path, Algorithm]:
-        return self._algorithms_by_path
+    def algorithms(self) -> dict[str, Algorithm]:
+        return self._algorithms
 
-    def get(self, algorithm_index: int) -> Algorithm:
-        return list(self._algorithms_by_path.values())[algorithm_index]
+    def register_all(self) -> None:
+        for algorithm_name in algorithms.__all__:
+            self.register(algorithm=getattr(algorithms, algorithm_name).ALGORITHM)
 
-    def update(self) -> None:
-        for algorithm_dir in self._algorithm_dir_paths:
-            for algorithm_module_path in algorithm_dir.glob("*"):
-                self.register_algorithm_from_path(algorithm_module_path)
+    def register(self, algorithm: Algorithm):
+        assert algorithm.name not in self._algorithms
 
-    def register_algorithm_from_path(self, algorithm_path: Path) -> None:
-        try:
-            algorithm_path = Path(algorithm_path)
-            if algorithm_path in self.algorithms:
-                return
-
-            module_name = f"_jb_alg_{len(self._algorithms_by_path)}_{algorithm_path.stem}"
-            spec = importlib.util.spec_from_file_location(module_name, algorithm_path)
-            if spec is None:
-                return
-
-            algorithm_module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(algorithm_module)
-
-            self._register_algorithm(algorithm_path, algorithm_module.ALGORITHM)
-
-        except Exception:
-            logger.exception(f"Failed to register analysis algorithm from '{algorithm_path}'")
-
-    def _register_algorithm(self, algorithm_path: Path, algorithm: Algorithm):
-        assert algorithm.name not in self._algorithms_by_name
-
-        self._algorithms_by_path[algorithm_path] = algorithm
-        self._algorithms_by_name[algorithm.name] = algorithm
+        self._algorithms[algorithm.name] = algorithm
         self._alg_registered_signal.emit(algorithm=algorithm)
 
         if algorithm.environment.state == Environment.State.NOT_PREPARED__TRY_BY_DEFAULT:
             self._prepare_environment(algorithm, last_env_params={})
 
     def prepare_environment(self, algorithm: Algorithm, env_parameters: dict[str]):
-        assert algorithm is self._algorithms_by_name[algorithm.name]
+        assert algorithm is self._algorithms[algorithm.name]
         assert len(env_parameters.keys() - algorithm.environment.model_fields.keys()) == 0
 
         last_params = algorithm.environment.model_dump()

@@ -63,7 +63,8 @@ class _Logger:
             format=(
                 "<green>{time:YYYY-MM-DD HH:mm:ss.SSSS}</green> | "
                 "<level>{extra[logger_name]}</level> | "
-                "<level>{level: <8}</level> | "
+                "<level>{thread.name}</level> | "
+                "<level>{level}</level> | "
                 "<cyan>{name}:{line}</cyan> | "
                 "<level>{extra[context]}{message}</level>"
                 "<light-black>{extra[details]}</light-black>"
