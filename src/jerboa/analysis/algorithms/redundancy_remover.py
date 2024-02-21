@@ -17,7 +17,7 @@
 
 import textwrap
 import pydantic
-import typing as t
+import typing as T
 
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import Task
@@ -64,7 +64,7 @@ class Analyzer(alg.Analyzer):
         self,
         executor: Task.Executor,
         previous_packet: alg.AnalysisPacket,
-    ) -> t.Iterable[alg.AnalysisPacket]:
+    ) -> T.Iterable[alg.AnalysisPacket]:
         raise NotImplementedError()
 
 

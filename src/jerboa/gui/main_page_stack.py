@@ -15,7 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-from PySide6 import QtWidgets as QtW
+from qtpy import QtWidgets as QtW
 
 from .player_page import PlayerPage
 

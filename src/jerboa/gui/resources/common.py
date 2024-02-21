@@ -15,7 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-from PySide6 import QtGui, QtCore
+from qtpy import QtGui, QtCore
 
 
 class LoadingSpinner(QtGui.QMovie):

@@ -17,8 +17,8 @@
 
 from dataclasses import dataclass
 
-import PySide6.QtWidgets as QtW
-import PySide6.QtGui as QtG
+import qtpy.QtWidgets as QtW
+import qtpy.QtGui as QtG
 
 from jerboa.core.signal import Signal
 

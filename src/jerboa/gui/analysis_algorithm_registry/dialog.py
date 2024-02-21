@@ -17,8 +17,8 @@
 
 from typing import Callable
 
-import PySide6.QtWidgets as QtW
-from PySide6.QtCore import Qt
+import qtpy.QtWidgets as QtW
+from qtpy.QtCore import Qt
 
 from jerboa.core.multithreading import Task
 from jerboa.core.signal import Signal

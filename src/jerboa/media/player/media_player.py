@@ -30,6 +30,7 @@ from .timer import ClockPlaybackTimer
 from .state import PlayerState
 from . import decoding
 
+
 SEEK_TIME = 5  # in seconds
 
 

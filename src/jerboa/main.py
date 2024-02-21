@@ -14,27 +14,27 @@
 # You should have received a copy of the GNU Affero General Public License
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+
 import multiprocessing as mp
 
-if __name__ == "__main__":
-    mp.set_start_method("spawn")
+mp.set_start_method("spawn", force=True)
 
 # pylint: disable=wrong-import-position
 import sys
 from dependency_injector import containers, providers
 
-from PySide6 import QtWidgets as QtW
+from qtpy import QtWidgets as QtW
 
 from jerboa import core
 from jerboa import analysis
 from jerboa import media
 from jerboa import gui
-from jerboa.settings import Settings
+from jerboa import settings as sett
 from jerboa.log import logger
 
 
 class Container(containers.DeclarativeContainer):
-    settings = providers.Singleton(Settings.load)
+    settings = providers.Singleton(sett.Settings.load)
 
     qt_app = providers.Singleton(QtW.QApplication, [])
 
@@ -74,10 +74,11 @@ class Container(containers.DeclarativeContainer):
 
     # -------------------------------------- Multithreading -------------------------------------- #
 
-    thread_spawner = providers.Singleton(
+    qt_thread_spawner = providers.Singleton(
         gui.core.multithreading.QtThreadSpawner
         # core.multithreading.PyThreadSpawner
     )
+    py_thread_spawner = providers.Singleton(core.multithreading.PyThreadSpawner)
     thread_pool = providers.Singleton(
         # gui.core.multithreading.QtThreadPool,
         core.multithreading.PyThreadPool,
@@ -86,9 +87,9 @@ class Container(containers.DeclarativeContainer):
 
     # ----------------------------------------- Timeline ----------------------------------------- #
 
-    timeline = providers.Singleton(
+    playback_timeline = providers.Singleton(
         core.timeline.FragmentedTimeline,
-        init_sections=[core.timeline.TMSection(0, float("inf"), 1)],
+        # init_sections=[core.timeline.TMSection(0, float("inf"), 1.0)],
         # init_sections=[
         #     core.timeline.TMSection(i * 3, i * 3 + 3, (2 - (i % 3)) / 2) for i in range(1000)
         # ],
@@ -115,6 +116,7 @@ class Container(containers.DeclarativeContainer):
 
     analysis_manager = providers.Singleton(
         analysis.run.manager.AnalysisManager,
+        playback_timeline=playback_timeline,
         error_message_title="Analysis Management Process Error",
         show_error_message_signal=show_error_message_signal,
         run_created_signal=analysis_run_created_signal,
@@ -125,7 +127,7 @@ class Container(containers.DeclarativeContainer):
     audio_manager = providers.Singleton(
         media.player.audio_player.AudioManager,
         app=qt_app,
-        thread_spawner=thread_spawner,
+        thread_spawner=qt_thread_spawner,
         output_devices_changed_signal=audio_output_devices_changed_signal,
         current_output_device_changed_signal=current_audio_output_device_changed_signal,
     )
@@ -140,7 +142,7 @@ class Container(containers.DeclarativeContainer):
 
     video_player = providers.Singleton(
         media.player.video_player.VideoPlayer,
-        thread_spawner=thread_spawner,
+        thread_spawner=py_thread_spawner,
         fatal_error_signal=providers.Factory(gui.core.signal.QtSignal),
         buffer_underrun_signal=providers.Factory(gui.core.signal.QtSignal),
         eof_signal=providers.Factory(gui.core.signal.QtSignal),
@@ -153,15 +155,15 @@ class Container(containers.DeclarativeContainer):
         video_player=video_player,
         audio_decoder_factory=providers.Factory(
             media.player.decoding.decoder.create_audio_decoder,
-            thread_spawner=thread_spawner,
+            thread_spawner=py_thread_spawner,
         ).provider,
         video_decoder_factory=providers.Factory(
             media.player.decoding.decoder.create_video_decoder,
-            thread_spawner=thread_spawner,
+            thread_spawner=py_thread_spawner,
         ).provider,
-        timeline=timeline,
+        timeline=playback_timeline,
         thread_pool=thread_pool,
-        thread_spawner=thread_spawner,
+        thread_spawner=py_thread_spawner,
         fatal_error_signal=providers.Factory(gui.core.signal.QtSignal),
         ready_to_play_signal=ready_to_play_signal,
     )
@@ -200,6 +202,8 @@ def connect_signals(core_c: Container) -> None:
     # ----------------------------------- media player signals ----------------------------------- #
 
     core_c.media_source_selected_signal().connect(core_c.media_player().initialize)
+    core_c.media_source_selected_signal().connect(core_c.analysis_manager().set_media_source)
+
     core_c.playback_toggle_signal().connect(core_c.media_player().playback_toggle)
     core_c.seek_backward_signal().connect(core_c.media_player().seek_backward)
     core_c.seek_forward_signal().connect(core_c.media_player().seek_forward)

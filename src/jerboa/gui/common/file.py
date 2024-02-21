@@ -17,8 +17,8 @@
 
 from functools import partial
 
-import PySide6.QtWidgets as QtW
-from PySide6.QtCore import QTimer
+import qtpy.QtWidgets as QtW
+from qtpy.QtCore import QTimer
 
 from jerboa.core.signal import Signal
 from jerboa.core.file import PathProcessor

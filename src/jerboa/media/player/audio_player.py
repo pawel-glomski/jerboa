@@ -17,9 +17,9 @@
 
 from threading import RLock, Lock, Condition
 
-import PySide6.QtWidgets as QtW
-import PySide6.QtMultimedia as QtM
-import PySide6.QtCore as QtC
+import qtpy.QtWidgets as QtW
+import qtpy.QtMultimedia as QtM
+import qtpy.QtCore as QtC
 
 from jerboa.utils import ActivationContext
 from jerboa.log import logger
@@ -58,8 +58,7 @@ def jb_to_qt_audio_sample_format(
 
 
 class AudioManager:
-    class KillTask(Task):
-        ...
+    class KillTask(Task): ...
 
     def __init__(
         self,
@@ -420,6 +419,9 @@ class AudioPlayer(PlaybackTimer):
                 self._audio_sink.stop()
                 self._audio_sink.stateChanged.disconnect()
                 self._audio_sink.deleteLater()
+                del self._audio_sink_device._decoder
+                self._audio_sink_device.deleteLater()
+                self._audio_sink_device = None
                 self._audio_sink = None
 
     def __audio_thread__reset__init__locked(
@@ -434,11 +436,12 @@ class AudioPlayer(PlaybackTimer):
         self._decoder = decoder
         self._time_offset = decoder.current_timepoint
 
+        self._audio_sink_device = QtAudioSourceDevice(decoder)
         self._audio_sink = QtM.QAudioSink(
             self._audio_manager.get_current_output_device(), audio_format
         )
         self._audio_sink.stateChanged.connect(self.__audio_thread__on_audio_sink_state_change)
-        self._audio_sink.start(QtAudioSourceDevice(decoder))
+        self._audio_sink.start(self._audio_sink_device)
         self._audio_sink.suspend()
 
     def uninitialize(self) -> Task.Future:

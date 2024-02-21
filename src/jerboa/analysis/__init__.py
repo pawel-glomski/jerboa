@@ -18,4 +18,5 @@
 from . import algorithm
 from . import algorithms
 from . import registry
+from . import resource
 from . import run

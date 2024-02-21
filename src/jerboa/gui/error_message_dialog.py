@@ -15,7 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import PySide6.QtWidgets as QtW
+import qtpy.QtWidgets as QtW
 
 
 class ErrorMessageDialogFactory:

@@ -20,7 +20,7 @@ from threading import Lock
 
 from jerboa.log import logger
 from jerboa.core.signal import Signal
-from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask
+from jerboa.core.multithreading import ThreadSpawner, TaskQueue, Task, FnTask, Event
 from jerboa.media.core import MediaType
 from .decoding.decoder import Decoder
 from .decoding.frame import JbVideoFrame
@@ -31,15 +31,14 @@ from .timer import PlaybackTimer
 THREAD_RESPONSE_TIMEOUT = 0.1
 SLEEP_THRESHOLD_RATIO = 1 / 3  # how much earlier can we display the frame (ratio of frame duration)
 SLEEP_THRESHOLD_MAX = 1 / 24 * SLEEP_THRESHOLD_RATIO  # but we cannot display it earlier than this
-SLEEP_TIME_MAX = 0.25
+SLEEP_TIME_MAX = 0.1
 
 TIMER_STARTUP_WAIT_TIME = 1 / 120
-TIMER_SYNC_RETRIES_MAX = 32
+TIMER_SYNC_RETRIES_MAX = 128
 
 
 class VideoPlayer:
-    class UninitializeTask(Task):
-        ...
+    class UninitializeTask(Task): ...
 
     @dataclass(frozen=True)
     class SeekTask(Task):
@@ -163,33 +162,41 @@ class VideoPlayer:
             logger.debug("Uninitializing... Successful")
 
     def __thread__playback_loop(self) -> None:
-        frame: JbVideoFrame | None = None
-        sync_retries = 0
-
         self.__thread__emit_first_frame()
+
+        sync_retries = 0
+        sleep_time_left_last = None
+        frame: JbVideoFrame | None = None
+        task_added_event: Event = Event()
+        task_added_event.abort()
         while True:
             try:
                 self._tasks.run_all(None if self.state == PlayerState.SUSPENDED else 0)
                 if self.state == PlayerState.SUSPENDED:
                     continue
 
+                if not task_added_event.is_pending:
+                    task_added_event = self._tasks.create_task_added_event()
+
                 if frame is None:
                     frame = self.__thread__get_frame()
-                    sync_retries = 0
-                else:
-                    sync_retries += 1
 
-                if frame is not None and self.__thread__sync_with_timer(frame):
-                    self._video_frame_update_signal.emit(frame=frame)
-                    frame = None
-                elif sync_retries >= TIMER_SYNC_RETRIES_MAX:
-                    logger.error(
-                        "The timer is not progressing... This player will be "
-                        "suspended and a 'Buffer Underrun' signal will be emitted..."
-                    )
-                    sync_retries = 0
-                    self.__thread__set_state(PlayerState.SUSPENDED)
-                    self.buffer_underrun_signal.emit()
+                if frame is not None:
+                    sleep_time_left = self.__thread__sync_with_timer(frame, task_added_event)
+                    if sleep_time_left <= 0:
+                        self._video_frame_update_signal.emit(frame=frame)
+                        frame = None
+                        sync_retries = 0
+                    elif sleep_time_left == sleep_time_left_last:
+                        sync_retries += 1
+                        if sync_retries >= TIMER_SYNC_RETRIES_MAX:
+                            logger.error(
+                                "The timer is not progressing... This player will be "
+                                "suspended and a 'Buffer Underrun' signal will be emitted..."
+                            )
+                            sync_retries = 0
+                            self.__thread__set_state(PlayerState.SUSPENDED)
+                            self.buffer_underrun_signal.emit()
 
             except VideoPlayer.SeekTask as seek_task:
                 if seek_task.execute(
@@ -237,28 +244,24 @@ class VideoPlayer:
             self.buffer_underrun_signal.emit()
         return None
 
-    def __thread__sync_with_timer(self, frame: JbVideoFrame) -> bool:
+    def __thread__sync_with_timer(self, frame: JbVideoFrame, task_added_event: Event) -> float:
         sleep_threshold = min(SLEEP_THRESHOLD_MAX, frame.duration * SLEEP_THRESHOLD_RATIO)
 
         current_timepoint = self._timer.current_timepoint()
         if current_timepoint is None:
-            self._tasks.create_task_added_event().wait(timeout=TIMER_STARTUP_WAIT_TIME)
-            return False
+            task_added_event.wait(timeout=TIMER_STARTUP_WAIT_TIME)
+            return -float("inf")
 
         sleep_time = frame.beg_timepoint - current_timepoint
         if sleep_time > sleep_threshold:
             # wait for the timer to catch up
-            self._tasks.create_task_added_event().wait(timeout=min(SLEEP_TIME_MAX, sleep_time))
+            task_added_event.wait(timeout=min(SLEEP_TIME_MAX, sleep_time))
 
             current_timepoint = self._timer.current_timepoint()
-            if current_timepoint is None:
-                return False
+            if current_timepoint is not None:
+                sleep_time = frame.beg_timepoint - current_timepoint
 
-            sleep_time = frame.beg_timepoint - current_timepoint
-
-        if sleep_time <= sleep_threshold:
-            return True
-        return False
+        return sleep_time - sleep_threshold
 
     def __thread__set_state(self, state: PlayerState) -> None:
         with self._mutex:

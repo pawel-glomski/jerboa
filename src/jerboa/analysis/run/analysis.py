@@ -33,12 +33,16 @@ class AnalyzerProcess:
         environment: alg.Environment,
         analysis_params: alg.AnalysisParams,
         last_packet: alg.AnalysisPacket | None,
-        # resource_manager: ResourceManager,
+        resource_manager: alg.ResourceManager,
     ) -> None:
         analyzer_process = AnalyzerProcess(
             ipc=ipc,
             ipc_protocol=proc.IPCProtocolChild(),
-            analyzer=analyzer_class(environment=environment, analysis_params=analysis_params),
+            analyzer=analyzer_class(
+                environment=environment,
+                params=analysis_params,
+                resource_manager=resource_manager,
+            ),
         )
 
         analyzer_task = mth.FnTask(lambda executor: analyzer_process.run(executor, last_packet))
@@ -62,7 +66,6 @@ class AnalyzerProcess:
         ipc: proc.IPC,
         ipc_protocol: proc.IPCProtocolChild,
         analyzer: alg.Analyzer,
-        # resource_manager: ResourceManager,
     ):
         ipc.configure(protocol=ipc_protocol)
 

@@ -18,37 +18,14 @@
 import enum
 import pickle
 import pydantic
-import typing as t
+import typing as T
 import abc
 from dataclasses import dataclass
 
 from jerboa.core.signal import Signal
 from jerboa.core.multithreading import Task
 from jerboa.core.timeline import TMSection
-
-
-class AnalysisData(abc.ABC):
-    @abc.abstractmethod
-    def serialize(self) -> bytes:
-        return pickle.dumps(self)
-
-    @staticmethod
-    @abc.abstractmethod
-    def deserialize(data: bytes) -> "AnalysisData":
-        return pickle.loads(data)
-
-
-T1 = t.TypeVar("T1", bound=AnalysisData)
-
-
-class AnalysisPacket(pydantic.BaseModel, abc.ABC, t.Generic[T1]):
-    model_config = pydantic.ConfigDict(frozen=True, arbitrary_types_allowed=True)
-
-    beg_timepoint: float
-    end_timepoint: float
-    interpretation: list[TMSection] | None
-
-    data: T1 = pydantic.Field(exclude=True)  # data is serialized manually
+from .resource import ResourceManager
 
 
 class Environment(pydantic.BaseModel, abc.ABC):
@@ -67,43 +44,85 @@ class Environment(pydantic.BaseModel, abc.ABC):
         raise NotImplementedError()
 
 
-class AnalysisParams(pydantic.BaseModel):
-    model_config = pydantic.ConfigDict(frozen=True, validate_default=True)
-    # ... analysis parameters here
-
-
 class InterpretationParams(pydantic.BaseModel):
     model_config = pydantic.ConfigDict(validate_assignment=True, validate_default=True)
     # ... interpretation parameters here
 
 
-class Analyzer(pydantic.BaseModel, abc.ABC):
-    environment: Environment = pydantic.Field(frozen=True)
-    analysis_params: AnalysisParams = pydantic.Field(frozen=True)
+class AnalysisParams(pydantic.BaseModel):
+    model_config = pydantic.ConfigDict(frozen=True, validate_default=True)
+    # ... analysis parameters here
+
+
+class AnalysisData:
+    def serialize(self) -> bytes:
+        return pickle.dumps(self)
+
+    @staticmethod
+    def deserialize(data: bytes) -> "AnalysisData":
+        return pickle.loads(data)
+
+
+# ------------------------------------------- Generics ------------------------------------------- #
+
+EnvT = T.TypeVar("EnvT", bound=Environment)
+AParamsT = T.TypeVar("AParamsT", bound=AnalysisParams)
+IParamsT = T.TypeVar("IParamsT", bound=InterpretationParams)
+ADataT = T.TypeVar("ADataT", bound=AnalysisData)
+
+# ----------------------------------------------- - ---------------------------------------------- #
+
+
+class AnalysisPacket(pydantic.BaseModel, abc.ABC, T.Generic[ADataT]):
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True)
+
+    beg_timepoint: float = pydantic.Field(frozen=True)
+    end_timepoint: float = pydantic.Field(frozen=True)
+
+    data: ADataT = pydantic.Field(frozen=True, exclude=True)  # data is serialized manually
+
+    interpretation: list[TMSection] = pydantic.Field(default_factory=list)
+
+
+class Analyzer(
+    pydantic.BaseModel,
+    T.Generic[EnvT, AParamsT, ADataT],
+    abc.ABC,
+):
+    model_config = pydantic.ConfigDict(arbitrary_types_allowed=True, extra="allow")
+
+    environment: EnvT = pydantic.Field(frozen=True)
+    params: AParamsT = pydantic.Field(frozen=True)
+
+    resource_manager: ResourceManager = pydantic.Field(frozen=True)
 
     @abc.abstractmethod
     def analyze(
         self,
         executor: Task.Executor,
-        previous_packet: AnalysisPacket | None,
-    ) -> t.Iterable[AnalysisPacket]:
+        previous_packet: AnalysisPacket[ADataT] | None,
+    ) -> T.Iterable[AnalysisPacket[ADataT]]:
         raise NotImplementedError()
 
 
-class Interpreter(pydantic.BaseModel, abc.ABC):
+class Interpreter(
+    pydantic.BaseModel,
+    T.Generic[EnvT, AParamsT, IParamsT, ADataT],
+    abc.ABC,
+):
     model_config = pydantic.ConfigDict(frozen=True)
 
-    environment: Environment
-    analysis_params: AnalysisParams
-    interpretation_params: InterpretationParams
+    environment: EnvT
+    analysis_params: AParamsT
+    interpretation_params: IParamsT
 
     @abc.abstractmethod
-    def interpret_next(self, packet: AnalysisPacket) -> list[TMSection]:
+    def interpret_next(self, packet: AnalysisPacket[ADataT]) -> list[TMSection]:
         raise NotImplementedError()
 
 
 class PassthroughInterpreter(Interpreter):
-    def interpret_next(self, packet: AnalysisPacket) -> list[TMSection]:
+    def interpret_next(self, packet):
         assert packet.interpretation is not None
         return packet.interpretation
 

@@ -15,14 +15,14 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-from PySide6 import (
+from qtpy import (
     QtWidgets as QtW,
     QtCore as QtC,
     QtGui as QtG,
     QtMultimedia as QtM,
     QtMultimediaWidgets as QtMW,
 )
-from PySide6.QtCore import Qt
+from qtpy.QtCore import Qt
 
 from jerboa.core.signal import Signal
 from jerboa.media.core import VideoConfig, VIDEO_FRAME_PIXEL_FORMAT
@@ -75,15 +75,14 @@ class Canvas(QtW.QStackedWidget):
 
     def update_frame(self, frame: JbVideoFrame) -> None:
         if frame is not None:
-            self._assure_correct_frame_size(frame.width, frame.height)
-
-            frame_qt = self._new_frame()
+            frame_qt = self._new_frame(frame.width, frame.height)
             with FrameMappingContext(frame_qt, QtM.QVideoFrame.MapMode.ReadWrite):
                 for plane_idx in range(frame_qt.planeCount()):
                     frame_qt.bits(plane_idx)[:] = frame.planes[plane_idx]
 
             self._frame_canvas.videoSink().setVideoFrame(frame_qt)
-            self.setCurrentWidget(self._frame_canvas)
+            if self.currentWidget() is not self._frame_canvas:
+                self.setCurrentWidget(self._frame_canvas)
         else:
             self.setCurrentWidget(self._no_video_label)
 
@@ -96,9 +95,9 @@ class Canvas(QtW.QStackedWidget):
             ]
             self._frame_idx = 0
 
-    def _new_frame(self) -> QtM.QVideoFrame:
-        self._frame_idx = (self._frame_idx + 1) % 2
-        return self._frames[self._frame_idx]
+    def _new_frame(self, width: int, height: int) -> QtM.QVideoFrame:
+        self._frame_format.setFrameSize(QtC.QSize(width, height))
+        return QtM.QVideoFrame(self._frame_format)
 
 
 class Timeline(QtW.QLabel):
@@ -131,8 +130,7 @@ class PlayerPage(QtW.QWidget):
         self._seek_backward_signal = seek_backward_signal
         self._seek_forward_signal = seek_forward_signal
 
-        self._splitter = QtW.QSplitter()
-        self._splitter.setOrientation(Qt.Orientation.Vertical)
+        self._splitter = QtW.QSplitter(Qt.Orientation.Vertical)
         self._splitter.setStyleSheet(
             """
             QSplitter::handle {

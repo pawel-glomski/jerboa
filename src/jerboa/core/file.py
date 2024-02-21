@@ -20,7 +20,7 @@ import os
 from pathlib import Path
 from dataclasses import dataclass
 
-from PySide6.QtCore import QUrl
+from qtpy.QtCore import QUrl
 
 from jerboa.log import logger
 

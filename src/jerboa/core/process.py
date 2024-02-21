@@ -18,7 +18,7 @@
 import sys
 import enum
 import time
-import typing as t
+import typing as T
 import multiprocessing as mp
 from multiprocessing.connection import Connection
 from dataclasses import dataclass, field
@@ -59,12 +59,12 @@ class IPCMsgDesc:
     def __set_name__(self, owner, name: str):
         super().__setattr__("id", name)
 
-    def __get__(self, instance, owner) -> t.Callable | None:
+    def __get__(self, instance, owner) -> T.Callable | None:
         if instance is None:
             return self
         return instance.__dict__.get(self._handler_var_name, None)
 
-    def __set__(self, instance, handler: t.Callable | None):
+    def __set__(self, instance, handler: T.Callable | None):
         utils.assert_callable(handler, expected_args=self.payload)
 
         instance.__dict__[self._handler_var_name] = handler
@@ -88,7 +88,7 @@ class IPCProtocol:
     def __init__(self, role: Role):
         super().__setattr__("_role", role)
 
-    def __getitem__(self, msg_id: str) -> t.Callable:
+    def __getitem__(self, msg_id: str) -> T.Callable:
         return getattr(self, msg_id)
 
     def __setattr__(self, name: str, value) -> None:
@@ -176,7 +176,7 @@ class IPC:
         protocol.child_finished = IPC._stack_handlers(protocol.child_finished, self.__run__kill)
 
     @staticmethod
-    def _stack_handlers(*handlers: t.Callable) -> t.Callable:
+    def _stack_handlers(*handlers: T.Callable) -> T.Callable:
         def _wrapped_handler(**kwargs):
             for handler in handlers:
                 if handler is not None:
@@ -258,7 +258,7 @@ class IPC:
         return IPC(parent, role=Role.PARENT), IPC(child, role=Role.CHILD)
 
 
-def _worker(name: str, target: t.Callable, ipc: IPC, kwargs: dict[str], main_logger):
+def _worker(name: str, target: T.Callable, ipc: IPC, kwargs: dict[str], main_logger):
     logger.initialize(name=name, main_logger=main_logger)
     try:
         logger.debug("The subprocess has started")
@@ -275,6 +275,6 @@ def _worker(name: str, target: t.Callable, ipc: IPC, kwargs: dict[str], main_log
 # TODO
 # import concurrent.futures
 # executor = concurrent.futures.ProcessPoolExecutor()
-def create(name: str, target: t.Callable, ipc: IPC, /, **kwargs) -> mp.Process:
+def create(name: str, target: T.Callable, ipc: IPC, /, **kwargs) -> mp.Process:
     logger.debug(f"Creating a subprocess: `{name}`")
     return mp.Process(name=name, target=_worker, args=(name, target, ipc, kwargs, logger))

@@ -15,8 +15,6 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-from typing import Callable
-
 import av
 import errno
 import numpy as np
@@ -60,7 +58,11 @@ class AudioReformatter:
 class VideoReformatter:
     def __init__(self, config: VideoConfig):
         self._config = config
-        self._reformatter: Callable[[av.VideoFrame], av.VideoFrame] | None = None
+
+        self._graph = None
+        self.out_pixel_format_av_name = jb_to_av.video_pixel_format(self._config.pixel_format).name
+
+        # self._reformatter = av.video.reformatter.VideoReformatter()
 
         # filter graph is quite slow and lot of time is spent waiting for the output frame.
         # Thus we could delegate the waiting task to another thread and return a future instead.
@@ -80,33 +82,23 @@ class VideoReformatter:
     def reformat(self, frame: av.VideoFrame) -> av.VideoFrame:
         assert frame is not None, "VideoReformatter cannot be flushed"
 
-        if self._reformatter is None:
-            self._reformatter = self._create_reformatter(frame)
-        return self._reformatter(frame)
-        # return self._thread_pool.submit(self._reformatter, frame)
+        if frame.format.name != self.out_pixel_format_av_name:
+            if self._graph is None:
+                self._graph = self._create_filter_graph(
+                    frame_template=frame,
+                    out_pixel_format_av_name=self.out_pixel_format_av_name,
+                )
+            frame.pts = 0
+            self._graph.push(frame)
+            frame = VideoReformatter._pull_from_filter_graph(self._graph)
+        # frame = self._reformatter.reformat(frame, format=self.out_pixel_format_av_name)
 
-    def _create_reformatter(self, frame_template: av.VideoFrame) -> av.filter.Graph:
-        def get_planes(frame: av.VideoFrame):
-            return [np.frombuffer(plane, dtype=np.ubyte) for plane in frame.planes]
-
-        out_pixel_format_av = jb_to_av.video_pixel_format(self._config.pixel_format)
-
-        if frame_template.format.name == out_pixel_format_av.name:
-            return get_planes
-
-        graph = self._create_filter_graph(frame_template, out_pixel_format_av)
-
-        def filter_graph_reformatter(frame_in: av.VideoFrame):
-            graph.push(frame_in)
-            frame_out = get_planes(VideoReformatter._pull_from_filter_graph(graph))
-            return frame_out
-
-        return filter_graph_reformatter
+        return [np.frombuffer(plane, dtype=np.ubyte) for plane in frame.planes]
 
     def _create_filter_graph(
         self,
         frame_template: av.VideoFrame,
-        out_pixel_format_av: str,
+        out_pixel_format_av_name: str,
     ) -> tuple[av.filter.context.FilterContext, av.filter.context.FilterContext]:
         graph = av.filter.Graph()
 
@@ -124,7 +116,7 @@ class VideoReformatter:
 
         format_filter = graph.add(
             "format",
-            pix_fmts=out_pixel_format_av.name,
+            pix_fmts=out_pixel_format_av_name,
         )
 
         buffersink = graph.add("buffersink")

@@ -15,8 +15,8 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import PySide6.QtWidgets as QtW
-from PySide6.QtCore import Qt
+import qtpy.QtWidgets as QtW
+from qtpy.QtCore import Qt
 
 
 from jerboa.core.signal import Signal

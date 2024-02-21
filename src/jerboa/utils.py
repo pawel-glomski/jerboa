@@ -15,7 +15,7 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 import inspect
-from typing import Callable
+import typing as T
 
 
 class ActivationContext:
@@ -37,7 +37,29 @@ class ActivationContext:
         return self._active
 
 
-def assert_callable(fn: Callable, expected_args: set[str]) -> None:
+class LazyObj:
+    def __init__(self, obj_type: type, *args, **kwargs):
+        self._obj_type = obj_type
+        self._args = args
+        self._kwargs = kwargs
+        self._instance = None
+
+    def __getattr__(self, attr_name: str) -> T.Any:
+        if self._instance is None:
+            self._instance = self._obj_type(*self._args, **self._kwargs)
+            del self._obj_type
+            del self._args
+            del self._kwargs
+            self.__getattribute__ = lambda attr: getattr(self._instance, attr)
+        else:
+            raise AttributeError(
+                f"'{self._instance.__class__.__name__}' object has no attribute '{attr_name}'"
+            )
+
+        return self.__getattribute__(attr_name)
+
+
+def assert_callable(fn: T.Callable, expected_args: set[str]) -> None:
     observed_args = inspect.signature(fn).parameters
 
     missing_args = expected_args - observed_args.keys()

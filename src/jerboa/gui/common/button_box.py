@@ -15,8 +15,8 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-import PySide6.QtWidgets as QtW
-import PySide6.QtGui as QtG
+import qtpy.QtWidgets as QtW
+import qtpy.QtGui as QtG
 
 
 class RejectAcceptButtonBox(QtW.QDialogButtonBox):

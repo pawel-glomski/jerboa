@@ -24,9 +24,11 @@ dependencies = [
     "dependency-injector",
     "loguru",
     "pydantic",
+    "pydantic_settings",
     "av",
     "pylibrb",
     "PySide6",
+    "qtpy",
     "yt-dlp",
 ]
 

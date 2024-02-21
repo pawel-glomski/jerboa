@@ -17,54 +17,43 @@
 
 from typing import Optional
 
-from bisect import bisect_right
+from bisect import bisect_left
 from dataclasses import dataclass
 
 from jerboa.media.core import MediaType
 
-DEFAULT_SAMPLE_RATE = 44100
-DEFAULT_RESOLUTION = 720
-
 
 @dataclass(order=True, frozen=True)
 class AudioFeatures:
-    sample_rate: int | None
     channels: int | None
+    sample_rate: int | None
+
+    @property
+    def media_type(self) -> MediaType:
+        return MediaType.AUDIO
 
     def __str__(self) -> str:
         return f"{self.channels or '?'} x {self.sample_rate or '?'}"
 
-    @staticmethod
-    def find_default(features_alternatives: list["AudioFeatures"]) -> int | None:
-        if features_alternatives:
-            idx = bisect_right(
-                features_alternatives,
-                DEFAULT_SAMPLE_RATE,
-                key=lambda audio_variant: audio_variant.sample_rate or 0,
-            )
-            return max(0, idx - 1)
-        return None
-
 
 @dataclass(order=True, frozen=True)
 class VideoFeatures:
-    width: int | None
     height: int | None
+    width: int | None
     fps: float | None
+
+    @property
+    def media_type(self) -> MediaType:
+        return MediaType.VIDEO
 
     def __str__(self) -> str:
         return f"{self.width}x{self.height}, {self.fps:.1f}fps"
 
-    @staticmethod
-    def find_default(features_alternatives: list["VideoFeatures"]) -> int | None:
-        if features_alternatives:
-            idx = bisect_right(
-                features_alternatives,
-                DEFAULT_RESOLUTION,
-                key=lambda video_variant: min(video_variant.width, video_variant.height),
-            )
-            return max(0, idx - 1)
-        return None
+
+DEFAULT_FEATURES = {
+    MediaType.AUDIO: AudioFeatures(channels=2, sample_rate=44100),
+    MediaType.VIDEO: VideoFeatures(height=720, width=0, fps=30),
+}
 
 
 @dataclass(frozen=True)
@@ -243,8 +232,9 @@ class MediaStreamSource:
         self._features_list = sorted(list(self._variants_by_features.keys()))
 
         if variants:
-            Features = type(variants[0].grouping_features)
-            self._default_features_index = Features.find_default(self._features_list)
+            self._default_features_index = self._find_closest_features(
+                DEFAULT_FEATURES[self.media_type]
+            )
         else:
             self._default_features_index = None
 
@@ -276,6 +266,40 @@ class MediaStreamSource:
         if self.selected_features_index is not None:
             return self._variants_by_features[self._features_list[self.selected_features_index]]
         return None
+
+    def find_closest_variant_group(
+        self, features: AudioFeatures | VideoFeatures
+    ) -> list[AudioSourceVariant] | list[VideoSourceVariant]:
+        return self._variants_by_features[self.features_list[self._find_closest_features(features)]]
+
+    def _find_closest_features(self, features: AudioFeatures | VideoFeatures) -> int:
+        assert features.media_type == self.media_type
+
+        return min(len(self._features_list) - 1, bisect_left(self._features_list, features))
+
+        # if features.media_type == MediaType.AUDIO:
+        #     features_list = sorted(f.channels - features.channels for f in self.features_list)[0]
+        #     for observed_features in self.features_list:
+        #         observed_features
+
+        #     self.features_list
+
+        #     if features:
+        #         idx = bisect_right(
+        #             self.features_list,
+        #             DEFAULT_SAMPLE_RATE,
+        #             key=lambda audio_variant: audio_variant.sample_rate or 0,
+        #         )
+        #         return max(0, idx - 1)
+        #     return None
+        # else:
+        #     if features:
+        #         idx = bisect_right(
+        #             self.features_list,
+        #             DEFAULT_RESOLUTION,
+        #             key=lambda video_variant: min(video_variant.width, video_variant.height),
+        #         )
+        #         return max(0, idx - 1)
 
     @staticmethod
     def from_yt_dlp_dict(info: dict, media_type: MediaType) -> "MediaStreamSource":

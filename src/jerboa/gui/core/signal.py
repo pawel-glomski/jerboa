@@ -16,7 +16,7 @@
 
 
 from typing import Callable
-from PySide6 import QtCore as QtC
+from qtpy import QtCore as QtC
 
 from jerboa.core.signal import Signal
 

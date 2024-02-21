@@ -22,8 +22,8 @@ import annotated_types
 from typing import TypeVar, Generic
 from dataclasses import dataclass
 
-import PySide6.QtWidgets as QtW
-from PySide6.QtCore import Qt
+import qtpy.QtWidgets as QtW
+from qtpy.QtCore import Qt
 
 from . import input_widget
 from .page_stack import MessagePage

@@ -169,7 +169,7 @@ class TestFragmentedTimeline:
 
         tl.append_section(TMSection(2, 3, 0.5))
 
-        assert tl.get_sections() == [(TMSection(0, 1), 1.0), (TMSection(2, 3, 0.5), 1.5)]
+        assert tl.get_sections()[0] == [TMSection(0, 1), TMSection(2, 3, 0.5)]
         assert tl.time_scope == 3
 
     def test_append_section_should_extend_when_direct_continuation(self):
@@ -177,7 +177,7 @@ class TestFragmentedTimeline:
 
         tl.append_section(TMSection(1, 2, 0.5))
 
-        assert tl.get_sections() == [(TMSection(0, 2, 0.5), 1.0)]
+        assert tl.get_sections()[0] == [TMSection(0, 2, 0.5)]
         assert tl.time_scope == 2
 
     def test_append_section_should_not_append_when_modifier_is_0(self):
@@ -185,7 +185,7 @@ class TestFragmentedTimeline:
 
         tl.append_section(TMSection(2, 3, 0))
 
-        assert tl.get_sections() == [(TMSection(0, 1), 1.0)]
+        assert tl.get_sections()[0] == [TMSection(0, 1)]
         assert tl.time_scope == 3
 
     def test_append_section_should_clamp_section_beg_to_0_when_negative_beg(self):
@@ -193,8 +193,60 @@ class TestFragmentedTimeline:
 
         tl.append_section(TMSection(-INF, INF))
 
-        assert tl.get_sections() == [(TMSection(0, INF), INF)]
+        assert tl.get_sections()[0] == [TMSection(0, INF)]
         assert tl.time_scope == INF
+
+    @pytest.mark.parametrize(
+        "beg, end",
+        [
+            (-2, -1),
+            (-1, 0),
+            (7, 8),
+            (8, 10),
+        ],
+    )
+    def test_get_sections_should_return_empty_list_for_ranges_outside_the_scope(
+        self, beg: float, end: float
+    ):
+        tl = FragmentedTimeline(
+            [
+                TMSection(0, 1),
+                TMSection(2, 6),
+                TMSection(10, 20),
+                TMSection(30, float("inf")),
+            ]
+        )
+
+        sections, beg_idx, end_idx = tl.get_sections(beg, end)
+        assert len(sections) == 0
+        assert beg_idx == end_idx
+
+    @pytest.mark.parametrize(
+        "beg, end, expected_beg_idx, expected_end_idx",
+        [
+            (-1, 0.5, 0, 1),
+            (0, 2, 0, 1),
+            (0.5, 10, 0, 2),
+            (1, 31, 1, 4),
+            (4, float("inf"), 1, 4),
+        ],
+    )
+    def test_get_sections_should_return_correct_indices(
+        self, beg: float, end: float, expected_beg_idx: int, expected_end_idx: int
+    ):
+        tl = FragmentedTimeline(
+            [
+                TMSection(0, 1),
+                TMSection(3, 6),
+                TMSection(10, 20),
+                TMSection(30, float("inf")),
+            ]
+        )
+
+        sections, beg_idx, end_idx = tl.get_sections(beg, end)
+        assert len(sections) > 0
+        assert beg_idx == expected_beg_idx
+        assert end_idx == expected_end_idx
 
     def test_unmap_timepoint_to_source_should_return_none_when_empty_timeline(self):
         tl = FragmentedTimeline()

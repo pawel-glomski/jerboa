@@ -439,8 +439,9 @@ class FrameMappingPreparationNode(Node):
                         scope_extended_event = context.timeline.create_scope_extended_event(
                             frame.end_timepoint
                         )
-                        context.tasks.add_event_to_abort_on_task_added(scope_extended_event)
-                        scope_extended_event.wait()
+                        if scope_extended_event.is_pending:
+                            context.tasks.add_event_to_abort_on_task_added(scope_extended_event)
+                            scope_extended_event.wait()
                         context.tasks.run_all()
 
                     # note the value of `beg` is `max(beg_timepoint, min_timepoint)`

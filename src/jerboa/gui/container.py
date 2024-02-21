@@ -17,7 +17,7 @@
 
 from dependency_injector import containers, providers
 
-import PySide6.QtWidgets as QtW
+import qtpy.QtWidgets as QtW
 
 from jerboa.core.file import PathProcessor
 from jerboa.core.signal import Signal

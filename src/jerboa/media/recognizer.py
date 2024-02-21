@@ -58,8 +58,8 @@ class MediaSourceRecognizer:
         media_source = recognition_error_message = None
 
         try:
-            avcontainer = av.open(media_source_path.path)
-            media_source = MediaSource.from_av_container(avcontainer)
+            with av.open(media_source_path.path) as avcontainer:
+                media_source = MediaSource.from_av_container(avcontainer)
         except (
             av.error.FileNotFoundError,
             av.error.OSError,

@@ -25,9 +25,9 @@ from .context import DecodingContext
 from .frame import JbAudioFrame, JbVideoFrame
 from . import node
 
-
-BUFFER_DURATION = 10  # in seconds
-PREFILL_DURATION = 1  # in seconds
+# TODO: different buffer sizes for local and online media
+BUFFER_DURATION = 3  # in seconds
+PREFILL_DURATION = 0.25  # in seconds
 assert PREFILL_DURATION < BUFFER_DURATION
 
 
@@ -124,11 +124,23 @@ class Decoder:
                 self.__thread__kill("Killed by an error", crashed=True)
                 break
 
+        self._context.close()
+
+        del self._root_node
+        del self._output_node
+        del self._buffer
+        del self._context
+
+        import gc
+
+        gc.collect()
+
     def __thread__put_output_to_buffer(self, output: JbAudioFrame | JbVideoFrame) -> None:
         with self._mutex__shared_with_task_queue:
             buffer_not_full_event = self._buffer_not_full.create_emit_event__locked()
-        self._context.tasks.add_event_to_abort_on_task_added(buffer_not_full_event)
-        buffer_not_full_event.wait()
+        if buffer_not_full_event.is_pending:
+            self._context.tasks.add_event_to_abort_on_task_added(buffer_not_full_event)
+            buffer_not_full_event.wait()
         with self._mutex__shared_with_task_queue:
             if not self._buffer.is_full():
                 self._buffer.put(output)
@@ -187,7 +199,7 @@ class Decoder:
                     target_duration=PREFILL_DURATION
                 )
             executor.abort_aware_wait(event)
-            if self._buffer.duration <= 0:
+            if event.is_emitted and self._buffer.duration <= 0:
                 executor.abort()
             executor.finish()
 

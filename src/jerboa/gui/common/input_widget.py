@@ -18,10 +18,10 @@
 import enum
 from typing import TypeVar, Generic
 
-import PySide6.QtWidgets as QtW
-import PySide6.QtCore as QtC
-import PySide6.QtGui as QtG
-from PySide6.QtCore import Qt
+import qtpy.QtWidgets as QtW
+import qtpy.QtCore as QtC
+import qtpy.QtGui as QtG
+from qtpy.QtCore import Qt
 
 
 ValueT = TypeVar("ValueT")

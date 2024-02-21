@@ -21,7 +21,6 @@ from typing_extensions import Annotated
 from pathlib import Path
 
 from jerboa import __version__
-from .log import logger
 
 
 # ------------------------------------------- Constants ------------------------------------------ #
@@ -29,8 +28,8 @@ from .log import logger
 PROJECT_NAME = "jerboa"
 PROJECT_VERSION = __version__
 
-_HOME_PATH_DEFAULT = Path(f"~/.{PROJECT_NAME}/")
-_CACHE_DIR_PATH_DEFAULT = Path(f"~/.cache/{PROJECT_NAME}/")
+_HOME_PATH_DEFAULT = Path.home() / f".{PROJECT_NAME}"
+_CACHE_DIR_PATH_DEFAULT = Path.home() / f".cache/{PROJECT_NAME}"
 
 # --------------------------------------------- Utils -------------------------------------------- #
 
@@ -62,14 +61,12 @@ def validate_directory_write_permissions_with_fallback(dir_path: Path, fallback_
     try:
         return validate_directory_write_permissions(dir_path)
     except AssertionError:
-        logger.warning(
-            f"No write permissions for '{dir_path}'. Trying the fallback instead '{fallback_path}'"
-        )
+        print(f"No write permissions for '{dir_path}'. Trying '{fallback_path}' instead.")
         return validate_directory_write_permissions(fallback_path)
 
 
 DirectoryPath = Annotated[
-    pydantic.DirectoryPath,
+    Path,
     pydantic.Field(validate_default=True),
     pydantic.AfterValidator(validate_directory_write_permissions),
 ]
@@ -91,8 +88,13 @@ class Environment(pydantic_settings.BaseSettings):
     def settings_path(self) -> Path:
         return self.home_path / "settings.json"
 
+    @property
+    def logs_path(self) -> Path:
+        return self.home_path / "jerboa.log"
+
 
 ENVIRONMENT = Environment()
+
 
 # ------------------------------------------- Settings ------------------------------------------- #
 

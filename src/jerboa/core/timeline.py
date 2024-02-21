@@ -16,7 +16,7 @@
 
 
 import math
-from bisect import bisect_left
+from bisect import bisect_left, bisect_right
 from dataclasses import dataclass, field
 
 from jerboa.core.multithreading import RWLock, PredicateEmitter, Event
@@ -159,9 +159,16 @@ class FragmentedTimeline:
             self._time_scope = extended_scope
             self._scope_extended.evaluate_and_emit__locked()
 
-    def get_sections(self) -> list[tuple[TMSection, float]]:
+    def get_sections(
+        self, beg: float = 0, end: float | None = None
+    ) -> tuple[list[TMSection], int, int]:
         with self._mutex.as_reader():
-            return list(zip(self._sections, self._resulting_timepoints))
+            if end is None:
+                end = self.time_scope
+            # TODO(OPT): don't use key
+            beg_idx = bisect_right(self._sections, beg, key=lambda s: s.end)
+            end_idx = bisect_left(self._sections, end, key=lambda s: s.beg)
+            return (self._sections[beg_idx:end_idx], beg_idx, end_idx)
 
     def append_section(self, section: TMSection) -> None:
         """
@@ -256,32 +263,32 @@ class FragmentedTimeline:
             if end > self.time_scope:
                 return (None, None)
 
-            involved_sections = list[TMSection]()
-            idx = bisect_left(self._sections, beg, key=lambda s: s.end)  # TODO(OPT): don't use key
-            if idx >= len(self._sections):
-                mapped_beg = self._sections[-1].end if self._sections else 0
-                mapped_end = mapped_beg
-                next_timepoint = self.time_scope
-            else:
-                mapped_beg = self._resulting_timepoints[idx - 1] if idx > 0 else 0.0
-                mapped_beg += self._sections[idx].modifier * max(0, beg - self._sections[idx].beg)
-                mapped_end = mapped_beg
-
-                while idx < len(self._sections) and end > self._sections[idx].beg:
-                    overlap_section = self._sections[idx].overlap(beg, end)
-                    if overlap_section.duration > 0:
-                        mapped_end += overlap_section.duration
-                        involved_sections.append(overlap_section)
-                    idx += 1
-
-                if idx > 0 and end < self._sections[idx - 1].end:
+            sections, beg_idx, end_idx = self.get_sections(beg, end)
+            if beg_idx < end_idx:
+                if end < sections[-1].end:
                     next_timepoint = end
-                elif idx < len(self._sections):
-                    next_timepoint = self._sections[idx].beg
+                elif end_idx < len(self._sections):
+                    next_timepoint = self._sections[end_idx].beg
                 else:
                     next_timepoint = self._time_scope
 
-            return (RangeMappingResult(mapped_beg, mapped_end, involved_sections), next_timepoint)
+                mapped_beg = self._resulting_timepoints[beg_idx - 1] if beg_idx > 0 else 0.0
+                mapped_beg += sections[0].modifier * max(0, beg - sections[0].beg)
+                mapped_end = mapped_beg
+                for section_idx, section in enumerate(sections):
+                    sections[section_idx] = section.overlap(beg, end)
+                    mapped_end += sections[section_idx].duration
+
+            else:
+                if beg_idx < len(self._sections):
+                    next_timepoint = self._sections[beg_idx].beg
+                    mapped_beg = self._resulting_timepoints[beg_idx]
+                else:
+                    next_timepoint = self._time_scope
+                    mapped_beg = self._resulting_timepoints[-1] if self._resulting_timepoints else 0
+                mapped_end = mapped_beg
+
+            return (RangeMappingResult(mapped_beg, mapped_end, sections), next_timepoint)
 
     def create_scope_extended_event(self, target_scope: float) -> Event:
         with self._mutex.as_writer():

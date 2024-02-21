@@ -17,8 +17,8 @@
 
 import pydantic
 
-import PySide6.QtWidgets as QtW
-from PySide6.QtCore import Qt
+import qtpy.QtWidgets as QtW
+from qtpy.QtCore import Qt
 
 from jerboa.gui.common.parameter import ParameterCollection
 from jerboa.gui.common.button_box import RejectAcceptButtonBox

@@ -15,8 +15,8 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 
 
-from PySide6.QtGui import QResizeEvent
-import PySide6.QtWidgets as QtW
+from qtpy.QtGui import QResizeEvent
+import qtpy.QtWidgets as QtW
 
 
 class TextWidget(QtW.QLabel):

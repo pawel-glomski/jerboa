@@ -47,6 +47,9 @@ class AVContext:
     def start_timepoint(self) -> float:
         return max(0, (self.stream.start_time or 0) * self.stream.time_base)
 
+    def close(self) -> None:
+        self.container.close()
+
     @staticmethod
     def open(
         filepath: str,
@@ -56,7 +59,8 @@ class AVContext:
         assert media_type in [MediaType.AUDIO, MediaType.VIDEO]
 
         container = av.open(
-            f"cache:{filepath}",
+            f"{filepath}",
+            # f"cache:{filepath}",  # TODO: use cache protocol only for remote files
             # timeout=(None, 0.5),
         )
         # container.flags |= av.container.core.Flags.NONBLOCK
@@ -176,6 +180,9 @@ class DecodingContext:
         self.media.avc.container.seek(round(timepoint * av.time_base))
         self.last_seek_timepoint = timepoint
         self.min_timepoint = timepoint
+
+    def close(self):
+        self.media.avc.close()
 
 
 @dataclass(frozen=True)

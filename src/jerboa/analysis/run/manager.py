@@ -22,12 +22,12 @@ from dataclasses import dataclass, field
 
 
 from jerboa.log import logger
-from jerboa.core.signal import Signal
-from jerboa.core.timeline import TMSection
-
-from jerboa.analysis import algorithm as alg
 from jerboa.core import process as proc
-from . import runner
+from jerboa.core import timeline as tl
+from jerboa.core.signal import Signal
+from jerboa.analysis import algorithm as alg
+from jerboa.media.source import MediaSource
+from . import analysis
 
 
 RUN_FINISH_TIMEOUT = 5
@@ -57,7 +57,7 @@ class AnalysisRunView:
 
     state: AnalysisRun.State
 
-    sections: list[TMSection] = field(default_factory=list)
+    sections: list[tl.TMSection] = field(default_factory=list)
 
     @property
     def scope(self) -> float:
@@ -69,6 +69,7 @@ class AnalysisRunView:
 
 
 class IPCProtocolChild(proc.IPCProtocolChild):
+    set_media_source = proc.IPCMsgDesc("media_source")
     create_run = proc.IPCMsgDesc("alg_desc", response_timeout=0.5)
     resume_run = proc.IPCMsgDesc("run_id")
     reinterpret_run = proc.IPCMsgDesc("run_id", "interpretation_params", response_timeout=10)
@@ -81,7 +82,7 @@ class IPCProtocolParent(proc.IPCProtocolParent):
     run_created = proc.IPCMsgDesc("run_id", "run_view")
     run_deleted = proc.IPCMsgDesc("run_id")
     run_reinterpreted = proc.IPCMsgDesc("run_id", "sections")
-    run_interpretation_updated = proc.IPCMsgDesc("run_id", "sections")
+    run_updated = proc.IPCMsgDesc("run_id", "sections")
     run_finished = proc.IPCMsgDesc("run_id")
     run_suspended = proc.IPCMsgDesc("run_id")
 
@@ -89,17 +90,17 @@ class IPCProtocolParent(proc.IPCProtocolParent):
 class AnalysisManagementProcess:
     @staticmethod
     def start(ipc: proc.IPC) -> None:
-        AnalysisManagementProcess(ipc=ipc).run()
+        AnalysisManagementProcess(ipc=ipc, resource_manager=alg.ResourceManager()).run()
 
-    def __init__(self, ipc: proc.IPC):
+    def __init__(self, ipc: proc.IPC, resource_manager: alg.ResourceManager):
+        self._ipc = ipc
+        self._resource_manager = resource_manager
+
         self._next_run_id = 0
         self._runs = dict[int, AnalysisRun]()
 
-        self._sync_manager = mp.Manager()  # this can take a while in debug mode (~2 seconds)
-
-        self._ipc = ipc
-
         protocol = IPCProtocolChild()
+        protocol.set_media_source = self.__ipc__set_media_source
         protocol.create_run = self.__ipc__create_run
         protocol.resume_run = self.__ipc__resume_run
         protocol.reinterpret_run = self.__ipc__reinterpret_run
@@ -108,6 +109,9 @@ class AnalysisManagementProcess:
         protocol.load = self.__ipc__load
 
         self._ipc.configure(protocol)
+
+    def __ipc__set_media_source(self, media_source: MediaSource) -> None:
+        self._resource_manager.set_media_source(media_source)
 
     def __ipc__create_run(self, alg_desc: alg.AlgorithmInstanceDesc) -> None:
         assert self._next_run_id not in self._runs
@@ -119,18 +123,23 @@ class AnalysisManagementProcess:
 
         process = proc.create(
             f"Run #{run_id} ({alg_desc.algorithm.name})",
-            runner.AnalyzerProcess.start,
+            analysis.AnalyzerProcess.start,
             child_ipc,
             analyzer_class=alg_desc.algorithm.analyzer_class,
             environment=alg_desc.algorithm.environment,
             analysis_params=alg_desc.analysis_params,
             last_packet=None,
+            resource_manager=self._resource_manager,
         )
         process.start()
 
         def run_updated(packet: alg.AnalysisPacket) -> None:
+            packet.interpretation = self._runs[run_id].interpreter.interpret_next(packet)
             self._runs[run_id].packets.append(packet)
-            self._runs[run_id].new_packets.notify_all()
+            self._ipc.send(
+                IPCProtocolParent.run_updated, run_id=run_id, sections=packet.interpretation
+            )
+            # self._runs[run_id].new_packets.notify_all()
 
         def run_finished() -> None:
             self._runs[run_id].state = AnalysisRun.State.FINISHED
@@ -139,7 +148,7 @@ class AnalysisManagementProcess:
         def run_error(message: str) -> None:
             self._ipc.send(IPCProtocolParent.error, message=message)
 
-        protocol = runner.IPCProtocolParent()
+        protocol = analysis.IPCProtocolParent()
         protocol.analysis_updated = run_updated
         protocol.child_finished = run_finished
         protocol.error = run_error
@@ -199,8 +208,8 @@ class AnalysisManagementProcess:
 
         parent_ipc, child_ipc = proc.IPC.create()
         process = proc.create(
-            f"Run {run.algorithm.name}#{run_id}",
-            runner.AnalyzerProcess.start,
+            f"Run #{run_id} {run.algorithm.name}",
+            analysis.AnalyzerProcess.start,
             child_ipc,
             analyzer_class=run.alg_desc.algorithm.analyzer_class,
             environment=run.alg_desc.algorithm.environment,
@@ -247,13 +256,16 @@ class AnalysisManagementProcess:
 class AnalysisManager:
     def __init__(
         self,
+        playback_timeline: tl.FragmentedTimeline,
         error_message_title: str,
         show_error_message_signal: Signal,
         run_created_signal: Signal,
+        # run_updated_signal: Signal,
+        # run_reinterpreted_signal: Signal,
     ) -> None:
+        self._playback_timeline = playback_timeline
         self._error_message_title = error_message_title
         self._show_error_message_signal = show_error_message_signal
-
         self._run_created_signal = run_created_signal
 
         self._runs = dict[int, AnalysisRunView]()
@@ -264,7 +276,7 @@ class AnalysisManager:
         protocol.run_created = self.__ipc__run_created
         protocol.run_deleted = self.__ipc__run_deleted
         protocol.run_reinterpreted = self.__ipc__run_reinterpreted
-        protocol.run_interpretation_updated = self.__ipc__run_interpretation_updated
+        protocol.run_updated = self.__ipc__run_updated
         protocol.run_finished = self.__ipc__run_finished
         protocol.run_suspended = self.__ipc__run_suspended
         protocol.error = self.__ipc__error
@@ -305,30 +317,37 @@ class AnalysisManager:
         self._run_created_signal.emit(run_id=run_id, algorithm=run_view.alg_desc.algorithm)
 
     def __ipc__run_deleted(self, run_id: int) -> None:
-        self._run_deleted_singal.emit(run_id=run_id)
         self._runs.pop(run_id)
+        # self._run_deleted_singal.emit(run_id=run_id)
 
-    def __ipc__run_reinterpreted(self, run_id: int, sections: list[TMSection]) -> None:
+    def __ipc__run_reinterpreted(self, run_id: int, sections: list[tl.TMSection]) -> None:
         self._runs[run_id].sections = sections
-        self._create_timeline()
+        # TODO:
+        # self._run_reinterpreted_signal.emit(run_id=run_id, sections=sections)
+        # self._playback_timeline_reset_signal.emit(sections=sections)
 
-    def __ipc__run_interpretation_updated(self, run_id: int, sections: list[TMSection]) -> None:
+    def __ipc__run_updated(self, run_id: int, sections: list[tl.TMSection]) -> None:
         self._runs[run_id].sections += sections
-        self._update_timeline()
+        # TODO:
+        # self._run_update_signal.emit(sections=sections, is_running=True)
+        for section in sections:
+            self._playback_timeline.append_section(section)
 
     def __ipc__run_finished(self, run_id: int) -> None:
         self._runs[run_id].state = AnalysisRun.State.FINISHED
-        self._update_timeline()
+        # TODO:
+        # self._run_update_signal.emit(sections=[], is_running=False)
 
     def __ipc__run_suspended(self, run_id: int) -> None:
         self._runs[run_id].state = AnalysisRun.State.SUSPENDED
-        self._update_timeline()
+        # TODO:
+        # self._run_update_signal.emit(sections=[], is_running=False)
 
     def __ipc__error(self, message: str) -> None:
         self._show_error_message_signal.emit(message=message, title=self._error_message_title)
 
-    def _update_timeline(self) -> None:
-        ...
+    def set_media_source(self, media_source: str) -> None:
+        self._ipc.send(IPCProtocolChild.set_media_source, media_source=media_source)
 
     def kill(self) -> None:
         self._ipc.kill()

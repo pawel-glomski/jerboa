@@ -625,7 +625,7 @@ class Task(Exception, Generic[T1]):
         with self._state.mutex:
             if not self._state.stage.is_finished(finishing_aborted=True):
                 self._state.finish_with_exception__locked(
-                    Task.UnexpectedStageError("Task never finished", self._state),
+                    AssertionError("Task never finished", self._state),
                     raise_now=True,
                 )
 
@@ -822,4 +822,4 @@ class PyThreadSpawner(ThreadSpawner):
 
 def do_job_with_exception_logging(job: Callable, args: tuple, kwargs: dict) -> None:
     with logger.catch():
-        return job(*args, **kwargs)
+        job(*args, **kwargs)

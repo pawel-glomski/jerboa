@@ -17,7 +17,7 @@
 
 from typing import Callable
 
-from PySide6 import QtCore as QtC
+from qtpy import QtCore as QtC
 
 from jerboa.core.multithreading import (
     ThreadPool,
@@ -50,38 +50,48 @@ class QtThreadPool(ThreadPool):
         return task.future
 
 
+from jerboa.log import logger
+
+
 class QtThreadSpawner(ThreadSpawner):
+    class FinishedSignalWrapper(QtC.QObject):
+        signal = QtC.Signal(int)
+
     class Worker(QtC.QObject):
-        finished = QtC.Signal()
-
-        def __init__(self, job: Callable, args: tuple, kwargs: dict):
+        def __init__(self, job: Callable):
             super().__init__()
-
             self._job = job
-            self._args = args
-            self._kwargs = kwargs
 
         def run(self) -> None:
-            try:
-                do_job_with_exception_logging(self._job, self._args, self._kwargs)
-            finally:
-                self.finished.emit()
+            self._job()
 
     def __init__(self):
-        self._threads = dict[QtC.QThread, QtThreadSpawner.Worker]()
+        self._threads = dict[int, tuple[QtC.QThread, QtThreadSpawner.Worker]]()
+        self._finished_signal_wrapper = QtThreadSpawner.FinishedSignalWrapper()
+        self._finished_signal_wrapper.signal.connect(self._on_finished)
+
+        self._counter = 0
+
+    def _on_finished(self, thread_id: int):
+        thread = self._threads[thread_id][0]
+        thread.quit()
 
     def start(self, job: Callable, *args, **kwargs):
         thread = QtC.QThread()
+        thread_id = self._counter
+        self._counter += 1
 
-        def on_finished():
-            thread.quit()
-            self._threads.pop(thread)
+        def _qt_job():
+            try:
+                do_job_with_exception_logging(job, args, kwargs)
+            finally:
+                self._finished_signal_wrapper.signal.emit(thread_id)
 
-        worker = QtThreadSpawner.Worker(job, args, kwargs)
+        worker = QtThreadSpawner.Worker(_qt_job)
         worker.moveToThread(thread)
-        worker.finished.connect(on_finished)
 
         thread.started.connect(worker.run)
+        thread.finished.connect(lambda: self._threads.pop(thread_id))
         thread.start()
 
-        self._threads[thread] = worker
+        self._threads[thread_id] = (thread, worker)

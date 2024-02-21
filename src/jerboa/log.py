@@ -22,6 +22,8 @@ import loguru
 from functools import lru_cache
 from typing import Callable
 
+from jerboa.settings import ENVIRONMENT
+
 
 sys.tracebacklimit = 10
 
@@ -57,9 +59,24 @@ class _Logger:
     @staticmethod
     def _create_logger() -> loguru.Logger:
         loguru.logger.remove()
+
+        _Logger._add_handler(sys.stderr)
+        _Logger._add_handler(ENVIRONMENT.logs_path, mode="w")
+
+        loguru.logger.configure(
+            extra={
+                "context": "",
+                "details": "",
+            }
+        )
+        loguru.logger = loguru.logger.patch(_Logger._patch_extra)
+
+        return loguru.logger
+
+    @staticmethod
+    def _add_handler(sink, **kwargs):
         loguru.logger.add(
-            sys.stderr,
-            # "./log.txt",
+            sink,
             format=(
                 "<green>{time:YYYY-MM-DD HH:mm:ss.SSSS}</green> | "
                 "<level>{extra[logger_name]}</level> | "
@@ -71,16 +88,8 @@ class _Logger:
             ),
             diagnose=False,
             enqueue=True,
+            **kwargs,
         )
-        loguru.logger.configure(
-            extra={
-                "context": "",
-                "details": "",
-            }
-        )
-        loguru.logger = loguru.logger.patch(_Logger._patch_extra)
-
-        return loguru.logger
 
     @staticmethod
     def _patch_extra(record) -> None:
@@ -94,5 +103,5 @@ logger: loguru.Logger | _Logger = _Logger()
 
 
 @lru_cache(5)
-def log_once(log_fn: Callable[[str], None], *args, **kwargs):
+def log_once(log_fn: Callable, *args, **kwargs):
     log_fn(*args, **kwargs)
